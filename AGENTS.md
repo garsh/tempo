@@ -4,6 +4,13 @@
 Tempo is a local-first, zero-backend Progressive Web App (PWA) for managing periodic and recurring routines (chores, habits, maintenance).
 It syncs data to the user's private Google Drive hidden application folder (`drive.appdata`).
 
+## Agent Guidelines & Boundaries
+- **Git Commits**: Do NOT create Git commits automatically. Wait for the user to explicitly request the creation of a commit.
+- **Running Tests**:
+  - Do NOT run tests automatically as a general practice.
+  - If you believe a test should be run to confirm that things still work, suggest that the user run it and print the command line to do so (e.g. `npx vitest run`).
+  - **Exception**: If the AI adds a new test, it may run it to confirm that the new test passes.
+
 ## Commands & Workflows
 - **Development Server**: `npm run dev`
   - Runs on port `5180` (binds to `0.0.0.0` / host: true).
