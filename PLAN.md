@@ -1,132 +1,185 @@
-# Tempo: Periodic Todo & Routine Manager (PLAN.md)
+# Tempo: TickTick-style Task Manager (PLAN.md)
 
-A cross-platform (Desktop + Mobile PWA) task manager optimized for recurring items and periodic rhythms, built with a local-first, zero-backend architecture syncing directly to Google Drive.
-
----
-
-## 1. Architecture Decision: Local-First with Google Drive AppData
-
-- **Zero-Backend / Client-Only**: The application is distributed as a static Progressive Web App (PWA). No server database is maintained; you incur zero hosting/infrastructure cost.
-- **Data Privacy & Ownership**: All user data resides in the user's private Google Drive hidden application folder (`drive.appdata` scope).
-- **Offline Capability**: Local-first operation via browser **IndexedDB (Dexie.js)**. Tasks can be viewed, created, and checked off with zero network latency or while offline.
-- **Sync Engine**:
-  - Sync triggers on app startup, user action, and periodic background check.
-  - Authenticates via Google Identity Services (GIS) token client requesting `https://www.googleapis.com/auth/drive.appdata`.
-  - Reads and updates a single sync file: `tempo_backup.json` inside the hidden `appDataFolder`.
+A cross-platform (Desktop + Mobile PWA) task manager aimed at a credible **TickTick replacement** for personal use: local-first, zero-backend, syncing to Google Drive AppData. Recurring routines remain a first-class strength; one-off tasks, lists, smart lists, and calendar are in scope. **Out of scope for now:** collaboration/shared lists, home-screen widgets, habits module, Pomodoro/focus.
 
 ---
 
-## 2. Conflict Resolution Specification
+## Product decisions (2026-10)
 
-Sync merges are performed at the **item level** with deterministic rules:
+- App is **not in production use** — data model may break freely; no migration compatibility required.
+- **No** collaboration, widgets, habits, or Pomodoro.
+- Keep Google Drive AppData + IndexedDB local-first architecture.
+- Recurrence stays optional and strong (including `after_completion`); it is no longer required on every task.
 
-### A. Data Model & Metadata
+---
+
+## 1. Architecture (unchanged foundation)
+
+- **Zero-Backend / Client-Only**: Static Progressive Web App (PWA). No server database.
+- **Data Privacy & Ownership**: User data in Google Drive hidden application folder (`drive.appdata` scope).
+- **Offline**: Local-first via **IndexedDB (Dexie.js)**.
+- **Sync**: On startup, user action, and periodic background check. GIS OAuth + single sync file `tempo_backup.json` in `appDataFolder`. Item-level merge (LWW on attrs/tombstones; **set union** on completion history); Drive `ETag` / `If-Match` with retry on 412.
+
+---
+
+## 2. Target data model (Phase 0)
+
+Replace required-recurrence `PeriodicTask` with a general task model. Sketch (evolve in code as needed):
+
 ```typescript
-export type RecurrenceType = 
-  | 'after_completion' // e.g. "Wait 5 days after I finish this before it's due again"
-  | 'fixed_interval';  // e.g. "Every Monday" or "Every 3 days regardless of when done"
+export type RecurrenceType =
+  | 'after_completion' // next due = completion + interval
+  | 'fixed_interval';  // next due = previous due + interval / rule
 
-export interface PeriodicTask {
+export interface RecurrenceRule {
+  type: RecurrenceType;
+  intervalValue: number;
+  intervalUnit: 'days' | 'weeks' | 'months';
+  // Phase 2+: weekdays, monthly-by-date, end on date/count
+}
+
+export interface Task {
   id: string;                  // UUID v4
   title: string;
   notes?: string;
-  recurrenceType: RecurrenceType;
-  intervalValue: number;       // e.g., 5
-  intervalUnit: 'days' | 'weeks' | 'months';
-  dueDate: string;             // ISO date string (YYYY-MM-DD)
-  createdAt: number;           // Unix epoch ms
-  updatedAt: number;           // Unix epoch ms (for LWW conflict resolution)
-  deletedAt?: number | null;   // Soft-delete tombstone (preserves deletion across devices)
-  completionHistory: number[]; // Epoch ms timestamps of every completion
+  listId: string;              // Inbox or user list
+  dueAt?: string | null;       // ISO date or datetime; optional
+  priority?: 'high' | 'medium' | 'low' | 'none';
+  pinned?: boolean;
   tags?: string[];
+  subtasks?: { id: string; title: string; completed: boolean }[];
+  recurrence?: RecurrenceRule | null; // optional — one-off when null
+  completedAt?: number | null;
+  completionHistory: number[]; // epoch ms
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+}
+
+export interface TaskList {
+  id: string;
+  name: string;
+  folderId?: string | null;
+  sortOrder?: number;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
 }
 ```
 
-### B. Merge Algorithm
-1. **Remote Fetch**: Download latest `tempo_backup.json` and its Google Drive `ETag`.
-2. **Item-by-Item Reconciliation**:
-   - **Local Only**: Keep and mark for upload.
-   - **Remote Only**: Insert into local IndexedDB.
-   - **Conflict (Task exists both locally and remotely)**:
-     - **Task Attributes** (`title`, `notes`, `interval`, `dueDate`): Newer `updatedAt` wins.
-     - **Tombstones** (`deletedAt`): Whichever has a non-null `deletedAt` with a later or equal timestamp wins.
-     - **Completion History** (`completionHistory`): **Set Union** of both timestamp arrays (`Array.from(new Set([...localHistory, ...remoteHistory])).sort()`). This guarantees completions recorded offline on phone and metadata edits made on desktop both survive.
-3. **Commit & Push**:
-   - Save merged state into local IndexedDB.
-   - Upload merged state back to Google Drive with `If-Match: <ETag>`.
-   - If `412 Precondition Failed` (another device synced in the interim), retry fetch-and-merge.
+Merge rules stay item-level LWW + completion-history union; extend the same pattern to lists/folders.
 
 ---
 
-## 3. Core Product Features
+## 3. Technical stack
 
-### A. Periodic Recurrence Engine
-1. **Completion-Based Recurrence ("Reset Clock on Done")**:
-   - *Use cases*: Watering plants, cutting hair, car maintenance, vacuuming.
-   - *Logic*: `Next Due Date = Date of Completion + Interval`.
-2. **Fixed Interval Recurrence**:
-   - *Use cases*: Paying bills, taking weekly trash out, monthly reports.
-   - *Logic*: `Next Due Date = Previous Due Date + Interval` (or specific weekdays/dates).
-3. **Smart Urgency Buckets**:
-   - **Overdue**: Due date < today.
-   - **Due Today**: Due date == today.
-   - **Upcoming**: Due within next 3 days.
-   - **Later**: Beyond 3 days.
-
-### B. Progressive Web App (PWA) Capabilities
-- **Desktop & Mobile Responsive**: Single responsive layout built with Tailwind CSS.
-- **Installable**: Web App Manifest with icons, standalone display mode, theme color.
-- **Offline Service Worker**: Powered by `vite-plugin-pwa` (Workbox) caching all assets and offline fallback.
-- **Local Notifications**: Web Notifications API for due task reminders.
+- Vite + React 19 + TypeScript
+- Tailwind CSS + Lucide Icons
+- Dexie.js (IndexedDB)
+- Google Identity Services + Drive REST API v3 (`drive.appdata`)
+- `vite-plugin-pwa` / Workbox
+- Vitest (recurrence, merge, filters)
 
 ---
 
-## 4. Technical Stack
+## 4. Implementation roadmap
 
-- **Bundler & Framework**: Vite + React 18 / 19 + TypeScript
-- **Styling**: Tailwind CSS + Lucide Icons
-- **Local Database**: Dexie.js (wrapper around IndexedDB)
-- **Authentication & Cloud API**: Google Identity Services (`google.accounts.oauth2`) + Google Drive REST API v3
-- **PWA Tooling**: `vite-plugin-pwa`
-- **Testing**: Vitest (for conflict resolution & recurrence calculation unit tests)
+### Phase 0 — Model reset (foundation)
+
+- [ ] Replace `PeriodicTask` (required recurrence) with general **Task** + optional `recurrence`
+- [ ] **Lists** model: built-in **Inbox** + user-created lists
+- [ ] Update Dexie schema, repositories, seed data, merge/sync payload shape
+- [ ] CRUD UI: create one-off *or* recurring tasks; assign to Inbox or a list
+- [ ] No backward-compat migration required (app not in use)
+
+*Done when:* one-off and recurring tasks both work; nothing forces recurrence.
+
+### Phase 1 — Daily driver core
+
+- [ ] Due **date/time** (not date-only only)
+- [ ] Smart lists: **Today**, **Tomorrow**, **Next 7 Days**, **Inbox**
+- [ ] Reminders / Web Notifications for due tasks (closes former Phase 5 notifications gap)
+- [ ] Priorities + pin
+- [ ] Keep/improve search + tag filter pills
+- [ ] Urgency still useful for recurring items (overdue / due today / upcoming)
+
+*Done when:* you can live in **Today** for a week without missing due work.
+
+### Phase 2 — Structure & depth
+
+- [ ] Subtasks / check items
+- [ ] Folders (group lists)
+- [ ] Richer recurrence: weekdays, monthly-by-date, end on date/count; keep `after_completion`
+- [ ] Sections inside a list — optional if subtasks cover enough
+
+*Done when:* a multi-step project and an “every weekday” chore both feel natural.
+
+### Phase 3 — Shell & calendar
+
+- [ ] Layout: sidebar (smart lists + folders/lists) → main task list → detail pane
+- [ ] Calendar views: **month** + **agenda**
+- [ ] Keyboard shortcuts for capture and navigation
+- [ ] Responsive desktop + mobile; retire single-column “routines feed” as the only shell
+
+*Done when:* the app reads as a TickTick-like shell, not a single routine feed.
+
+### Phase 4 — Power find & board
+
+- [ ] Saved filters (AND/OR on tags / priority / due / list)
+- [ ] Kanban / board by status or list
+- [ ] Quick capture: global shortcut and/or PWA share; light NLP for due dates
+
+*Done when:* power users can filter and board without leaving Tempo.
+
+### Phase 5 — Sync & polish
+
+- [ ] Background / startup Drive sync polish (feel invisible)
+- [ ] Notification reliability
+- [ ] Custom SVG/PNG app icons + PWA install polish
+- [ ] Optional import from TickTick / CSV
+- [ ] Stats only if clearly useful
+
+*Done when:* sync is invisible and alerts are trustworthy.
 
 ---
 
-## 5. Implementation Roadmap
+## 5. Explicitly out of scope (for now)
 
-### Phase 1: Project Foundation & Domain Logic
-- [x] Architecture & storage decision (Option A: Google Drive AppData).
-- [x] Scaffold Vite + React + TypeScript + Tailwind CSS project.
-- [x] Implement core domain logic:
-  - Recurrence engine (`calculateNextDueDate`, urgency status calculation).
-  - Conflict resolution merge engine (`mergeTasks`, `resolveTaskConflict`).
-  - Unit tests verifying edge cases (offline edits, overlapping completions, tombstones).
+- Collaboration / shared lists
+- Home-screen widgets
+- Habits module (routines/recurrence cover maintenance-style needs)
+- Pomodoro / focus timer
+- Eisenhower Matrix, Timeline/Gantt
+- Google Calendar bi-directional sync
+- Attachments, templates, Won’t Do
+- Location / email reminders
 
-### Phase 2: Local-First Task Management (IndexedDB)
-- [x] Configure Dexie.js schema and repositories (`TempoDatabase`).
-- [x] Build task CRUD and completion actions:
-  - Quick-complete (updates completion history and computes next due date).
-  - Task creation modal with recurrence presets ("Every N days", "N days after completion", etc.).
-  - Task editing and soft-deletion (`deletedAt`).
-  - Initial sample routine seeder for quick first-run experience.
+Revisit only if product direction changes.
 
-### Phase 3: UI & Responsive Views
-- [x] Responsive layout optimized for desktop and mobile screens.
-- [x] Dashboard views:
-  - "Due & Overdue" view (grouped with status badges).
-  - "Upcoming" view.
-  - "All Routines" view with recurrence badges and cadence summaries.
-  - Tag filter pills and instant search.
-  - Completion count badge and last completed date indicator.
+---
 
-### Phase 4: Google Drive AppData Sync Integration
-- [x] Google Identity Services OAuth token client (`googleAuth.ts`).
-- [x] Drive API client for `appDataFolder` (`googleDrive.ts`).
-- [x] Conflict resolution merge with Google Drive `ETag` precondition header.
-- [x] Settings modal with Google Client ID configuration and sync triggers.
-- [x] Offline JSON export and import for data portability.
+## 6. Suggested build order
 
-### Phase 5: PWA, Notifications & Polish
-- [x] Configure Web App Manifest, theme colors, and offline service worker via `vite-plugin-pwa`.
-- [ ] Custom SVG/PNG app icon generation.
-- [ ] Web Notifications API toggle for due routine reminders.
+**0 → 1 → 2 → 3 → 4 → 5**
+
+- **0 before 1:** daily smart lists need optional due dates and non-forced recurrence.
+- **2 before 3:** new shell should show real structure (lists/folders/subtasks), not empty chrome.
+- **4 after 3:** board/filters belong on the list+detail shell, not the old single feed.
+- **5 last:** don’t polish sync/notifications around a moving schema.
+
+---
+
+## 7. Prior completed work (archive)
+
+Already shipped under the routines-first plan:
+
+- [x] Architecture & Drive AppData decision
+- [x] Vite + React + TypeScript + Tailwind scaffold
+- [x] Recurrence engine + urgency buckets + unit tests
+- [x] Merge/conflict engine + unit tests
+- [x] Dexie CRUD, completion → next due, soft delete
+- [x] Due & Overdue / Upcoming / All Routines views, tags, search
+- [x] GIS OAuth + Drive sync + Settings + JSON import/export
+- [x] PWA plugin / service worker baseline
+
+Phase 0 intentionally **supersedes** the old required-`PeriodicTask` model.
