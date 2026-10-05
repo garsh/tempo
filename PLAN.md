@@ -116,10 +116,10 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 3 — Shell & calendar
 
-- [ ] Layout: sidebar (smart lists + folders/lists) → main task list → detail pane
-- [ ] Calendar views: **month** + **agenda**
-- [ ] Keyboard shortcuts for capture and navigation
-- [ ] Responsive desktop + mobile; retire single-column “routines feed” as the only shell
+- [x] Layout: sidebar (smart lists + folders/lists) → main task list → detail pane
+- [x] Calendar views: **month** + **agenda**
+- [x] Keyboard shortcuts for capture and navigation
+- [x] Responsive desktop + mobile; retire single-column “routines feed” as the only shell
 
 *Done when:* the app reads as a TickTick-like shell, not a single routine feed.
 

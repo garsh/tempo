@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   completeTask,
@@ -13,9 +13,9 @@ import {
   togglePinTask,
   toggleSubtask,
 } from './db/db';
-import type { Folder, SmartView, Task, TaskInput, TaskList } from './types/task';
+import type { AppView, Folder, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
-import { getTaskUrgency, isCompleted } from './domain/recurrence';
+import { formatDate, getTaskUrgency, isCompleted } from './domain/recurrence';
 import {
   filterByListId,
   filterInbox,
@@ -25,10 +25,15 @@ import {
   openTasks,
 } from './domain/smartLists';
 import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorting';
+import { tasksDueOnDate } from './domain/calendar';
 import { useDueNotifications } from './hooks/useDueNotifications';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
 import { TaskModal } from './components/TaskModal';
 import { SettingsModal } from './components/SettingsModal';
+import { TaskDetailPane } from './components/TaskDetailPane';
+import { CalendarMonthView } from './components/CalendarMonthView';
+import { CalendarAgendaView } from './components/CalendarAgendaView';
 import {
   Plus,
   Settings,
@@ -44,15 +49,22 @@ import {
   Sunrise,
   CalendarRange,
   Folder as FolderIcon,
+  Menu,
+  PanelRightOpen,
+  Keyboard,
+  CalendarDays,
+  X,
 } from 'lucide-react';
 
-function viewTitle(view: SmartView, lists: TaskList[]): string {
+function viewTitle(view: AppView, lists: TaskList[]): string {
   if (view === 'today') return 'Today';
   if (view === 'tomorrow') return 'Tomorrow';
   if (view === 'next7') return 'Next 7 Days';
   if (view === 'inbox') return 'Inbox';
   if (view === 'all') return 'All Open';
   if (view === 'completed') return 'Completed';
+  if (view === 'calendar-month') return 'Calendar';
+  if (view === 'calendar-agenda') return 'Agenda';
   if (view.startsWith('list:')) {
     const id = view.slice(5);
     return lists.find((l) => l.id === id)?.name ?? 'List';
@@ -60,19 +72,40 @@ function viewTitle(view: SmartView, lists: TaskList[]): string {
   return 'Tasks';
 }
 
+function navBtn(active: boolean) {
+  return `w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+    active
+      ? 'bg-indigo-600 text-white shadow-sm'
+      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+  }`;
+}
+
 export function App() {
-  const [activeView, setActiveView] = useState<SmartView>('today');
+  const [activeView, setActiveView] = useState<AppView>('today');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [detailOpenMobile, setDetailOpenMobile] = useState(false);
+
   const [newListName, setNewListName] = useState('');
   const [showNewListInput, setShowNewListInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [newListFolderId, setNewListFolderId] = useState<string>('');
+  const [newListFolderId, setNewListFolderId] = useState('');
+
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getFullYear());
+  const [calMonth, setCalMonth] = useState(now.getMonth());
+  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
+
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     seedInitialTasksIfEmpty();
@@ -93,13 +126,10 @@ export function App() {
     });
 
   const listNameById = new Map(activeLists.map((l) => [l.id, l.name]));
-
   const userLists = activeLists.filter((l) => l.id !== INBOX_LIST_ID);
-
   const activeFolders = [...allFolders]
     .filter((f) => !f.deletedAt)
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-
   const unfiledLists = userLists.filter((l) => !l.folderId);
 
   const activeTasks = allTasks.filter((t) => !t.deletedAt);
@@ -113,8 +143,10 @@ export function App() {
 
   const overdueTasks = open.filter((t) => getTaskUrgency(t.dueAt) === 'overdue');
   const dueTodayTasks = open.filter((t) => getTaskUrgency(t.dueAt) === 'due_today');
-
   const allTags = Array.from(new Set(open.flatMap((t) => t.tags || []))).filter(Boolean);
+
+  const isCalendar =
+    activeView === 'calendar-month' || activeView === 'calendar-agenda';
 
   const baseForView = useMemo((): Task[] => {
     switch (activeView) {
@@ -132,6 +164,9 @@ export function App() {
         return [...completedOneOffs].sort(
           (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)
         );
+      case 'calendar-month':
+      case 'calendar-agenda':
+        return open;
       default:
         if (activeView.startsWith('list:')) {
           return filterByListId(activeTasks, activeView.slice(5));
@@ -141,14 +176,46 @@ export function App() {
   }, [activeView, activeTasks, open, completedOneOffs]);
 
   const displayedTasks = useMemo(() => {
+    if (isCalendar && activeView === 'calendar-month' && calSelectedDate) {
+      let list = tasksDueOnDate(activeTasks, calSelectedDate);
+      list = list.filter((t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag));
+      return sortTasksForDailyView(list);
+    }
+
     let list = baseForView.filter(
       (t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag)
     );
-    if (activeView !== 'completed') {
+    if (activeView !== 'completed' && !isCalendar) {
       list = sortTasksForDailyView(list);
     }
+    if (activeView === 'calendar-agenda') {
+      return sortTasksForDailyView(list);
+    }
     return list;
-  }, [baseForView, searchQuery, selectedTag, activeView]);
+  }, [
+    baseForView,
+    searchQuery,
+    selectedTag,
+    activeView,
+    isCalendar,
+    calSelectedDate,
+    activeTasks,
+  ]);
+
+  const selectedTask =
+    selectedTaskId != null
+      ? activeTasks.find((t) => t.id === selectedTaskId) || null
+      : null;
+
+  const selectTask = useCallback((task: Task) => {
+    setSelectedTaskId(task.id);
+    setDetailOpenMobile(true);
+  }, []);
+
+  const openCapture = useCallback(() => {
+    setEditingTask(null);
+    setIsTaskModalOpen(true);
+  }, []);
 
   const handleComplete = async (id: string) => {
     await completeTask(id);
@@ -161,6 +228,10 @@ export function App() {
 
   const handleDelete = async (id: string) => {
     await softDeleteTask(id);
+    if (selectedTaskId === id) {
+      setSelectedTaskId(null);
+      setDetailOpenMobile(false);
+    }
   };
 
   const handleTogglePin = async (id: string) => {
@@ -168,22 +239,21 @@ export function App() {
   };
 
   const handleSave = async (taskData: TaskInput) => {
-    await saveTask(taskData);
+    const saved = await saveTask(taskData);
     setEditingTask(null);
+    setSelectedTaskId(saved.id);
   };
 
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newListName.trim();
     if (!name) return;
-    const list = await saveList({
-      name,
-      folderId: newListFolderId || null,
-    });
+    const list = await saveList({ name, folderId: newListFolderId || null });
     setNewListName('');
     setNewListFolderId('');
     setShowNewListInput(false);
     setActiveView(`list:${list.id}`);
+    setSidebarOpen(false);
   };
 
   const handleCreateFolder = async (e: React.FormEvent) => {
@@ -209,6 +279,68 @@ export function App() {
     await toggleSubtask(taskId, subtaskId);
   };
 
+  const goView = useCallback((view: AppView) => {
+    setActiveView(view);
+    setSidebarOpen(false);
+  }, []);
+
+  useKeyboardShortcuts({
+    onCapture: openCapture,
+    onSearchFocus: () => searchRef.current?.focus(),
+    onEscape: () => {
+      if (showShortcutsHelp) {
+        setShowShortcutsHelp(false);
+        return;
+      }
+      if (isTaskModalOpen) {
+        setIsTaskModalOpen(false);
+        return;
+      }
+      if (isSettingsModalOpen) {
+        setIsSettingsModalOpen(false);
+        return;
+      }
+      if (detailOpenMobile) {
+        setDetailOpenMobile(false);
+        return;
+      }
+      if (sidebarOpen) {
+        setSidebarOpen(false);
+        return;
+      }
+      setSelectedTaskId(null);
+    },
+    onGoToday: () => goView('today'),
+    onGoTomorrow: () => goView('tomorrow'),
+    onGoNext7: () => goView('next7'),
+    onGoInbox: () => goView('inbox'),
+    onGoCalendarMonth: () => goView('calendar-month'),
+    onGoCalendarAgenda: () => goView('calendar-agenda'),
+    onToggleSidebar: () => setSidebarOpen((v) => !v),
+    onNextTask: () => {
+      if (displayedTasks.length === 0) return;
+      const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
+      const next = displayedTasks[Math.min(idx + 1, displayedTasks.length - 1)] ?? displayedTasks[0];
+      selectTask(next);
+    },
+    onPrevTask: () => {
+      if (displayedTasks.length === 0) return;
+      const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
+      const prev =
+        displayedTasks[Math.max(idx - 1, 0)] ?? displayedTasks[displayedTasks.length - 1];
+      selectTask(prev);
+    },
+    onCompleteSelected: () => {
+      if (selectedTaskId) void handleComplete(selectedTaskId);
+    },
+    onEditSelected: () => {
+      if (selectedTask) handleEdit(selectedTask);
+    },
+    onOpenHelp: () => setShowShortcutsHelp(true),
+  });
+
+
+
   const defaultListForNew =
     activeView === 'inbox'
       ? INBOX_LIST_ID
@@ -221,252 +353,173 @@ export function App() {
     activeView === 'tomorrow' ||
     activeView === 'next7' ||
     activeView === 'all' ||
-    activeView === 'completed';
+    activeView === 'completed' ||
+    isCalendar;
 
-  const navBtn = (active: boolean) =>
-    `w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-      active
-        ? 'bg-indigo-600 text-white shadow-sm'
-        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-    }`;
+  const sidebar = (
+    <div className="h-full overflow-y-auto p-3 space-y-4">
+      <div className="space-y-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
+          Smart lists
+        </div>
+        {(
+          [
+            ['today', 'Today', Sun, todayCount],
+            ['tomorrow', 'Tomorrow', Sunrise, tomorrowCount],
+            ['next7', 'Next 7 Days', CalendarRange, next7Count],
+            ['inbox', 'Inbox', Inbox, inboxCount],
+            ['all', 'All Open', Layers, null],
+            ['completed', 'Completed', CheckCircle2, null],
+          ] as const
+        ).map(([id, label, Icon, count]) => (
+          <button
+            key={id}
+            type="button"
+            className={navBtn(activeView === id)}
+            onClick={() => goView(id)}
+          >
+            <span className="inline-flex items-center gap-2">
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </span>
+            {count != null && count > 0 && (
+              <span
+                className={`text-[10px] px-1.5 rounded-full ${
+                  activeView === id ? 'bg-indigo-800' : 'bg-slate-800'
+                }`}
+              >
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500/30 selection:text-indigo-200">
-      <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3.5">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black text-xl">
-              T
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-slate-100 tracking-tight">Tempo</h1>
-                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Daily
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
-                Today · smart lists · reminders
-              </p>
-            </div>
-          </div>
+      <div className="space-y-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
+          Calendar
+        </div>
+        <button
+          type="button"
+          className={navBtn(activeView === 'calendar-month')}
+          onClick={() => goView('calendar-month')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <CalendarDays className="w-3.5 h-3.5" />
+            Month
+          </span>
+        </button>
+        <button
+          type="button"
+          className={navBtn(activeView === 'calendar-agenda')}
+          onClick={() => goView('calendar-agenda')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <CalendarRange className="w-3.5 h-3.5" />
+            Agenda
+          </span>
+        </button>
+      </div>
 
-          <div className="flex items-center gap-2">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between px-3 mb-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            Folders & lists
+          </span>
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl transition-colors"
-              title="Settings & Google Drive Sync"
+              type="button"
+              onClick={() => setShowNewFolderInput((v) => !v)}
+              className="text-[11px] text-slate-400 hover:text-indigo-300"
+              title="New folder"
             >
-              <Settings className="w-4 h-4" />
+              <FolderIcon className="w-3 h-3" />
             </button>
-
             <button
-              onClick={() => {
-                setEditingTask(null);
-                setIsTaskModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm transition-all shadow-md shadow-indigo-600/25 active:scale-95"
+              type="button"
+              onClick={() => setShowNewListInput((v) => !v)}
+              className="text-[11px] text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
             >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Task</span>
-              <span className="sm:hidden">New</span>
+              <Plus className="w-3 h-3" />
+              New
             </button>
           </div>
         </div>
-      </header>
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-8 py-6">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* Sidebar: smart lists + user lists */}
-          <aside className="lg:w-56 shrink-0 space-y-4">
-            <div className="space-y-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
-                Smart lists
+        {showNewFolderInput && (
+          <form onSubmit={handleCreateFolder} className="flex gap-1.5 px-1 mb-1">
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Folder name"
+              autoFocus
+              className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              type="submit"
+              className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg"
+            >
+              Add
+            </button>
+          </form>
+        )}
+
+        {showNewListInput && (
+          <form onSubmit={handleCreateList} className="space-y-1.5 px-1 mb-1">
+            <input
+              type="text"
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              placeholder="List name"
+              autoFocus
+              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <select
+              value={newListFolderId}
+              onChange={(e) => setNewListFolderId(e.target.value)}
+              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="">No folder</option>
+              {activeFolders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="w-full px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
+            >
+              Add list
+            </button>
+          </form>
+        )}
+
+        {activeFolders.map((folder) => {
+          const listsInFolder = userLists.filter((l) => l.folderId === folder.id);
+          return (
+            <div key={folder.id} className="mb-1">
+              <div className="relative group/folder flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <FolderIcon className="w-3 h-3 text-amber-400/80" />
+                  {folder.name}
+                </span>
+                <button
+                  type="button"
+                  title={`Delete folder ${folder.name}`}
+                  onClick={() => handleDeleteFolder(folder)}
+                  className="hidden group-hover/folder:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
               </div>
-              <button type="button" className={navBtn(activeView === 'today')} onClick={() => setActiveView('today')}>
-                <span className="inline-flex items-center gap-2">
-                  <Sun className="w-3.5 h-3.5" />
-                  Today
-                </span>
-                {todayCount > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded-full ${activeView === 'today' ? 'bg-indigo-800' : 'bg-slate-800'}`}>
-                    {todayCount}
-                  </span>
-                )}
-              </button>
-              <button type="button" className={navBtn(activeView === 'tomorrow')} onClick={() => setActiveView('tomorrow')}>
-                <span className="inline-flex items-center gap-2">
-                  <Sunrise className="w-3.5 h-3.5" />
-                  Tomorrow
-                </span>
-                {tomorrowCount > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded-full ${activeView === 'tomorrow' ? 'bg-indigo-800' : 'bg-slate-800'}`}>
-                    {tomorrowCount}
-                  </span>
-                )}
-              </button>
-              <button type="button" className={navBtn(activeView === 'next7')} onClick={() => setActiveView('next7')}>
-                <span className="inline-flex items-center gap-2">
-                  <CalendarRange className="w-3.5 h-3.5" />
-                  Next 7 Days
-                </span>
-                {next7Count > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded-full ${activeView === 'next7' ? 'bg-indigo-800' : 'bg-slate-800'}`}>
-                    {next7Count}
-                  </span>
-                )}
-              </button>
-              <button type="button" className={navBtn(activeView === 'inbox')} onClick={() => setActiveView('inbox')}>
-                <span className="inline-flex items-center gap-2">
-                  <Inbox className="w-3.5 h-3.5" />
-                  Inbox
-                </span>
-                {inboxCount > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded-full ${activeView === 'inbox' ? 'bg-indigo-800' : 'bg-slate-800'}`}>
-                    {inboxCount}
-                  </span>
-                )}
-              </button>
-              <button type="button" className={navBtn(activeView === 'all')} onClick={() => setActiveView('all')}>
-                <span className="inline-flex items-center gap-2">
-                  <Layers className="w-3.5 h-3.5" />
-                  All Open
-                </span>
-              </button>
-              <button type="button" className={navBtn(activeView === 'completed')} onClick={() => setActiveView('completed')}>
-                <span className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Completed
-                </span>
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between px-3 mb-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Folders & lists
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowNewFolderInput((v) => !v)}
-                    className="text-[11px] text-slate-400 hover:text-indigo-300 font-medium inline-flex items-center gap-0.5"
-                    title="New folder"
-                  >
-                    <FolderIcon className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowNewListInput((v) => !v)}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center gap-0.5"
-                    title="New list"
-                  >
-                    <Plus className="w-3 h-3" />
-                    New
-                  </button>
-                </div>
-              </div>
-
-              {showNewFolderInput && (
-                <form onSubmit={handleCreateFolder} className="flex gap-1.5 px-1 mb-1">
-                  <input
-                    type="text"
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    placeholder="Folder name"
-                    autoFocus
-                    className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="submit"
-                    className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg"
-                  >
-                    Add
-                  </button>
-                </form>
-              )}
-
-              {showNewListInput && (
-                <form onSubmit={handleCreateList} className="space-y-1.5 px-1 mb-1">
-                  <input
-                    type="text"
-                    value={newListName}
-                    onChange={(e) => setNewListName(e.target.value)}
-                    placeholder="List name"
-                    autoFocus
-                    className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                  <select
-                    value={newListFolderId}
-                    onChange={(e) => setNewListFolderId(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="">No folder</option>
-                    {activeFolders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    className="w-full px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
-                  >
-                    Add list
-                  </button>
-                </form>
-              )}
-
-              {activeFolders.map((folder) => {
-                const listsInFolder = userLists.filter((l) => l.folderId === folder.id);
-                return (
-                  <div key={folder.id} className="mb-1">
-                    <div className="relative group/folder flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
-                      <span className="inline-flex items-center gap-1.5 truncate">
-                        <FolderIcon className="w-3 h-3 text-amber-400/80" />
-                        {folder.name}
-                      </span>
-                      <button
-                        type="button"
-                        title={`Delete folder ${folder.name}`}
-                        onClick={() => handleDeleteFolder(folder)}
-                        className="hidden group-hover/folder:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                    {listsInFolder.map((list) => (
-                      <div key={list.id} className="relative group/list pl-2">
-                        <button
-                          type="button"
-                          className={navBtn(activeView === `list:${list.id}`)}
-                          onClick={() => setActiveView(`list:${list.id}`)}
-                        >
-                          <span className="inline-flex items-center gap-2 truncate">
-                            <ListIcon className="w-3.5 h-3.5 shrink-0" />
-                            {list.name}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          title={`Delete ${list.name}`}
-                          onClick={() => handleDeleteList(list)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-
-              {unfiledLists.map((list) => (
-                <div key={list.id} className="relative group/list">
+              {listsInFolder.map((list) => (
+                <div key={list.id} className="relative group/list pl-2">
                   <button
                     type="button"
                     className={navBtn(activeView === `list:${list.id}`)}
-                    onClick={() => setActiveView(`list:${list.id}`)}
+                    onClick={() => goView(`list:${list.id}`)}
                   >
                     <span className="inline-flex items-center gap-2 truncate">
                       <ListIcon className="w-3.5 h-3.5 shrink-0" />
@@ -484,82 +537,209 @@ export function App() {
                 </div>
               ))}
             </div>
-          </aside>
+          );
+        })}
 
-          {/* Main column */}
-          <section className="flex-1 min-w-0 space-y-5">
-            {/* Stats for Today context */}
-            <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-              <div
-                onClick={() => setActiveView('today')}
-                className={`p-3.5 sm:p-4 rounded-2xl border cursor-pointer transition-all ${
-                  overdueTasks.length > 0
-                    ? 'bg-rose-950/20 border-rose-900/40 hover:border-rose-700/60'
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                  <span className="font-medium">Overdue</span>
-                  <Clock
-                    className={`w-3.5 h-3.5 ${overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-500'}`}
-                  />
-                </div>
-                <div
-                  className={`text-xl sm:text-2xl font-bold ${
-                    overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-200'
-                  }`}
-                >
-                  {overdueTasks.length}
-                </div>
-              </div>
+        {unfiledLists.map((list) => (
+          <div key={list.id} className="relative group/list">
+            <button
+              type="button"
+              className={navBtn(activeView === `list:${list.id}`)}
+              onClick={() => goView(`list:${list.id}`)}
+            >
+              <span className="inline-flex items-center gap-2 truncate">
+                <ListIcon className="w-3.5 h-3.5 shrink-0" />
+                {list.name}
+              </span>
+            </button>
+            <button
+              type="button"
+              title={`Delete ${list.name}`}
+              onClick={() => handleDeleteList(list)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+      </div>
 
-              <div
-                onClick={() => setActiveView('today')}
-                className={`p-3.5 sm:p-4 rounded-2xl border cursor-pointer transition-all ${
-                  dueTodayTasks.length > 0
-                    ? 'bg-amber-950/20 border-amber-900/40 hover:border-amber-700/60'
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                  <span className="font-medium">Due Today</span>
-                  <CalendarCheck
-                    className={`w-3.5 h-3.5 ${dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}
-                  />
-                </div>
-                <div
-                  className={`text-xl sm:text-2xl font-bold ${
-                    dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-200'
-                  }`}
-                >
-                  {dueTodayTasks.length}
-                </div>
-              </div>
+      <p className="px-3 pt-2 text-[10px] text-slate-600">
+        Press <kbd className="px-1 rounded bg-slate-900 text-slate-400">?</kbd> for shortcuts
+      </p>
+    </div>
+  );
 
-              <div
-                onClick={() => setActiveView('all')}
-                className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition-all"
-              >
-                <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                  <span className="font-medium">Open</span>
-                  <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                </div>
-                <div className="text-xl sm:text-2xl font-bold text-slate-200">{open.length}</div>
-              </div>
+  return (
+    <div className="h-dvh bg-slate-950 text-slate-100 flex flex-col overflow-hidden selection:bg-indigo-500/30 selection:text-indigo-200">
+      <header className="shrink-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button
+              type="button"
+              className="lg:hidden p-2 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl"
+              onClick={() => setSidebarOpen(true)}
+              title="Open sidebar (\\)"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black text-lg shrink-0">
+              T
             </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold text-slate-100 tracking-tight">Tempo</h1>
+                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hidden sm:inline">
+                  Shell
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 truncate hidden md:block">
+                Sidebar · list · detail · calendar
+              </p>
+            </div>
+          </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={() => setShowShortcutsHelp(true)}
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl hidden sm:inline-flex"
+              title="Keyboard shortcuts (?)"
+            >
+              <Keyboard className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailOpenMobile(true)}
+              className="xl:hidden p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl"
+              title="Open detail pane"
+            >
+              <PanelRightOpen className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl"
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button
+              onClick={openCapture}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md shadow-indigo-600/25"
+              title="New task (n)"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Three-pane shell */}
+      <div className="flex-1 flex min-h-0 relative">
+        {/* Desktop sidebar */}
+        <aside className="hidden lg:flex w-56 xl:w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-950/60">
+          {sidebar}
+        </aside>
+
+        {/* Mobile sidebar drawer */}
+        {sidebarOpen && (
+          <div className="lg:hidden fixed inset-0 z-50 flex">
+            <div className="w-72 max-w-[85vw] bg-slate-950 border-r border-slate-800 shadow-2xl flex flex-col">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+                <span className="text-xs font-bold text-slate-300">Navigate</span>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              {sidebar}
+            </div>
+            <div className="flex-1 bg-black/50" onClick={() => setSidebarOpen(false)} />
+          </div>
+        )}
+
+        {/* Main column */}
+        <section className="flex-1 min-w-0 flex flex-col min-h-0">
+          <div className="shrink-0 px-3 sm:px-5 pt-4 space-y-3">
+            {!isCalendar && (
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => goView('today')}
+                  className={`p-3 rounded-2xl border text-left ${
+                    overdueTasks.length > 0
+                      ? 'bg-rose-950/20 border-rose-900/40'
+                      : 'bg-slate-900/60 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
+                    <span>Overdue</span>
+                    <Clock className={`w-3.5 h-3.5 ${overdueTasks.length ? 'text-rose-400' : ''}`} />
+                  </div>
+                  <div
+                    className={`text-xl font-bold ${
+                      overdueTasks.length ? 'text-rose-400' : 'text-slate-200'
+                    }`}
+                  >
+                    {overdueTasks.length}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goView('today')}
+                  className={`p-3 rounded-2xl border text-left ${
+                    dueTodayTasks.length > 0
+                      ? 'bg-amber-950/20 border-amber-900/40'
+                      : 'bg-slate-900/60 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
+                    <span>Due Today</span>
+                    <CalendarCheck
+                      className={`w-3.5 h-3.5 ${dueTodayTasks.length ? 'text-amber-400' : ''}`}
+                    />
+                  </div>
+                  <div
+                    className={`text-xl font-bold ${
+                      dueTodayTasks.length ? 'text-amber-400' : 'text-slate-200'
+                    }`}
+                  >
+                    {dueTodayTasks.length}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goView('all')}
+                  className="p-3 rounded-2xl border border-slate-800 bg-slate-900/60 text-left"
+                >
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
+                    <span>Open</span>
+                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                  </div>
+                  <div className="text-xl font-bold text-slate-200">{open.length}</div>
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h2 className="text-base font-bold text-slate-100">
                 {viewTitle(activeView, activeLists)}
-                <span className="ml-2 text-xs font-medium text-slate-500">
-                  {displayedTasks.length}
-                </span>
+                {!isCalendar && (
+                  <span className="ml-2 text-xs font-medium text-slate-500">
+                    {displayedTasks.length}
+                  </span>
+                )}
               </h2>
               <div className="relative flex-1 sm:max-w-xs">
                 <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={searchRef}
                   type="text"
-                  placeholder="Search title, notes, tags..."
+                  placeholder="Search… (/)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
@@ -567,14 +747,14 @@ export function App() {
               </div>
             </div>
 
-            {allTags.length > 0 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            {allTags.length > 0 && !isCalendar && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
                 <button
                   onClick={() => setSelectedTag(null)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors shrink-0 ${
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 ${
                     selectedTag === null
                       ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                      : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-300'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800'
                   }`}
                 >
                   All tags
@@ -583,10 +763,10 @@ export function App() {
                   <button
                     key={tag}
                     onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors shrink-0 ${
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 ${
                       selectedTag === tag
                         ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                        : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-300'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800'
                     }`}
                   >
                     #{tag}
@@ -594,29 +774,79 @@ export function App() {
                 ))}
               </div>
             )}
+          </div>
 
-            <div className="space-y-3">
-              {displayedTasks.length === 0 ? (
+          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-3">
+            {activeView === 'calendar-month' && (
+              <>
+                <CalendarMonthView
+                  tasks={activeTasks}
+                  year={calYear}
+                  monthIndex={calMonth}
+                  selectedDateStr={calSelectedDate}
+                  onMonthChange={(y, m) => {
+                    setCalYear(y);
+                    setCalMonth(m);
+                  }}
+                  onSelectDate={setCalSelectedDate}
+                  onSelectTask={selectTask}
+                />
+                {calSelectedDate && (
+                  <div className="pt-2 space-y-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      {calSelectedDate}
+                    </h3>
+                    {displayedTasks.length === 0 ? (
+                      <p className="text-xs text-slate-500">No tasks this day.</p>
+                    ) : (
+                      displayedTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className={
+                            selectedTaskId === task.id ? 'ring-2 ring-indigo-500 rounded-2xl' : ''
+                          }
+                          onClick={() => selectTask(task)}
+                        >
+                          <TaskCard
+                            task={task}
+                            listName={listNameById.get(task.listId)}
+                            onComplete={handleComplete}
+                            onEdit={handleEdit}
+                            onDelete={handleDelete}
+                            onTogglePin={handleTogglePin}
+                            onToggleSubtask={handleToggleSubtask}
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {activeView === 'calendar-agenda' && (
+              <CalendarAgendaView
+                tasks={activeTasks}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={selectTask}
+              />
+            )}
+
+            {!isCalendar &&
+              (displayedTasks.length === 0 ? (
                 <div className="py-16 text-center border border-dashed border-slate-800 rounded-3xl bg-slate-900/30">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 mx-auto flex items-center justify-center mb-3">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
                   <h3 className="text-base font-semibold text-slate-200">
-                    {activeView === 'today'
-                      ? 'All caught up for today!'
-                      : activeView === 'completed'
-                        ? 'No completed tasks yet'
-                        : 'No tasks here'}
+                    {activeView === 'today' ? 'All caught up!' : 'No tasks here'}
                   </h3>
                   <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-                    Create a one-off or recurring task with an optional due date and time.
+                    Press <kbd className="px-1 rounded bg-slate-800">n</kbd> to capture a task.
                   </p>
                   <button
-                    onClick={() => {
-                      setEditingTask(null);
-                      setIsTaskModalOpen(true);
-                    }}
-                    className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition-colors"
+                    onClick={openCapture}
+                    className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add a Task
@@ -625,25 +855,64 @@ export function App() {
               ) : (
                 <div className="grid grid-cols-1 gap-3">
                   {displayedTasks.map((task) => (
-                    <TaskCard
+                    <div
                       key={task.id}
-                      task={task}
-                      listName={
-                        showListNameOnCards ? listNameById.get(task.listId) : undefined
+                      className={
+                        selectedTaskId === task.id ? 'ring-2 ring-indigo-500/80 rounded-2xl' : ''
                       }
-                      onComplete={handleComplete}
-                      onEdit={handleEdit}
-                      onDelete={handleDelete}
-                      onTogglePin={handleTogglePin}
-                      onToggleSubtask={handleToggleSubtask}
-                    />
+                      onClick={() => selectTask(task)}
+                    >
+                      <TaskCard
+                        task={task}
+                        listName={
+                          showListNameOnCards ? listNameById.get(task.listId) : undefined
+                        }
+                        onComplete={handleComplete}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                        onTogglePin={handleTogglePin}
+                        onToggleSubtask={handleToggleSubtask}
+                      />
+                    </div>
                   ))}
                 </div>
-              )}
+              ))}
+          </div>
+        </section>
+
+        {/* Desktop detail pane */}
+        <aside className="hidden xl:flex w-80 shrink-0 flex-col border-l border-slate-800 bg-slate-950/40">
+          <TaskDetailPane
+            task={selectedTask}
+            listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
+            onClose={() => setSelectedTaskId(null)}
+            onComplete={handleComplete}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onTogglePin={handleTogglePin}
+            onToggleSubtask={handleToggleSubtask}
+          />
+        </aside>
+
+        {/* Mobile/tablet detail drawer */}
+        {detailOpenMobile && (
+          <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
+            <div className="flex-1 bg-black/50" onClick={() => setDetailOpenMobile(false)} />
+            <div className="w-full max-w-md bg-slate-950 border-l border-slate-800 shadow-2xl">
+              <TaskDetailPane
+                task={selectedTask}
+                listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
+                onClose={() => setDetailOpenMobile(false)}
+                onComplete={handleComplete}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onTogglePin={handleTogglePin}
+                onToggleSubtask={handleToggleSubtask}
+              />
             </div>
-          </section>
-        </div>
-      </main>
+          </div>
+        )}
+      </div>
 
       <TaskModal
         isOpen={isTaskModalOpen}
@@ -661,6 +930,47 @@ export function App() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
       />
+
+      {showShortcutsHelp && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-100 inline-flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-indigo-400" />
+                Shortcuts
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowShortcutsHelp(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <ul className="space-y-2 text-xs text-slate-300">
+              {[
+                ['n / c', 'New task (capture)'],
+                ['/', 'Focus search'],
+                ['1–4', 'Today / Tomorrow / Next 7 / Inbox'],
+                ['m / a', 'Calendar month / Agenda'],
+                ['j / k', 'Next / previous task'],
+                ['x', 'Complete selected'],
+                ['e', 'Edit selected'],
+                ['\\', 'Toggle sidebar (mobile)'],
+                ['Esc', 'Close panels / deselect'],
+                ['?', 'This help'],
+              ].map(([key, desc]) => (
+                <li key={key} className="flex items-center justify-between gap-3">
+                  <span className="text-slate-400">{desc}</span>
+                  <kbd className="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 font-mono text-[11px]">
+                    {key}
+                  </kbd>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
