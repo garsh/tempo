@@ -71,13 +71,18 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
   };
   await db.lists.put(homeList);
 
+  const tomorrow = formatDate(new Date(Date.now() + 86400000));
+  const inThree = formatDate(new Date(Date.now() + 86400000 * 3));
+
   const sampleTasks: Task[] = [
     {
       id: 'demo-1',
       title: 'Water indoor plants',
       notes: 'Check soil moisture for the ferns and monstera',
       listId: homeList.id,
-      dueAt: today,
+      dueAt: `${today}T09:00`,
+      priority: 'medium',
+      pinned: true,
       recurrence: {
         type: 'after_completion',
         intervalValue: 3,
@@ -94,6 +99,7 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       notes: 'Run Time Machine / backup script',
       listId: INBOX_LIST_ID,
       dueAt: today,
+      priority: 'high',
       recurrence: {
         type: 'fixed_interval',
         intervalValue: 1,
@@ -109,7 +115,8 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       title: 'Buy groceries for the week',
       notes: 'Milk, eggs, greens',
       listId: INBOX_LIST_ID,
-      dueAt: today,
+      dueAt: `${today}T17:30`,
+      priority: 'high',
       recurrence: null,
       createdAt: now,
       updatedAt: now,
@@ -122,6 +129,7 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       notes: 'Run vinegar or descaler cycle',
       listId: homeList.id,
       dueAt: formatDate(new Date(Date.now() - 86400000 * 1)),
+      priority: 'low',
       recurrence: {
         type: 'after_completion',
         intervalValue: 2,
@@ -137,11 +145,42 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       title: 'Call dentist to schedule checkup',
       listId: INBOX_LIST_ID,
       dueAt: null,
+      priority: 'medium',
       recurrence: null,
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
       tags: ['Health'],
+    },
+    {
+      id: 'demo-6',
+      title: 'Team standup notes',
+      notes: 'Prep talking points',
+      listId: INBOX_LIST_ID,
+      dueAt: `${tomorrow}T10:00`,
+      priority: 'none',
+      recurrence: null,
+      createdAt: now,
+      updatedAt: now,
+      completionHistory: [],
+      tags: ['Work'],
+    },
+    {
+      id: 'demo-7',
+      title: 'Pay rent',
+      listId: INBOX_LIST_ID,
+      dueAt: inThree,
+      priority: 'high',
+      pinned: true,
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 1,
+        intervalUnit: 'months',
+      },
+      createdAt: now,
+      updatedAt: now,
+      completionHistory: [],
+      tags: ['Finance'],
     },
   ];
 
@@ -241,6 +280,22 @@ export async function uncompleteTask(id: string): Promise<Task | null> {
   const updated: Task = {
     ...task,
     completedAt: null,
+    updatedAt: now,
+  };
+  await db.tasks.put(updated);
+  return updated;
+}
+
+/**
+ * Toggle pinned state on a task.
+ */
+export async function togglePinTask(id: string): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) return null;
+  const now = Date.now();
+  const updated: Task = {
+    ...task,
+    pinned: !task.pinned,
     updatedAt: now,
   };
   await db.tasks.put(updated);

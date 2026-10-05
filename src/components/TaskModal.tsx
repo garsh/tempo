@@ -1,8 +1,24 @@
 import { useState, useEffect } from 'react';
-import type { IntervalUnit, RecurrenceType, Task, TaskInput, TaskList } from '../types/task';
+import type {
+  IntervalUnit,
+  RecurrenceType,
+  Task,
+  TaskInput,
+  TaskList,
+  TaskPriority,
+} from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
-import { formatDate } from '../domain/recurrence';
-import { X, Sparkles, Calendar, Clock, RefreshCw, List as ListIcon } from 'lucide-react';
+import { combineDueAt, formatDate, splitDueAt } from '../domain/recurrence';
+import {
+  X,
+  Sparkles,
+  Calendar,
+  Clock,
+  RefreshCw,
+  List as ListIcon,
+  Flag,
+  Pin,
+} from 'lucide-react';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -28,7 +44,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('after_completion');
   const [intervalValue, setIntervalValue] = useState<number>(3);
   const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('days');
-  const [dueAt, setDueAt] = useState<string>('');
+  const [dueDate, setDueDate] = useState<string>('');
+  const [dueTime, setDueTime] = useState<string>('');
+  const [hasTime, setHasTime] = useState(false);
+  const [priority, setPriority] = useState<TaskPriority>('none');
+  const [pinned, setPinned] = useState(false);
   const [tagsInput, setTagsInput] = useState<string>('');
 
   useEffect(() => {
@@ -47,7 +67,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         setIntervalValue(3);
         setIntervalUnit('days');
       }
-      setDueAt(initialTask.dueAt || '');
+      const parts = splitDueAt(initialTask.dueAt);
+      setDueDate(parts.date);
+      setDueTime(parts.time || '');
+      setHasTime(!!parts.time);
+      setPriority(initialTask.priority ?? 'none');
+      setPinned(!!initialTask.pinned);
       setTagsInput(initialTask.tags ? initialTask.tags.join(', ') : '');
     } else {
       setTitle('');
@@ -57,7 +82,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setRecurrenceType('after_completion');
       setIntervalValue(3);
       setIntervalUnit('days');
-      setDueAt('');
+      setDueDate('');
+      setDueTime('');
+      setHasTime(false);
+      setPriority('none');
+      setPinned(false);
       setTagsInput('');
     }
   }, [initialTask, isOpen, defaultListId]);
@@ -75,10 +104,14 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       .map((t) => t.trim())
       .filter(Boolean);
 
-    // Recurring tasks need a due date to schedule the next occurrence
-    const resolvedDue =
-      dueAt.trim() ||
-      (isRecurring ? formatDate(new Date()) : null);
+    let datePart = dueDate.trim();
+    if (!datePart && isRecurring) {
+      datePart = formatDate(new Date());
+    }
+
+    const resolvedDue = datePart
+      ? combineDueAt(datePart, hasTime ? dueTime || '09:00' : null)
+      : null;
 
     onSave({
       id: initialTask?.id,
@@ -86,6 +119,8 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       notes: notes.trim() || undefined,
       listId,
       dueAt: resolvedDue,
+      priority,
+      pinned,
       recurrence: isRecurring
         ? {
             type: recurrenceType,
@@ -120,7 +155,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          {/* Title */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
               Title *
@@ -135,7 +169,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             />
           </div>
 
-          {/* Notes */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
               Notes (Optional)
@@ -149,7 +182,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             />
           </div>
 
-          {/* List picker */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
               <ListIcon className="w-3.5 h-3.5 text-indigo-400" />
@@ -168,7 +200,44 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             </select>
           </div>
 
-          {/* One-off vs Recurring toggle */}
+          {/* Priority + Pin */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
+                <Flag className="w-3.5 h-3.5 text-rose-400" />
+                Priority
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                className="w-full px-3 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+              >
+                <option value="none">None</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
+                <Pin className="w-3.5 h-3.5 text-amber-400" />
+                Pin
+              </label>
+              <button
+                type="button"
+                onClick={() => setPinned((p) => !p)}
+                className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                  pinned
+                    ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
+                    : 'bg-slate-950/70 border-slate-700/80 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                {pinned ? 'Pinned' : 'Not pinned'}
+              </button>
+            </div>
+          </div>
+
+          {/* One-off vs Recurring */}
           <div className="pt-1">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
               Task Type
@@ -184,9 +253,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 }`}
               >
                 <div className="font-semibold text-xs text-slate-200">One-off</div>
-                <span className="text-[11px] text-slate-400 mt-1">
-                  Completes once — no forced recurrence
-                </span>
+                <span className="text-[11px] text-slate-400 mt-1">Completes once</span>
               </button>
               <button
                 type="button"
@@ -198,14 +265,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 }`}
               >
                 <div className="font-semibold text-xs text-slate-200">Recurring</div>
-                <span className="text-[11px] text-slate-400 mt-1">
-                  Repeats on an interval after completion or fixed schedule
-                </span>
+                <span className="text-[11px] text-slate-400 mt-1">Repeats on an interval</span>
               </button>
             </div>
           </div>
 
-          {/* Recurrence options (only when recurring) */}
           {isRecurring && (
             <>
               <div className="pt-1">
@@ -226,11 +290,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                       <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
                       After Completion
                     </div>
-                    <span className="text-[11px] text-slate-400 mt-1">
-                      Next due = completion + interval
-                    </span>
                   </button>
-
                   <button
                     type="button"
                     onClick={() => setRecurrenceType('fixed_interval')}
@@ -244,9 +304,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                       <Clock className="w-3.5 h-3.5 text-cyan-400" />
                       Fixed Schedule
                     </div>
-                    <span className="text-[11px] text-slate-400 mt-1">
-                      Sticks to calendar interval
-                    </span>
                   </button>
                 </div>
               </div>
@@ -283,37 +340,61 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             </>
           )}
 
-          {/* Due date — optional for one-off, recommended for recurring */}
+          {/* Due date + optional time */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
               Due Date {isRecurring ? '' : '(Optional)'}
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 type="date"
-                value={dueAt}
-                onChange={(e) => setDueAt(e.target.value)}
-                className="flex-1 px-3.5 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="flex-1 min-w-[10rem] px-3.5 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
               />
-              {dueAt && (
+              {dueDate && (
                 <button
                   type="button"
-                  onClick={() => setDueAt('')}
+                  onClick={() => {
+                    setDueDate('');
+                    setDueTime('');
+                    setHasTime(false);
+                  }}
                   className="px-3 py-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-xl"
                 >
                   Clear
                 </button>
               )}
             </div>
-            {isRecurring && !dueAt && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                Defaults to today if left blank.
-              </p>
+            <div className="mt-2 flex items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasTime}
+                  disabled={!dueDate}
+                  onChange={(e) => {
+                    setHasTime(e.target.checked);
+                    if (e.target.checked && !dueTime) setDueTime('09:00');
+                  }}
+                  className="rounded border-slate-600"
+                />
+                Include time
+              </label>
+              {hasTime && dueDate && (
+                <input
+                  type="time"
+                  value={dueTime || '09:00'}
+                  onChange={(e) => setDueTime(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                />
+              )}
+            </div>
+            {isRecurring && !dueDate && (
+              <p className="text-[11px] text-slate-500 mt-1">Defaults to today if left blank.</p>
             )}
           </div>
 
-          {/* Tags */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
               Tags (Comma separated)
@@ -327,7 +408,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             />
           </div>
 
-          {/* Action buttons */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
             <button
               type="button"

@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import type { Task } from '../types/task';
+import type { Task, TaskPriority } from '../types/task';
 import {
+  formatDueLabel,
   formatRecurrenceLabel,
   getDaysDifference,
   getTaskUrgency,
+  hasDueTime,
   isCompleted,
   isRecurring,
 } from '../domain/recurrence';
@@ -17,6 +19,8 @@ import {
   Trash2,
   RotateCcw,
   List as ListIcon,
+  Flag,
+  Pin,
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -25,7 +29,30 @@ interface TaskCardProps {
   onComplete: (id: string) => void;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
+  onTogglePin?: (id: string) => void;
 }
+
+const PRIORITY_STYLE: Record<
+  TaskPriority,
+  { label: string; className: string }
+> = {
+  high: {
+    label: 'High',
+    className: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+  },
+  medium: {
+    label: 'Med',
+    className: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  },
+  low: {
+    label: 'Low',
+    className: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  },
+  none: {
+    label: '',
+    className: '',
+  },
+};
 
 export const TaskCard: React.FC<TaskCardProps> = ({
   task,
@@ -33,6 +60,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onComplete,
   onEdit,
   onDelete,
+  onTogglePin,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
@@ -41,6 +69,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
   const diffDays = task.dueAt ? getDaysDifference(task.dueAt) : 0;
+  const priority = task.priority ?? 'none';
 
   const handleCheck = () => {
     if (completed) return;
@@ -66,31 +95,34 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
             <Clock className="w-3 h-3" />
-            {Math.abs(diffDays)} {Math.abs(diffDays) === 1 ? 'day' : 'days'} overdue
+            {task.dueAt && hasDueTime(task.dueAt) && diffDays === 0
+              ? `Overdue · ${formatDueLabel(task.dueAt).split(' ').slice(1).join(' ')}`
+              : `${Math.abs(diffDays)} ${Math.abs(diffDays) === 1 ? 'day' : 'days'} overdue`}
           </span>
         );
       case 'due_today':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
             <Clock className="w-3 h-3" />
-            Due today
+            {task.dueAt && hasDueTime(task.dueAt)
+              ? `Today · ${formatDueLabel(task.dueAt).split(' ').slice(1).join(' ')}`
+              : 'Due today'}
           </span>
         );
       case 'upcoming':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
             <Calendar className="w-3 h-3" />
-            Due in {diffDays} {diffDays === 1 ? 'day' : 'days'}
+            {formatDueLabel(task.dueAt) || `Due in ${diffDays}d`}
           </span>
         );
       case 'later':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
             <Calendar className="w-3 h-3" />
-            {task.dueAt}
+            {formatDueLabel(task.dueAt)}
           </span>
         );
-      case 'none':
       default:
         return null;
     }
@@ -100,10 +132,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     task.completionHistory.length > 0
       ? new Date(task.completionHistory[task.completionHistory.length - 1]).toLocaleDateString(
           undefined,
-          {
-            month: 'short',
-            day: 'numeric',
-          }
+          { month: 'short', day: 'numeric' }
         )
       : null;
 
@@ -125,7 +154,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         <button
           onClick={handleCheck}
           disabled={completed}
-          title={completed ? 'Already completed' : recurring ? 'Mark complete for this period' : 'Mark complete'}
+          title={
+            completed
+              ? 'Already completed'
+              : recurring
+                ? 'Mark complete for this period'
+                : 'Mark complete'
+          }
           className={`flex-shrink-0 mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
             completed || justCompleted
               ? 'bg-emerald-500 border-emerald-500 text-white'
@@ -141,15 +176,33 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <h3
-              className={`text-base font-semibold truncate pr-2 ${
-                completed ? 'text-slate-400 line-through' : 'text-slate-100'
-              }`}
-            >
-              {task.title}
-            </h3>
+            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+              {task.pinned && (
+                <Pin className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 fill-amber-400/30" />
+              )}
+              <h3
+                className={`text-base font-semibold truncate ${
+                  completed ? 'text-slate-400 line-through' : 'text-slate-100'
+                }`}
+              >
+                {task.title}
+              </h3>
+            </div>
 
-            <div className="relative">
+            <div className="relative flex items-center gap-0.5">
+              {onTogglePin && (
+                <button
+                  onClick={() => onTogglePin(task.id)}
+                  className={`p-1 rounded-lg transition-colors ${
+                    task.pinned
+                      ? 'text-amber-400 hover:bg-amber-500/10'
+                      : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                  }`}
+                  title={task.pinned ? 'Unpin' : 'Pin'}
+                >
+                  <Pin className={`w-3.5 h-3.5 ${task.pinned ? 'fill-amber-400/40' : ''}`} />
+                </button>
+              )}
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors"
@@ -195,6 +248,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
             {getUrgencyBadge()}
 
+            {priority !== 'none' && (
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${PRIORITY_STYLE[priority].className}`}
+              >
+                <Flag className="w-2.5 h-2.5" />
+                {PRIORITY_STYLE[priority].label}
+              </span>
+            )}
+
             {listName && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
                 <ListIcon className="w-2.5 h-2.5" />
@@ -214,6 +276,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 {formatRecurrenceLabel(task.recurrence)}
               </span>
             )}
+
+            {task.tags?.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/80 text-[11px]"
+              >
+                #{tag}
+              </span>
+            ))}
 
             {task.completionHistory.length > 0 && (
               <span className="inline-flex items-center gap-1 text-slate-400 text-[11px]">
