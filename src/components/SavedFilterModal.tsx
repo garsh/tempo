@@ -102,29 +102,29 @@ export function SavedFilterModal({
     `px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
       active
         ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-300'
+        : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:text-tt-text/80'
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between pb-3 border-b border-tt-border">
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-tt-blue">
               <Filter className="w-4 h-4" />
             </div>
-            <h2 className="text-base font-bold text-slate-100">
+            <h2 className="text-base font-bold text-tt-text">
               {initial ? 'Edit saved filter' : 'New saved filter'}
             </h2>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-200">
+          <button type="button" onClick={onClose} className="p-1.5 text-tt-secondary hover:text-tt-text">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1">
               Name
             </label>
             <input
@@ -132,12 +132,12 @@ export function SavedFilterModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. High priority work"
-              className="w-full px-3 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-sm text-tt-text focus:outline-none focus:border-tt-blue"
             />
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1.5">
               Match mode
             </label>
             <div className="grid grid-cols-2 gap-2">
@@ -149,20 +149,20 @@ export function SavedFilterModal({
                   className={`px-3 py-2 rounded-xl border text-xs font-semibold uppercase ${
                     match === m
                       ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
-                      : 'bg-slate-950/40 border-slate-800 text-slate-400'
+                      : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary'
                   }`}
                 >
                   {m}
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-tt-muted mt-1">
               AND = every selected criterion; OR = any selected criterion.
             </p>
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1.5">
               Priorities
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -180,7 +180,7 @@ export function SavedFilterModal({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1.5">
               Due
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -198,7 +198,7 @@ export function SavedFilterModal({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1.5">
               Lists
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -216,7 +216,7 @@ export function SavedFilterModal({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1.5">
               Tags
             </label>
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -236,7 +236,7 @@ export function SavedFilterModal({
                 value={tagDraft}
                 onChange={(e) => setTagDraft(e.target.value)}
                 placeholder="Add tag"
-                className="flex-1 px-3 py-1.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                className="flex-1 px-3 py-1.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-xs text-tt-text focus:outline-none focus:border-tt-blue"
               />
               <button
                 type="button"
@@ -246,7 +246,7 @@ export function SavedFilterModal({
                   setTags((prev) => (prev.includes(t) ? prev : [...prev, t]));
                   setTagDraft('');
                 }}
-                className="px-3 py-1.5 bg-slate-800 text-xs rounded-xl text-slate-200"
+                className="px-3 py-1.5 bg-tt-sidebar text-xs rounded-xl text-tt-text"
               >
                 Add
               </button>
@@ -254,18 +254,18 @@ export function SavedFilterModal({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-tt-muted mb-1">
               Text query
             </label>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Title / notes contains…"
-              className="w-full px-3 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+              className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-sm text-tt-text focus:outline-none focus:border-tt-blue"
             />
           </div>
 
-          <label className="inline-flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+          <label className="inline-flex items-center gap-2 text-xs text-tt-secondary cursor-pointer">
             <input
               type="checkbox"
               checked={pinnedOnly}
@@ -275,13 +275,13 @@ export function SavedFilterModal({
             Pinned only
           </label>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-400">
+          <div className="flex justify-end gap-2 pt-2 border-t border-tt-border">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-tt-secondary">
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold"
+              className="px-5 py-2 rounded-xl bg-tt-blue hover:bg-tt-blue-hover text-white text-sm font-semibold"
             >
               Save filter
             </button>

@@ -23,8 +23,8 @@ export default defineConfig({
         short_name: 'Tempo',
         description:
           'Local-first tasks with smart lists, calendar, board, and Google Drive sync.',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#4772FA',
+        background_color: '#FFFFFF',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',

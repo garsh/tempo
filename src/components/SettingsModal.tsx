@@ -286,18 +286,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-tt-blue">
               <Cloud className="w-5 h-5" />
             </div>
-            <h2 className="text-lg font-bold text-slate-100">Settings & Sync</h2>
+            <h2 className="text-lg font-bold text-tt-text">Settings & Sync</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800 transition-colors"
+            className="p-1.5 text-tt-secondary hover:text-tt-text rounded-xl hover:bg-tt-sidebar transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -321,24 +321,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         )}
 
         <div className="mt-5 space-y-6">
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-tt-blue flex items-center gap-1.5">
                 <Cloud className="w-3.5 h-3.5" />
                 Google Drive AppData Sync
               </span>
               {lastSynced && (
-                <span className="text-[11px] text-slate-400">Last: {lastSynced}</span>
+                <span className="text-[11px] text-tt-secondary">Last: {lastSynced}</span>
               )}
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
+            <p className="text-xs text-tt-text/80 leading-relaxed">
               Syncs privately to Drive AppData. Startup + periodic background sync stays silent when
               your session token is still valid; conflicts (412) re-merge automatically.
             </p>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+              <label className="block text-[11px] font-semibold text-tt-secondary mb-1">
                 Google OAuth Client ID
               </label>
               <div className="flex gap-2">
@@ -348,13 +348,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={clientId}
                     onChange={(e) => setClientId(e.target.value)}
                     placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-tt-sidebar border border-tt-border rounded-xl text-xs text-tt-text placeholder-slate-600 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={handleSaveClientId}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl transition-colors"
+                  className="px-3 py-2 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl transition-colors"
                 >
                   Save
                 </button>
@@ -362,7 +362,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <div className="flex items-center justify-between gap-3 pt-1">
-              <div className="text-[11px] text-slate-400 leading-snug">
+              <div className="text-[11px] text-tt-secondary leading-snug">
                 Background sync (startup / ~10 min / on return)
               </div>
               <button
@@ -370,8 +370,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClick={handleToggleAutoSync}
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 ${
                   autoSync
-                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                    ? 'bg-tt-blue hover:bg-tt-blue-hover text-white'
+                    : 'bg-tt-sidebar hover:bg-black/[0.06] text-tt-text'
                 }`}
               >
                 {autoSync ? 'Auto On' : 'Auto Off'}
@@ -383,27 +383,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 disabled={isSyncing}
                 onClick={handleGoogleSync}
-                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:text-indigo-400 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20 active:scale-98"
+                className="w-full py-2.5 px-4 rounded-xl bg-tt-blue hover:bg-tt-blue-hover disabled:bg-indigo-950 disabled:text-tt-blue text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-tt-blue/20 active:scale-98"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 {isSyncing ? 'Syncing with Google Drive...' : 'Sign In with Google & Sync Now'}
               </button>
             </div>
 
-            <div className="pt-2 border-t border-slate-800/80">
-              <details className="text-[11px] text-slate-400 cursor-pointer">
-                <summary className="hover:text-slate-300 font-medium flex items-center gap-1">
-                  <Key className="w-3 h-3 text-slate-400" />
+            <div className="pt-2 border-t border-tt-border/80">
+              <details className="text-[11px] text-tt-secondary cursor-pointer">
+                <summary className="hover:text-tt-text/80 font-medium flex items-center gap-1">
+                  <Key className="w-3 h-3 text-tt-secondary" />
                   How do I get a Google Client ID? (2 min setup)
                 </summary>
-                <div className="mt-2 space-y-1.5 pl-2 text-slate-400 border-l border-slate-800">
+                <div className="mt-2 space-y-1.5 pl-2 text-tt-secondary border-l border-tt-border">
                   <p>
                     1. Go to{' '}
                     <a
                       href="https://console.cloud.google.com"
                       target="_blank"
                       rel="noreferrer"
-                      className="text-indigo-400 underline inline-flex items-center gap-0.5"
+                      className="text-tt-blue underline inline-flex items-center gap-0.5"
                     >
                       Google Cloud Console <ExternalLink className="w-2.5 h-2.5" />
                     </a>{' '}
@@ -418,7 +418,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </p>
                   <p>
                     4. Add your app&apos;s origin URL (e.g.{' '}
-                    <code className="text-slate-300">http://localhost:5180</code>) to{' '}
+                    <code className="text-tt-text/80">http://localhost:5180</code>) to{' '}
                     <strong>Authorized JavaScript Origins</strong>.
                   </p>
                   <p>5. Paste the Client ID above and click Sign In.</p>
@@ -427,18 +427,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
               <Bell className="w-3.5 h-3.5" />
               Due Reminders
             </span>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <p className="text-xs text-tt-secondary leading-relaxed">
               Fires when a due date/time is reached while Tempo is open, on focus, when you come
               back online, and via the service worker when installed as a PWA.
             </p>
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] text-slate-500">
-                Permission: <span className="text-slate-300">{notifPermission}</span>
+              <div className="text-[11px] text-tt-muted">
+                Permission: <span className="text-tt-text/80">{notifPermission}</span>
               </div>
               <button
                 type="button"
@@ -446,7 +446,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
                   notificationsOn
                     ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                    : 'bg-tt-sidebar hover:bg-black/[0.06] text-tt-text'
                 }`}
               >
                 {notificationsOn ? 'Reminders On' : 'Enable Reminders'}
@@ -454,7 +454,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
               <BarChart3 className="w-3.5 h-3.5" />
               Quick stats
@@ -467,20 +467,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 ['Done/wk', stats.completedThisWeek],
                 ['Streak', stats.completionStreakDays],
               ].map(([label, value]) => (
-                <div key={String(label)} className="rounded-xl bg-slate-900 border border-slate-800 py-2">
-                  <div className="text-sm font-bold text-slate-100 tabular-nums">{value}</div>
-                  <div className="text-[9px] text-slate-500">{label}</div>
+                <div key={String(label)} className="rounded-xl bg-tt-sidebar border border-tt-border py-2">
+                  <div className="text-sm font-bold text-tt-text tabular-nums">{value}</div>
+                  <div className="text-[9px] text-tt-muted">{label}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-tt-secondary flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5" />
               Offline File Backup & Restore
             </span>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-tt-secondary">
               Export tasks and lists as JSON, or restore from a previous backup.
             </p>
 
@@ -488,13 +488,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={handleExportJson}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl transition-colors"
+                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl transition-colors"
               >
-                <Download className="w-3.5 h-3.5 text-indigo-400" />
+                <Download className="w-3.5 h-3.5 text-tt-blue" />
                 Export JSON
               </button>
 
-              <label className="flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl cursor-pointer transition-colors">
+              <label className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
                 <Upload className="w-3.5 h-3.5 text-emerald-400" />
                 Import JSON
                 <input
@@ -507,16 +507,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
             <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
               <FileSpreadsheet className="w-3.5 h-3.5" />
               Import TickTick / CSV
             </span>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <p className="text-xs text-tt-secondary leading-relaxed">
               Optional one-shot import from a TickTick CSV export, or a simple CSV with{' '}
-              <code className="text-slate-300">title, list, due, priority, tags, notes, status</code>.
+              <code className="text-tt-text/80">title, list, due, priority, tags, notes, status</code>.
             </p>
-            <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl cursor-pointer transition-colors">
+            <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
               <Upload className="w-3.5 h-3.5 text-cyan-400" />
               Choose CSV file
               <input
@@ -532,7 +532,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="mt-6 flex justify-end">
           <button
             onClick={onClose}
-            className="px-5 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+            className="px-5 py-2 text-xs font-semibold rounded-xl bg-tt-sidebar hover:bg-black/[0.06] text-tt-text transition-colors"
           >
             Done
           </button>
