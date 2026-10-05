@@ -12,12 +12,23 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'Tempo - Periodic Todo & Routine Manager',
+        name: 'Tempo - Task Manager',
         short_name: 'Tempo',
-        description: 'Track recurring tasks, maintenance intervals, and periodic habits with Google Drive sync.',
+        description: 'Local-first tasks with smart lists, calendar, board, and Google Drive sync.',
         theme_color: '#3b82f6',
         background_color: '#0f172a',
         display: 'standalone',
+        start_url: '/',
+        share_target: {
+          action: '/?share=1',
+          method: 'GET',
+          enctype: 'application/x-www-form-urlencoded',
+          params: {
+            title: 'title',
+            text: 'text',
+            url: 'url',
+          },
+        },
         icons: [
           {
             src: 'pwa-192x192.png',

@@ -5,15 +5,17 @@ import {
   db,
   saveFolder,
   saveList,
+  saveSavedFilter,
   saveTask,
   seedInitialTasksIfEmpty,
   softDeleteFolder,
   softDeleteList,
+  softDeleteSavedFilter,
   softDeleteTask,
   togglePinTask,
   toggleSubtask,
 } from './db/db';
-import type { AppView, Folder, Task, TaskInput, TaskList } from './types/task';
+import type { AppView, Folder, SavedFilter, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
 import { formatDate, getTaskUrgency, isCompleted } from './domain/recurrence';
 import {
@@ -26,6 +28,7 @@ import {
 } from './domain/smartLists';
 import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorting';
 import { tasksDueOnDate } from './domain/calendar';
+import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
@@ -34,6 +37,10 @@ import { SettingsModal } from './components/SettingsModal';
 import { TaskDetailPane } from './components/TaskDetailPane';
 import { CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
+import { QuickCaptureModal } from './components/QuickCaptureModal';
+
+import { KanbanBoard } from './components/KanbanBoard';
+import { SavedFilterModal } from './components/SavedFilterModal';
 import {
   Plus,
   Settings,
@@ -54,7 +61,22 @@ import {
   Keyboard,
   CalendarDays,
   X,
+  Columns3,
+  Filter,
+  Zap,
 } from 'lucide-react';
+
+function resolveViewTitle(
+  view: AppView,
+  lists: TaskList[],
+  filters: SavedFilter[] = []
+): string {
+  if (view.startsWith('filter:')) {
+    const id = view.slice(7);
+    return filters.find((f) => f.id === id)?.name ?? 'Saved filter';
+  }
+  return viewTitle(view, lists);
+}
 
 function viewTitle(view: AppView, lists: TaskList[]): string {
   if (view === 'today') return 'Today';
@@ -65,10 +87,13 @@ function viewTitle(view: AppView, lists: TaskList[]): string {
   if (view === 'completed') return 'Completed';
   if (view === 'calendar-month') return 'Calendar';
   if (view === 'calendar-agenda') return 'Agenda';
+  if (view === 'board-status') return 'Board · Status';
+  if (view === 'board-list') return 'Board · Lists';
   if (view.startsWith('list:')) {
     const id = view.slice(5);
     return lists.find((l) => l.id === id)?.name ?? 'List';
   }
+  if (view.startsWith('filter:')) return 'Saved filter';
   return 'Tasks';
 }
 
@@ -80,6 +105,8 @@ function navBtn(active: boolean) {
   }`;
 }
 
+const EMPTY_SAVED_FILTERS: SavedFilter[] = [];
+
 export function App() {
   const [activeView, setActiveView] = useState<AppView>('today');
   const [searchQuery, setSearchQuery] = useState('');
@@ -90,6 +117,10 @@ export function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
+  const [quickCaptureText, setQuickCaptureText] = useState('');
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [editingFilter, setEditingFilter] = useState<SavedFilter | null>(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [detailOpenMobile, setDetailOpenMobile] = useState(false);
@@ -111,9 +142,26 @@ export function App() {
     seedInitialTasksIfEmpty();
   }, []);
 
+  // PWA Web Share Target / URL capture (?text=&title=&url= or ?share=1)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('share') && !params.has('text') && !params.has('title')) return;
+    const parts = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean);
+    const combined = parts.join(' — ').trim();
+    if (combined) {
+      setQuickCaptureText(combined);
+      setIsQuickCaptureOpen(true);
+    }
+    // Clean share params without reload
+    const url = new URL(window.location.href);
+    ['share', 'text', 'title', 'url'].forEach((k) => url.searchParams.delete(k));
+    window.history.replaceState({}, '', url.pathname + url.search);
+  }, []);
+
   const allTasks = useLiveQuery(() => db.tasks.toArray(), []) || [];
   const allLists = useLiveQuery(() => db.lists.toArray(), []) || [];
   const allFolders = useLiveQuery(() => db.folders.toArray(), []) || [];
+  const allSavedFilters = useLiveQuery(() => db.savedFilters.toArray(), []) ?? EMPTY_SAVED_FILTERS;
 
   useDueNotifications(allTasks);
 
@@ -131,6 +179,9 @@ export function App() {
     .filter((f) => !f.deletedAt)
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
   const unfiledLists = userLists.filter((l) => !l.folderId);
+  const activeSavedFilters = [...allSavedFilters]
+    .filter((f) => !f.deletedAt)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const activeTasks = allTasks.filter((t) => !t.deletedAt);
   const open = openTasks(activeTasks);
@@ -147,6 +198,7 @@ export function App() {
 
   const isCalendar =
     activeView === 'calendar-month' || activeView === 'calendar-agenda';
+  const isBoard = activeView === 'board-status' || activeView === 'board-list';
 
   const baseForView = useMemo((): Task[] => {
     switch (activeView) {
@@ -166,14 +218,22 @@ export function App() {
         );
       case 'calendar-month':
       case 'calendar-agenda':
+      case 'board-status':
+      case 'board-list':
         return open;
       default:
         if (activeView.startsWith('list:')) {
           return filterByListId(activeTasks, activeView.slice(5));
         }
+        if (activeView.startsWith('filter:')) {
+          const fid = activeView.slice(7);
+          const sf = allSavedFilters.find((f) => f.id === fid && !f.deletedAt);
+          if (!sf) return open;
+          return applySavedFilter(activeTasks, sf);
+        }
         return open;
     }
-  }, [activeView, activeTasks, open, completedOneOffs]);
+  }, [activeView, activeTasks, open, completedOneOffs, allSavedFilters]);
 
   const displayedTasks = useMemo(() => {
     if (isCalendar && activeView === 'calendar-month' && calSelectedDate) {
@@ -213,6 +273,11 @@ export function App() {
   }, []);
 
   const openCapture = useCallback(() => {
+    setQuickCaptureText('');
+    setIsQuickCaptureOpen(true);
+  }, []);
+
+  const openFullEditor = useCallback(() => {
     setEditingTask(null);
     setIsTaskModalOpen(true);
   }, []);
@@ -279,6 +344,38 @@ export function App() {
     await toggleSubtask(taskId, subtaskId);
   };
 
+  const handleSaveFilter = async (filter: {
+    id?: string;
+    name: string;
+    match: 'and' | 'or';
+    criteria: SavedFilter['criteria'];
+  }) => {
+    const saved = await saveSavedFilter(filter);
+    setActiveView(`filter:${saved.id}`);
+  };
+
+  const handleDeleteFilter = async (filter: SavedFilter) => {
+    await softDeleteSavedFilter(filter.id);
+    if (activeView === `filter:${filter.id}`) setActiveView('today');
+  };
+
+  const handleMoveToList = async (taskId: string, listId: string) => {
+    const task = await db.tasks.get(taskId);
+    if (!task || task.listId === listId) return;
+    await saveTask({
+      id: task.id,
+      title: task.title,
+      notes: task.notes,
+      listId,
+      dueAt: task.dueAt,
+      priority: task.priority,
+      pinned: task.pinned,
+      tags: task.tags,
+      subtasks: task.subtasks,
+      recurrence: task.recurrence,
+    });
+  };
+
   const goView = useCallback((view: AppView) => {
     setActiveView(view);
     setSidebarOpen(false);
@@ -290,6 +387,14 @@ export function App() {
     onEscape: () => {
       if (showShortcutsHelp) {
         setShowShortcutsHelp(false);
+        return;
+      }
+      if (isQuickCaptureOpen) {
+        setIsQuickCaptureOpen(false);
+        return;
+      }
+      if (isFilterModalOpen) {
+        setIsFilterModalOpen(false);
         return;
       }
       if (isTaskModalOpen) {
@@ -354,7 +459,8 @@ export function App() {
     activeView === 'next7' ||
     activeView === 'all' ||
     activeView === 'completed' ||
-    isCalendar;
+    isCalendar ||
+    activeView.startsWith('filter:');
 
   const sidebar = (
     <div className="h-full overflow-y-auto p-3 space-y-4">
@@ -419,6 +525,90 @@ export function App() {
             Agenda
           </span>
         </button>
+      </div>
+
+      <div className="space-y-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
+          Board
+        </div>
+        <button
+          type="button"
+          className={navBtn(activeView === 'board-status')}
+          onClick={() => goView('board-status')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Columns3 className="w-3.5 h-3.5" />
+            By status
+          </span>
+        </button>
+        <button
+          type="button"
+          className={navBtn(activeView === 'board-list')}
+          onClick={() => goView('board-list')}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Columns3 className="w-3.5 h-3.5" />
+            By list
+          </span>
+        </button>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center justify-between px-3 mb-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            Saved filters
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFilter(null);
+              setIsFilterModalOpen(true);
+            }}
+            className="text-[11px] text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
+          >
+            <Plus className="w-3 h-3" />
+            New
+          </button>
+        </div>
+        {activeSavedFilters.length === 0 && (
+          <p className="px-3 text-[11px] text-slate-600">No saved filters yet</p>
+        )}
+        {activeSavedFilters.map((sf) => (
+          <div key={sf.id} className="relative group/filter">
+            <button
+              type="button"
+              className={navBtn(activeView === `filter:${sf.id}`)}
+              onClick={() => goView(`filter:${sf.id}`)}
+            >
+              <span className="inline-flex items-center gap-2 truncate">
+                <Filter className="w-3.5 h-3.5 shrink-0" />
+                {sf.name}
+              </span>
+              <span className="text-[9px] uppercase text-slate-500">{sf.match}</span>
+            </button>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/filter:flex gap-0.5">
+              <button
+                type="button"
+                title="Edit filter"
+                onClick={() => {
+                  setEditingFilter(sf);
+                  setIsFilterModalOpen(true);
+                }}
+                className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[9px]"
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                title="Delete filter"
+                onClick={() => handleDeleteFilter(sf)}
+                className="w-5 h-5 flex items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="space-y-1">
@@ -594,7 +784,7 @@ export function App() {
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 truncate hidden md:block">
-                Sidebar · list · detail · calendar
+                Filters · board · capture · calendar
               </p>
             </div>
           </div>
@@ -665,7 +855,7 @@ export function App() {
         {/* Main column */}
         <section className="flex-1 min-w-0 flex flex-col min-h-0">
           <div className="shrink-0 px-3 sm:px-5 pt-4 space-y-3">
-            {!isCalendar && (
+            {!isCalendar && !isBoard && (
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
@@ -727,7 +917,7 @@ export function App() {
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h2 className="text-base font-bold text-slate-100">
-                {viewTitle(activeView, activeLists)}
+                {resolveViewTitle(activeView, activeLists, activeSavedFilters)}
                 {!isCalendar && (
                   <span className="ml-2 text-xs font-medium text-slate-500">
                     {displayedTasks.length}
@@ -777,6 +967,17 @@ export function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-3">
+            {isBoard && (
+              <KanbanBoard
+                tasks={displayedTasks}
+                lists={activeLists}
+                mode={activeView === 'board-list' ? 'list' : 'status'}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={selectTask}
+                onMoveToList={handleMoveToList}
+              />
+            )}
+
             {activeView === 'calendar-month' && (
               <>
                 <CalendarMonthView
@@ -832,7 +1033,7 @@ export function App() {
               />
             )}
 
-            {!isCalendar &&
+            {!isCalendar && !isBoard &&
               (displayedTasks.length === 0 ? (
                 <div className="py-16 text-center border border-dashed border-slate-800 rounded-3xl bg-slate-900/30">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 mx-auto flex items-center justify-center mb-3">
@@ -844,13 +1045,22 @@ export function App() {
                   <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
                     Press <kbd className="px-1 rounded bg-slate-800">n</kbd> to capture a task.
                   </p>
-                  <button
-                    onClick={openCapture}
-                    className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add a Task
-                  </button>
+                  <div className="mt-4 flex items-center justify-center gap-2">
+                    <button
+                      onClick={openCapture}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      Quick capture
+                    </button>
+                    <button
+                      onClick={openFullEditor}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Full editor
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3">
@@ -913,6 +1123,27 @@ export function App() {
           </div>
         )}
       </div>
+
+      <QuickCaptureModal
+        isOpen={isQuickCaptureOpen}
+        onClose={() => setIsQuickCaptureOpen(false)}
+        onSave={handleSave}
+        lists={activeLists}
+        defaultListId={defaultListForNew}
+        initialText={quickCaptureText}
+      />
+
+      <SavedFilterModal
+        isOpen={isFilterModalOpen}
+        onClose={() => {
+          setIsFilterModalOpen(false);
+          setEditingFilter(null);
+        }}
+        onSave={handleSaveFilter}
+        lists={activeLists}
+        availableTags={allTags}
+        initial={editingFilter}
+      />
 
       <TaskModal
         isOpen={isTaskModalOpen}

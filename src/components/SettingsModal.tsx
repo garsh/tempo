@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { db, ensureInboxList } from '../db/db';
 import { loadGoogleScript, requestGoogleAccessToken } from '../sync/googleAuth';
 import { SYNC_VERSION, syncWithGoogleDrive } from '../sync/googleDrive';
-import type { Folder, SyncData, Task, TaskList } from '../types/task';
-import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
+import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../types/task';
+import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../domain/merge';
 import {
   getNotificationPermission,
   isNotificationsEnabled,
@@ -108,7 +108,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         setLastSynced(timeStr);
         setSyncStatus({
           type: 'success',
-          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders!`,
+          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders, ${result.filtersCount} filters!`,
         });
         if (onSyncComplete) onSyncComplete();
       }
@@ -128,12 +128,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     const tasks = await db.tasks.toArray();
     const lists = await db.lists.toArray();
     const folders = await db.folders.toArray();
+    const savedFilters = await db.savedFilters.toArray();
     const data: SyncData = {
       version: SYNC_VERSION,
       exportedAt: Date.now(),
       tasks,
       lists,
       folders,
+      savedFilters,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -156,6 +158,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
         const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
         const incomingFolders: Folder[] = Array.isArray(parsed) ? [] : parsed.folders || [];
+        const incomingFilters: SavedFilter[] = Array.isArray(parsed) ? [] : parsed.savedFilters || [];
 
         if (!Array.isArray(incomingTasks)) {
           throw new Error('Invalid format: tasks array missing.');
@@ -164,11 +167,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         const localTasks = await db.tasks.toArray();
         const localLists = await db.lists.toArray();
         const localFolders = await db.folders.toArray();
+        const localFilters = await db.savedFilters.toArray();
         const mergedTasks = mergeTasks(localTasks, incomingTasks);
         const mergedLists = mergeLists(localLists, incomingLists);
         const mergedFolders = mergeFolders(localFolders, incomingFolders);
+        const mergedFilters = mergeSavedFilters(localFilters, incomingFilters);
 
-        await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
+        await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
           await db.tasks.bulkPut(mergedTasks);
           if (mergedLists.length > 0) {
             await db.lists.bulkPut(mergedLists);
@@ -176,12 +181,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           if (mergedFolders.length > 0) {
             await db.folders.bulkPut(mergedFolders);
           }
+          if (mergedFilters.length > 0) {
+            await db.savedFilters.bulkPut(mergedFilters);
+          }
         });
         await ensureInboxList();
 
         setSyncStatus({
           type: 'success',
-          message: `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders!`,
+          message: `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders, ${incomingFilters.length} filters!`,
         });
         if (onSyncComplete) onSyncComplete();
       } catch (err) {
