@@ -1,36 +1,48 @@
 import Dexie, { type Table } from 'dexie';
-import type { Task, TaskInput, TaskList, TaskListInput } from '../types/task';
+import type {
+  Folder,
+  FolderInput,
+  Subtask,
+  Task,
+  TaskInput,
+  TaskList,
+  TaskListInput,
+} from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import { calculateNextDueDate, formatDate, isRecurring } from '../domain/recurrence';
 
 export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
   lists!: Table<TaskList, string>;
+  folders!: Table<Folder, string>;
 
   constructor() {
     super('TempoDatabase');
 
-    // v1: original PeriodicTask-only schema (superseded; no migration)
     this.version(1).stores({
       tasks: 'id, dueDate, updatedAt, deletedAt',
     });
 
-    // v2: Task + optional recurrence + TaskList (Phase 0)
     this.version(2)
       .stores({
         tasks: 'id, listId, dueAt, updatedAt, deletedAt, completedAt',
         lists: 'id, sortOrder, updatedAt, deletedAt',
       })
       .upgrade(async (tx) => {
-        // App not in production use — drop legacy PeriodicTask rows
         await tx.table('tasks').clear();
       });
+
+    // v3: Folders (Phase 2)
+    this.version(3).stores({
+      tasks: 'id, listId, dueAt, updatedAt, deletedAt, completedAt',
+      lists: 'id, folderId, sortOrder, updatedAt, deletedAt',
+      folders: 'id, sortOrder, updatedAt, deletedAt',
+    });
   }
 }
 
 export const db = new TempoDatabase();
 
-/** Ensure the built-in Inbox list exists. */
 export async function ensureInboxList(): Promise<TaskList> {
   const existing = await db.lists.get(INBOX_LIST_ID);
   if (existing && !existing.deletedAt) return existing;
@@ -40,6 +52,7 @@ export async function ensureInboxList(): Promise<TaskList> {
     id: INBOX_LIST_ID,
     name: 'Inbox',
     sortOrder: 0,
+    folderId: null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     deletedAt: null,
@@ -48,9 +61,6 @@ export async function ensureInboxList(): Promise<TaskList> {
   return inbox;
 }
 
-/**
- * Seed Inbox + sample tasks if database is empty.
- */
 export async function seedInitialTasksIfEmpty(): Promise<void> {
   await ensureInboxList();
 
@@ -59,20 +69,38 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
 
   const now = Date.now();
   const today = formatDate(new Date());
+  const tomorrow = formatDate(new Date(Date.now() + 86400000));
+  const inThree = formatDate(new Date(Date.now() + 86400000 * 3));
 
-  // Sample user list
-  const homeList: TaskList = {
-    id: 'demo-list-home',
-    name: 'Home',
+  const personalFolder: Folder = {
+    id: 'demo-folder-personal',
+    name: 'Personal',
     sortOrder: 1,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
   };
-  await db.lists.put(homeList);
+  await db.folders.put(personalFolder);
 
-  const tomorrow = formatDate(new Date(Date.now() + 86400000));
-  const inThree = formatDate(new Date(Date.now() + 86400000 * 3));
+  const homeList: TaskList = {
+    id: 'demo-list-home',
+    name: 'Home',
+    folderId: personalFolder.id,
+    sortOrder: 1,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  const workList: TaskList = {
+    id: 'demo-list-work',
+    name: 'Work',
+    folderId: null,
+    sortOrder: 2,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  await db.lists.bulkPut([homeList, workList]);
 
   const sampleTasks: Task[] = [
     {
@@ -92,6 +120,10 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       updatedAt: now,
       completionHistory: [now - 86400000 * 3],
       tags: ['Plants'],
+      subtasks: [
+        { id: 'st-1a', title: 'Check fern', completed: false },
+        { id: 'st-1b', title: 'Check monstera', completed: true },
+      ],
     },
     {
       id: 'demo-2',
@@ -122,6 +154,11 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       updatedAt: now,
       completionHistory: [],
       tags: ['Errands'],
+      subtasks: [
+        { id: 'st-3a', title: 'Milk', completed: false },
+        { id: 'st-3b', title: 'Eggs', completed: false },
+        { id: 'st-3c', title: 'Greens', completed: false },
+      ],
     },
     {
       id: 'demo-4',
@@ -156,7 +193,7 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
       id: 'demo-6',
       title: 'Team standup notes',
       notes: 'Prep talking points',
-      listId: INBOX_LIST_ID,
+      listId: workList.id,
       dueAt: `${tomorrow}T10:00`,
       priority: 'none',
       recurrence: null,
@@ -176,20 +213,35 @@ export async function seedInitialTasksIfEmpty(): Promise<void> {
         type: 'fixed_interval',
         intervalValue: 1,
         intervalUnit: 'months',
+        monthDay: 1,
       },
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
       tags: ['Finance'],
     },
+    {
+      id: 'demo-8',
+      title: 'Morning stretch',
+      listId: homeList.id,
+      dueAt: today,
+      priority: 'low',
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 1,
+        intervalUnit: 'weeks',
+        weekdays: [1, 2, 3, 4, 5],
+      },
+      createdAt: now,
+      updatedAt: now,
+      completionHistory: [],
+      tags: ['Health'],
+    },
   ];
 
   await db.tasks.bulkPut(sampleTasks);
 }
 
-/**
- * Add or update a task
- */
 export async function saveTask(task: TaskInput): Promise<Task> {
   const now = Date.now();
   let fullTask: Task;
@@ -206,6 +258,7 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       completionHistory: existing?.completionHistory || [],
       completedAt: task.completedAt !== undefined ? task.completedAt : existing?.completedAt ?? null,
       recurrence: task.recurrence === undefined ? existing?.recurrence ?? null : task.recurrence,
+      subtasks: task.subtasks !== undefined ? task.subtasks : existing?.subtasks,
     };
   } else {
     fullTask = {
@@ -233,8 +286,8 @@ export async function saveTask(task: TaskInput): Promise<Task> {
 
 /**
  * Complete a task.
- * - Recurring: records completion, rolls dueAt forward, clears completedAt.
- * - One-off: records completion and sets completedAt.
+ * - Recurring: rolls dueAt forward (or finalizes if end rule hit); resets subtasks.
+ * - One-off: sets completedAt.
  */
 export async function completeTask(id: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
@@ -246,16 +299,35 @@ export async function completeTask(id: string): Promise<Task | null> {
   let updated: Task;
   if (isRecurring(task) && task.recurrence) {
     const nextDue = calculateNextDueDate(
-      { recurrence: task.recurrence, dueAt: task.dueAt },
+      {
+        recurrence: task.recurrence,
+        dueAt: task.dueAt,
+        completionHistory: task.completionHistory,
+      },
       new Date(now)
     );
-    updated = {
-      ...task,
-      dueAt: nextDue,
-      completedAt: null,
-      completionHistory: history,
-      updatedAt: now,
-    };
+
+    if (nextDue === null) {
+      // Recurrence ended — treat as finished
+      updated = {
+        ...task,
+        recurrence: null,
+        completedAt: now,
+        completionHistory: history,
+        updatedAt: now,
+        subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: true })),
+      };
+    } else {
+      updated = {
+        ...task,
+        dueAt: nextDue,
+        completedAt: null,
+        completionHistory: history,
+        updatedAt: now,
+        // Reset check items for the next cycle
+        subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
+      };
+    }
   } else {
     updated = {
       ...task,
@@ -269,9 +341,6 @@ export async function completeTask(id: string): Promise<Task | null> {
   return updated;
 }
 
-/**
- * Un-complete a one-off task (clear completedAt).
- */
 export async function uncompleteTask(id: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
@@ -286,9 +355,6 @@ export async function uncompleteTask(id: string): Promise<Task | null> {
   return updated;
 }
 
-/**
- * Toggle pinned state on a task.
- */
 export async function togglePinTask(id: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
@@ -302,9 +368,33 @@ export async function togglePinTask(id: string): Promise<Task | null> {
   return updated;
 }
 
-/**
- * Soft delete a task
- */
+export async function toggleSubtask(
+  taskId: string,
+  subtaskId: string
+): Promise<Task | null> {
+  const task = await db.tasks.get(taskId);
+  if (!task) return null;
+  const now = Date.now();
+  const subtasks = (task.subtasks || []).map((s) =>
+    s.id === subtaskId ? { ...s, completed: !s.completed } : s
+  );
+  const updated: Task = { ...task, subtasks, updatedAt: now };
+  await db.tasks.put(updated);
+  return updated;
+}
+
+export async function setTaskSubtasks(
+  taskId: string,
+  subtasks: Subtask[]
+): Promise<Task | null> {
+  const task = await db.tasks.get(taskId);
+  if (!task) return null;
+  const now = Date.now();
+  const updated: Task = { ...task, subtasks, updatedAt: now };
+  await db.tasks.put(updated);
+  return updated;
+}
+
 export async function softDeleteTask(id: string): Promise<void> {
   const task = await db.tasks.get(id);
   if (!task) return;
@@ -317,9 +407,6 @@ export async function softDeleteTask(id: string): Promise<void> {
   });
 }
 
-/**
- * Restore a soft-deleted task
- */
 export async function restoreTask(id: string): Promise<void> {
   const task = await db.tasks.get(id);
   if (!task) return;
@@ -332,9 +419,6 @@ export async function restoreTask(id: string): Promise<void> {
   });
 }
 
-/**
- * Add or update a list (Inbox id is reserved / upserted via ensureInboxList).
- */
 export async function saveList(list: TaskListInput): Promise<TaskList> {
   const now = Date.now();
 
@@ -349,6 +433,7 @@ export async function saveList(list: TaskListInput): Promise<TaskList> {
       ...list,
       id: list.id,
       name: list.name,
+      folderId: list.folderId !== undefined ? list.folderId : existing?.folderId ?? null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       deletedAt: existing?.deletedAt ?? null,
@@ -370,10 +455,6 @@ export async function saveList(list: TaskListInput): Promise<TaskList> {
   return full;
 }
 
-/**
- * Soft-delete a user list. Tasks in that list move to Inbox.
- * Inbox cannot be deleted.
- */
 export async function softDeleteList(id: string): Promise<void> {
   if (id === INBOX_LIST_ID) return;
 
@@ -394,6 +475,63 @@ export async function softDeleteList(id: string): Promise<void> {
       await db.tasks.put({
         ...task,
         listId: INBOX_LIST_ID,
+        updatedAt: now,
+      });
+    }
+  });
+}
+
+export async function saveFolder(folder: FolderInput): Promise<Folder> {
+  const now = Date.now();
+
+  if (folder.id) {
+    const existing = await db.folders.get(folder.id);
+    const full: Folder = {
+      ...(existing || {}),
+      ...folder,
+      id: folder.id,
+      name: folder.name,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      deletedAt: existing?.deletedAt ?? null,
+    };
+    await db.folders.put(full);
+    return full;
+  }
+
+  const full: Folder = {
+    id: crypto.randomUUID(),
+    name: folder.name,
+    sortOrder: folder.sortOrder ?? Date.now(),
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  await db.folders.put(full);
+  return full;
+}
+
+/**
+ * Soft-delete a folder. Lists in it become unfoldered (folderId = null).
+ */
+export async function softDeleteFolder(id: string): Promise<void> {
+  const folder = await db.folders.get(id);
+  if (!folder) return;
+
+  const now = Date.now();
+  await db.transaction('rw', db.folders, db.lists, async () => {
+    await db.folders.put({
+      ...folder,
+      deletedAt: now,
+      updatedAt: now,
+    });
+
+    const listsInFolder = await db.lists.where('folderId').equals(id).toArray();
+    for (const list of listsInFolder) {
+      if (list.deletedAt) continue;
+      await db.lists.put({
+        ...list,
+        folderId: null,
         updatedAt: now,
       });
     }

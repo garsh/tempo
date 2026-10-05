@@ -3,14 +3,17 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import {
   completeTask,
   db,
+  saveFolder,
   saveList,
   saveTask,
   seedInitialTasksIfEmpty,
+  softDeleteFolder,
   softDeleteList,
   softDeleteTask,
   togglePinTask,
+  toggleSubtask,
 } from './db/db';
-import type { SmartView, Task, TaskInput, TaskList } from './types/task';
+import type { Folder, SmartView, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
 import { getTaskUrgency, isCompleted } from './domain/recurrence';
 import {
@@ -40,6 +43,7 @@ import {
   Sun,
   Sunrise,
   CalendarRange,
+  Folder as FolderIcon,
 } from 'lucide-react';
 
 function viewTitle(view: SmartView, lists: TaskList[]): string {
@@ -66,6 +70,9 @@ export function App() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [newListName, setNewListName] = useState('');
   const [showNewListInput, setShowNewListInput] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [newListFolderId, setNewListFolderId] = useState<string>('');
 
   useEffect(() => {
     seedInitialTasksIfEmpty();
@@ -73,6 +80,7 @@ export function App() {
 
   const allTasks = useLiveQuery(() => db.tasks.toArray(), []) || [];
   const allLists = useLiveQuery(() => db.lists.toArray(), []) || [];
+  const allFolders = useLiveQuery(() => db.folders.toArray(), []) || [];
 
   useDueNotifications(allTasks);
 
@@ -87,6 +95,12 @@ export function App() {
   const listNameById = new Map(activeLists.map((l) => [l.id, l.name]));
 
   const userLists = activeLists.filter((l) => l.id !== INBOX_LIST_ID);
+
+  const activeFolders = [...allFolders]
+    .filter((f) => !f.deletedAt)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+
+  const unfiledLists = userLists.filter((l) => !l.folderId);
 
   const activeTasks = allTasks.filter((t) => !t.deletedAt);
   const open = openTasks(activeTasks);
@@ -162,16 +176,37 @@ export function App() {
     e.preventDefault();
     const name = newListName.trim();
     if (!name) return;
-    const list = await saveList({ name });
+    const list = await saveList({
+      name,
+      folderId: newListFolderId || null,
+    });
     setNewListName('');
+    setNewListFolderId('');
     setShowNewListInput(false);
     setActiveView(`list:${list.id}`);
+  };
+
+  const handleCreateFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newFolderName.trim();
+    if (!name) return;
+    await saveFolder({ name });
+    setNewFolderName('');
+    setShowNewFolderInput(false);
   };
 
   const handleDeleteList = async (list: TaskList) => {
     if (list.id === INBOX_LIST_ID) return;
     await softDeleteList(list.id);
     if (activeView === `list:${list.id}`) setActiveView('today');
+  };
+
+  const handleDeleteFolder = async (folder: Folder) => {
+    await softDeleteFolder(folder.id);
+  };
+
+  const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
+    await toggleSubtask(taskId, subtaskId);
   };
 
   const defaultListForNew =
@@ -309,38 +344,124 @@ export function App() {
             <div className="space-y-1">
               <div className="flex items-center justify-between px-3 mb-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Lists
+                  Folders & lists
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setShowNewListInput((v) => !v)}
-                  className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center gap-0.5"
-                >
-                  <Plus className="w-3 h-3" />
-                  New
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewFolderInput((v) => !v)}
+                    className="text-[11px] text-slate-400 hover:text-indigo-300 font-medium inline-flex items-center gap-0.5"
+                    title="New folder"
+                  >
+                    <FolderIcon className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewListInput((v) => !v)}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium inline-flex items-center gap-0.5"
+                    title="New list"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New
+                  </button>
+                </div>
               </div>
 
-              {showNewListInput && (
-                <form onSubmit={handleCreateList} className="flex gap-1.5 px-1 mb-1">
+              {showNewFolderInput && (
+                <form onSubmit={handleCreateFolder} className="flex gap-1.5 px-1 mb-1">
                   <input
                     type="text"
-                    value={newListName}
-                    onChange={(e) => setNewListName(e.target.value)}
-                    placeholder="List name"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="Folder name"
                     autoFocus
                     className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
                   <button
                     type="submit"
-                    className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
+                    className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg"
                   >
                     Add
                   </button>
                 </form>
               )}
 
-              {userLists.map((list) => (
+              {showNewListInput && (
+                <form onSubmit={handleCreateList} className="space-y-1.5 px-1 mb-1">
+                  <input
+                    type="text"
+                    value={newListName}
+                    onChange={(e) => setNewListName(e.target.value)}
+                    placeholder="List name"
+                    autoFocus
+                    className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <select
+                    value={newListFolderId}
+                    onChange={(e) => setNewListFolderId(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">No folder</option>
+                    {activeFolders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="w-full px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
+                  >
+                    Add list
+                  </button>
+                </form>
+              )}
+
+              {activeFolders.map((folder) => {
+                const listsInFolder = userLists.filter((l) => l.folderId === folder.id);
+                return (
+                  <div key={folder.id} className="mb-1">
+                    <div className="relative group/folder flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                      <span className="inline-flex items-center gap-1.5 truncate">
+                        <FolderIcon className="w-3 h-3 text-amber-400/80" />
+                        {folder.name}
+                      </span>
+                      <button
+                        type="button"
+                        title={`Delete folder ${folder.name}`}
+                        onClick={() => handleDeleteFolder(folder)}
+                        className="hidden group-hover/folder:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {listsInFolder.map((list) => (
+                      <div key={list.id} className="relative group/list pl-2">
+                        <button
+                          type="button"
+                          className={navBtn(activeView === `list:${list.id}`)}
+                          onClick={() => setActiveView(`list:${list.id}`)}
+                        >
+                          <span className="inline-flex items-center gap-2 truncate">
+                            <ListIcon className="w-3.5 h-3.5 shrink-0" />
+                            {list.name}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          title={`Delete ${list.name}`}
+                          onClick={() => handleDeleteList(list)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+
+              {unfiledLists.map((list) => (
                 <div key={list.id} className="relative group/list">
                   <button
                     type="button"
@@ -514,6 +635,7 @@ export function App() {
                       onEdit={handleEdit}
                       onDelete={handleDelete}
                       onTogglePin={handleTogglePin}
+                      onToggleSubtask={handleToggleSubtask}
                     />
                   ))}
                 </div>

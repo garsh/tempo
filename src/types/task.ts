@@ -2,6 +2,9 @@ export type RecurrenceType = 'after_completion' | 'fixed_interval';
 
 export type IntervalUnit = 'days' | 'weeks' | 'months';
 
+/** 0 = Sunday … 6 = Saturday (matches Date#getDay). */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 export type TaskPriority = 'high' | 'medium' | 'low' | 'none';
 
 export type TaskUrgency = 'overdue' | 'due_today' | 'upcoming' | 'later' | 'none';
@@ -16,11 +19,28 @@ export const PRIORITY_ORDER: Record<TaskPriority, number> = {
   none: 3,
 };
 
+export const WEEKDAY_LABELS: Record<Weekday, string> = {
+  0: 'Sun',
+  1: 'Mon',
+  2: 'Tue',
+  3: 'Wed',
+  4: 'Thu',
+  5: 'Fri',
+  6: 'Sat',
+};
+
 export interface RecurrenceRule {
   type: RecurrenceType;
   intervalValue: number;
   intervalUnit: IntervalUnit;
-  // Phase 2+: weekdays, monthly-by-date, end on date/count
+  /** Weekly: which weekdays fire (e.g. Mon–Fri). Empty/undefined = same weekday as due. */
+  weekdays?: Weekday[];
+  /** Monthly: day of month 1–31 (clamped to month length). Undefined = same DOM as due. */
+  monthDay?: number;
+  /** Stop generating occurrences after this date (YYYY-MM-DD). */
+  endOnDate?: string | null;
+  /** Stop after this many completions (uses completionHistory length). */
+  endAfterCount?: number | null;
 }
 
 export interface Subtask {
@@ -62,11 +82,22 @@ export interface TaskList {
   deletedAt?: number | null;
 }
 
+/** Groups lists in the sidebar (Phase 2). */
+export interface Folder {
+  id: string;
+  name: string;
+  sortOrder?: number;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+}
+
 export interface SyncData {
   version: number;
   exportedAt: number;
   tasks: Task[];
   lists: TaskList[];
+  folders?: Folder[];
 }
 
 /** Fields accepted when creating/updating a task via the UI. */
@@ -86,7 +117,11 @@ export type TaskListInput = Omit<
   id?: string;
 };
 
-/** Smart-list / navigation views (Phase 1). */
+export type FolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'> & {
+  id?: string;
+};
+
+/** Smart-list / navigation views. */
 export type SmartView =
   | 'today'
   | 'tomorrow'

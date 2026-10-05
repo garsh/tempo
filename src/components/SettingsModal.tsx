@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { db, ensureInboxList } from '../db/db';
 import { loadGoogleScript, requestGoogleAccessToken } from '../sync/googleAuth';
 import { SYNC_VERSION, syncWithGoogleDrive } from '../sync/googleDrive';
-import type { SyncData, Task, TaskList } from '../types/task';
-import { mergeLists, mergeTasks } from '../domain/merge';
+import type { Folder, SyncData, Task, TaskList } from '../types/task';
+import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
 import {
   getNotificationPermission,
   isNotificationsEnabled,
@@ -108,7 +108,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         setLastSynced(timeStr);
         setSyncStatus({
           type: 'success',
-          message: `Synced ${result.tasksCount} tasks and ${result.listsCount} lists with Google Drive!`,
+          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders!`,
         });
         if (onSyncComplete) onSyncComplete();
       }
@@ -127,11 +127,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     await ensureInboxList();
     const tasks = await db.tasks.toArray();
     const lists = await db.lists.toArray();
+    const folders = await db.folders.toArray();
     const data: SyncData = {
       version: SYNC_VERSION,
       exportedAt: Date.now(),
       tasks,
       lists,
+      folders,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -153,6 +155,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         const parsed = JSON.parse(content) as SyncData | Task[];
         const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
         const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
+        const incomingFolders: Folder[] = Array.isArray(parsed) ? [] : parsed.folders || [];
 
         if (!Array.isArray(incomingTasks)) {
           throw new Error('Invalid format: tasks array missing.');
@@ -160,20 +163,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
         const localTasks = await db.tasks.toArray();
         const localLists = await db.lists.toArray();
+        const localFolders = await db.folders.toArray();
         const mergedTasks = mergeTasks(localTasks, incomingTasks);
         const mergedLists = mergeLists(localLists, incomingLists);
+        const mergedFolders = mergeFolders(localFolders, incomingFolders);
 
-        await db.transaction('rw', db.tasks, db.lists, async () => {
+        await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
           await db.tasks.bulkPut(mergedTasks);
           if (mergedLists.length > 0) {
             await db.lists.bulkPut(mergedLists);
+          }
+          if (mergedFolders.length > 0) {
+            await db.folders.bulkPut(mergedFolders);
           }
         });
         await ensureInboxList();
 
         setSyncStatus({
           type: 'success',
-          message: `Imported ${incomingTasks.length} tasks and ${incomingLists.length} lists!`,
+          message: `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders!`,
         });
         if (onSyncComplete) onSyncComplete();
       } catch (err) {
