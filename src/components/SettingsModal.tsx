@@ -5,6 +5,13 @@ import { SYNC_VERSION, syncWithGoogleDrive } from '../sync/googleDrive';
 import type { SyncData, Task, TaskList } from '../types/task';
 import { mergeLists, mergeTasks } from '../domain/merge';
 import {
+  getNotificationPermission,
+  isNotificationsEnabled,
+  notificationsSupported,
+  requestNotificationPermission,
+  setNotificationsEnabled,
+} from '../domain/notifications';
+import {
   X,
   Cloud,
   HardDrive,
@@ -15,6 +22,7 @@ import {
   RefreshCw,
   Key,
   ExternalLink,
+  Bell,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -35,12 +43,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     const saved = localStorage.getItem('tempo_last_synced_at');
     return saved ? new Date(parseInt(saved)).toLocaleString() : null;
   });
+  const [notificationsOn, setNotificationsOn] = useState(() => isNotificationsEnabled());
+  const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
 
   if (!isOpen) return null;
 
   const handleSaveClientId = () => {
     localStorage.setItem('tempo_google_client_id', clientId.trim());
     setSyncStatus({ type: 'success', message: 'Client ID saved locally.' });
+  };
+
+  const handleToggleNotifications = async () => {
+    if (!notificationsSupported()) {
+      setSyncStatus({ type: 'error', message: 'Notifications are not supported in this browser.' });
+      return;
+    }
+    if (!notificationsOn) {
+      const perm = await requestNotificationPermission();
+      setNotifPermission(perm);
+      if (perm !== 'granted') {
+        setSyncStatus({
+          type: 'error',
+          message: 'Notification permission was not granted. Check browser site settings.',
+        });
+        setNotificationsOn(false);
+        return;
+      }
+      setNotificationsEnabled(true);
+      setNotificationsOn(true);
+      setSyncStatus({ type: 'success', message: 'Due-task reminders enabled.' });
+      try {
+        new Notification('Tempo reminders on', {
+          body: 'You will get a notification when a task becomes due while Tempo is open.',
+        });
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setNotificationsEnabled(false);
+      setNotificationsOn(false);
+      setSyncStatus({ type: 'success', message: 'Reminders disabled.' });
+    }
   };
 
   const handleGoogleSync = async () => {
@@ -267,6 +310,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   <p>5. Paste the Client ID above and click Sign In.</p>
                 </div>
               </details>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+              <Bell className="w-3.5 h-3.5" />
+              Due Reminders
+            </span>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Browser notifications when a task&apos;s due date/time is reached while Tempo is open
+              (or when you return to the tab). Works for date-only and timed dues.
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] text-slate-500">
+                Permission: <span className="text-slate-300">{notifPermission}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleNotifications}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                  notificationsOn
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
+              >
+                {notificationsOn ? 'Reminders On' : 'Enable Reminders'}
+              </button>
             </div>
           </div>
 

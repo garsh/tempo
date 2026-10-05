@@ -9,6 +9,13 @@ export type TaskUrgency = 'overdue' | 'due_today' | 'upcoming' | 'later' | 'none
 /** Built-in Inbox list id — always present, never deleted. */
 export const INBOX_LIST_ID = 'inbox';
 
+export const PRIORITY_ORDER: Record<TaskPriority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+  none: 3,
+};
+
 export interface RecurrenceRule {
   type: RecurrenceType;
   intervalValue: number;
@@ -27,7 +34,12 @@ export interface Task {
   title: string;
   notes?: string;
   listId: string; // Inbox or user list
-  dueAt?: string | null; // ISO date YYYY-MM-DD; optional
+  /**
+   * Optional due instant.
+   * - Date-only: `YYYY-MM-DD` (all-day; overdue after that calendar day ends)
+   * - Date+time: `YYYY-MM-DDTHH:mm` local (no timezone suffix)
+   */
+  dueAt?: string | null;
   priority?: TaskPriority;
   pinned?: boolean;
   tags?: string[];
@@ -73,3 +85,13 @@ export type TaskListInput = Omit<
 > & {
   id?: string;
 };
+
+/** Smart-list / navigation views (Phase 1). */
+export type SmartView =
+  | 'today'
+  | 'tomorrow'
+  | 'next7'
+  | 'inbox'
+  | 'all'
+  | 'completed'
+  | `list:${string}`;

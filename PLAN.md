@@ -96,12 +96,12 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 1 — Daily driver core
 
-- [ ] Due **date/time** (not date-only only)
-- [ ] Smart lists: **Today**, **Tomorrow**, **Next 7 Days**, **Inbox**
-- [ ] Reminders / Web Notifications for due tasks (closes former Phase 5 notifications gap)
-- [ ] Priorities + pin
-- [ ] Keep/improve search + tag filter pills
-- [ ] Urgency still useful for recurring items (overdue / due today / upcoming)
+- [x] Due **date/time** (not date-only only)
+- [x] Smart lists: **Today**, **Tomorrow**, **Next 7 Days**, **Inbox**
+- [x] Reminders / Web Notifications for due tasks (closes former Phase 5 notifications gap)
+- [x] Priorities + pin
+- [x] Keep/improve search + tag filter pills
+- [x] Urgency still useful for recurring items (overdue / due today / upcoming)
 
 *Done when:* you can live in **Today** for a week without missing due work.
 
