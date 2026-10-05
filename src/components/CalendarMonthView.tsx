@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { Task } from '../types/task';
 import { buildMonthGrid, monthLabel, shiftMonth, tasksDueOnDate } from '../domain/calendar';
+import { formatDate } from '../domain/recurrence';
+import { pillColorForId } from '../theme/listColors';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -25,6 +27,7 @@ export function CalendarMonthView({
   onSelectTask,
 }: CalendarMonthViewProps) {
   const grid = useMemo(() => buildMonthGrid(year, monthIndex), [year, monthIndex]);
+  const todayStr = formatDate(new Date());
 
   const go = (delta: number) => {
     const next = shiftMonth(year, monthIndex, delta);
@@ -32,14 +35,14 @@ export function CalendarMonthView({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-bold text-slate-100">{monthLabel(year, monthIndex)}</h2>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between px-0.5">
+        <h2 className="text-lg font-bold text-tt-text">{monthLabel(year, monthIndex)}</h2>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => go(-1)}
-            className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            className="p-1.5 rounded-lg text-tt-secondary hover:bg-tt-sidebar"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -48,54 +51,64 @@ export function CalendarMonthView({
             onClick={() => {
               const now = new Date();
               onMonthChange(now.getFullYear(), now.getMonth());
+              onSelectDate(formatDate(now));
             }}
-            className="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-800 text-slate-400 hover:text-slate-200"
+            className="px-2.5 py-1 text-[11px] font-semibold rounded-lg text-tt-blue hover:bg-tt-blue-soft"
           >
             Today
           </button>
           <button
             type="button"
             onClick={() => go(1)}
-            className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            className="p-1.5 rounded-lg text-tt-secondary hover:bg-tt-sidebar"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 px-0.5">
+      <div className="grid grid-cols-7 text-[11px] font-medium text-tt-muted">
         {DOW.map((d) => (
-          <div key={d} className="text-center py-1">
+          <div key={d} className="text-center py-1.5">
             {d}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className="grid grid-cols-7 border-t border-l border-tt-border">
         {grid.map((cell) => {
           const dayTasks = tasksDueOnDate(tasks, cell.dateStr);
           const selected = selectedDateStr === cell.dateStr;
+          const isToday = cell.dateStr === todayStr;
           return (
             <button
               key={cell.dateStr}
               type="button"
               onClick={() => onSelectDate(cell.dateStr)}
-              className={`min-h-[4.5rem] sm:min-h-[5.5rem] p-1 rounded-xl border text-left transition-colors ${
-                selected
-                  ? 'border-indigo-500 bg-indigo-950/40'
-                  : cell.isToday
-                    ? 'border-amber-700/50 bg-amber-950/20'
-                    : 'border-slate-800/80 bg-slate-900/40 hover:border-slate-700'
-              } ${!cell.inCurrentMonth ? 'opacity-40' : ''}`}
+              className={`min-h-[4.75rem] sm:min-h-[5.75rem] p-1 border-r border-b text-left align-top transition-colors ${
+                !cell.inCurrentMonth ? 'opacity-35' : ''
+              } ${selected && !isToday ? 'hover:bg-tt-sidebar/60' : 'bg-white hover:bg-tt-sidebar/60'}`}
+              style={{
+                borderColor: '#E8E8ED',
+                backgroundColor: selected ? '#E8EEFE' : '#FFFFFF',
+                boxShadow: isToday && selected ? 'inset 0 0 0 2px #4772FA' : undefined,
+              }}
             >
-              <div
-                className={`text-[11px] font-semibold mb-1 ${
-                  cell.isToday ? 'text-amber-300' : 'text-slate-400'
-                }`}
-              >
-                {cell.date.getDate()}
+              <div className="flex justify-center mb-0.5">
+                <span
+                  className="inline-flex w-6 h-6 items-center justify-center text-[12px] font-semibold rounded-full"
+                  style={
+                    isToday
+                      ? { backgroundColor: '#4772FA', color: '#FFFFFF' }
+                      : selected
+                        ? { color: '#4772FA', backgroundColor: 'transparent' }
+                        : { color: '#1C1C1E', backgroundColor: 'transparent' }
+                  }
+                >
+                  {cell.date.getDate()}
+                </span>
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-0.5 px-0.5">
                 {dayTasks.slice(0, 3).map((t) => (
                   <div
                     key={t.id}
@@ -111,14 +124,15 @@ export function CalendarMonthView({
                         onSelectTask(t);
                       }
                     }}
-                    className="truncate text-[10px] px-1 py-0.5 rounded bg-indigo-600/30 text-indigo-100 hover:bg-indigo-600/50 cursor-pointer"
+                    className="truncate text-[9px] sm:text-[10px] px-1 py-[1px] rounded font-medium text-tt-text/90 cursor-pointer leading-tight"
+                    style={{ backgroundColor: pillColorForId(t.listId || t.id) }}
                     title={t.title}
                   >
                     {t.title}
                   </div>
                 ))}
                 {dayTasks.length > 3 && (
-                  <div className="text-[9px] text-slate-500 px-1">+{dayTasks.length - 3} more</div>
+                  <div className="text-[9px] text-tt-muted px-0.5">+{dayTasks.length - 3}</div>
                 )}
               </div>
             </button>

@@ -17,7 +17,7 @@ import {
 } from './db/db';
 import type { AppView, Folder, SavedFilter, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
-import { formatDate, getTaskUrgency, isCompleted } from './domain/recurrence';
+import { formatDate, isCompleted } from './domain/recurrence';
 import {
   filterByListId,
   filterInbox,
@@ -32,7 +32,6 @@ import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { computeTempoStats } from './domain/stats';
 import { TaskCard } from './components/TaskCard';
 import { TaskModal } from './components/TaskModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -40,35 +39,23 @@ import { TaskDetailPane } from './components/TaskDetailPane';
 import { CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { QuickCaptureModal } from './components/QuickCaptureModal';
-
 import { KanbanBoard } from './components/KanbanBoard';
 import { SavedFilterModal } from './components/SavedFilterModal';
 import { InstallPrompt } from './components/InstallPrompt';
-import { StatsStrip } from './components/StatsStrip';
+import { IconRail } from './components/shell/IconRail';
+import { SidebarNav } from './components/shell/SidebarNav';
+import { MobileBottomBar } from './components/shell/MobileBottomBar';
+import { EmptyInboxState } from './components/shell/EmptyInboxState';
+import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
+import { QuickAddBar } from './components/shell/QuickAddBar';
+import { groupTasksForListView } from './domain/taskGroups';
 import {
   Plus,
-  Settings,
-  CalendarCheck,
-  Clock,
-  Layers,
   Search,
-  CheckCircle2,
-  Inbox,
-  List as ListIcon,
-  Trash2,
-  Sun,
-  Sunrise,
-  CalendarRange,
-  Folder as FolderIcon,
   Menu,
-  PanelRightOpen,
   Keyboard,
-  CalendarDays,
   X,
-  Columns3,
-  Filter,
-  Zap,
-  Cloud,
+  MoreVertical,
 } from 'lucide-react';
 
 function resolveViewTitle(
@@ -100,14 +87,6 @@ function viewTitle(view: AppView, lists: TaskList[]): string {
   }
   if (view.startsWith('filter:')) return 'Saved filter';
   return 'Tasks';
-}
-
-function navBtn(active: boolean) {
-  return `w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-    active
-      ? 'bg-indigo-600 text-white shadow-sm'
-      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-  }`;
 }
 
 const EMPTY_SAVED_FILTERS: SavedFilter[] = [];
@@ -174,8 +153,6 @@ export function App() {
   useDueNotifications(allTasks);
 
   const { status: syncStatus, syncNow } = useAutoSync();
-  const tempoStats = useMemo(() => computeTempoStats(allTasks), [allTasks]);
-
   const activeLists = [...allLists]
     .filter((l) => !l.deletedAt)
     .sort((a, b) => {
@@ -203,8 +180,6 @@ export function App() {
   const next7Count = filterNext7Days(activeTasks).length;
   const inboxCount = filterInbox(activeTasks).length;
 
-  const overdueTasks = open.filter((t) => getTaskUrgency(t.dueAt) === 'overdue');
-  const dueTodayTasks = open.filter((t) => getTaskUrgency(t.dueAt) === 'due_today');
   const allTags = Array.from(new Set(open.flatMap((t) => t.tags || []))).filter(Boolean);
 
   const isCalendar =
@@ -288,11 +263,6 @@ export function App() {
     setIsQuickCaptureOpen(true);
   }, []);
 
-  const openFullEditor = useCallback(() => {
-    setEditingTask(null);
-    setIsTaskModalOpen(true);
-  }, []);
-
   const handleComplete = async (id: string) => {
     await completeTask(id);
   };
@@ -318,6 +288,33 @@ export function App() {
     const saved = await saveTask(taskData);
     setEditingTask(null);
     setSelectedTaskId(saved.id);
+  };
+
+  const handlePatchTask = async (
+    id: string,
+    patch: Partial<{
+      dueAt: string | null;
+      priority: Task['priority'];
+      recurrence: Task['recurrence'];
+      notes: string;
+      title: string;
+      pinned: boolean;
+    }>
+  ) => {
+    const existing = await db.tasks.get(id);
+    if (!existing) return;
+    await saveTask({
+      id: existing.id,
+      title: patch.title ?? existing.title,
+      notes: patch.notes ?? existing.notes,
+      listId: existing.listId,
+      dueAt: patch.dueAt !== undefined ? patch.dueAt : existing.dueAt,
+      priority: patch.priority !== undefined ? patch.priority : existing.priority,
+      pinned: patch.pinned !== undefined ? patch.pinned : existing.pinned,
+      tags: existing.tags,
+      subtasks: existing.subtasks,
+      recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
+    });
   };
 
   const handleCreateList = async (e: React.FormEvent) => {
@@ -473,691 +470,427 @@ export function App() {
     isCalendar ||
     activeView.startsWith('filter:');
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const taskGroups = useMemo(() => {
+    if (isCalendar || isBoard || activeView === 'completed') return [];
+    return groupTasksForListView(displayedTasks, {
+      includeCompleted: activeView === 'today' || activeView === 'all' || activeView.startsWith('list:'),
+    });
+  }, [displayedTasks, isCalendar, isBoard, activeView]);
+
+  const toggleGroup = (id: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const viewTitleText = resolveViewTitle(activeView, activeLists, activeSavedFilters);
+
+  /** TickTick new-install empty Inbox: pure-black mobile chrome (narrow). */
+  const inboxOpenCount = filterInbox(activeTasks).length;
+  const mobileEmptyInbox = activeView === 'inbox' && inboxOpenCount === 0;
+
   const sidebar = (
-    <div className="h-full overflow-y-auto p-3 space-y-4">
-      <div className="space-y-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
-          Smart lists
-        </div>
-        {(
-          [
-            ['today', 'Today', Sun, todayCount],
-            ['tomorrow', 'Tomorrow', Sunrise, tomorrowCount],
-            ['next7', 'Next 7 Days', CalendarRange, next7Count],
-            ['inbox', 'Inbox', Inbox, inboxCount],
-            ['all', 'All Open', Layers, null],
-            ['completed', 'Completed', CheckCircle2, null],
-          ] as const
-        ).map(([id, label, Icon, count]) => (
-          <button
-            key={id}
-            type="button"
-            className={navBtn(activeView === id)}
-            onClick={() => goView(id)}
-          >
-            <span className="inline-flex items-center gap-2">
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </span>
-            {count != null && count > 0 && (
-              <span
-                className={`text-[10px] px-1.5 rounded-full ${
-                  activeView === id ? 'bg-indigo-800' : 'bg-slate-800'
-                }`}
-              >
-                {count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
-          Calendar
-        </div>
-        <button
-          type="button"
-          className={navBtn(activeView === 'calendar-month')}
-          onClick={() => goView('calendar-month')}
-        >
-          <span className="inline-flex items-center gap-2">
-            <CalendarDays className="w-3.5 h-3.5" />
-            Month
-          </span>
-        </button>
-        <button
-          type="button"
-          className={navBtn(activeView === 'calendar-agenda')}
-          onClick={() => goView('calendar-agenda')}
-        >
-          <span className="inline-flex items-center gap-2">
-            <CalendarRange className="w-3.5 h-3.5" />
-            Agenda
-          </span>
-        </button>
-      </div>
-
-      <div className="space-y-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-1">
-          Board
-        </div>
-        <button
-          type="button"
-          className={navBtn(activeView === 'board-status')}
-          onClick={() => goView('board-status')}
-        >
-          <span className="inline-flex items-center gap-2">
-            <Columns3 className="w-3.5 h-3.5" />
-            By status
-          </span>
-        </button>
-        <button
-          type="button"
-          className={navBtn(activeView === 'board-list')}
-          onClick={() => goView('board-list')}
-        >
-          <span className="inline-flex items-center gap-2">
-            <Columns3 className="w-3.5 h-3.5" />
-            By list
-          </span>
-        </button>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex items-center justify-between px-3 mb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            Saved filters
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingFilter(null);
-              setIsFilterModalOpen(true);
-            }}
-            className="text-[11px] text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
-          >
-            <Plus className="w-3 h-3" />
-            New
-          </button>
-        </div>
-        {activeSavedFilters.length === 0 && (
-          <p className="px-3 text-[11px] text-slate-600">No saved filters yet</p>
-        )}
-        {activeSavedFilters.map((sf) => (
-          <div key={sf.id} className="relative group/filter">
-            <button
-              type="button"
-              className={navBtn(activeView === `filter:${sf.id}`)}
-              onClick={() => goView(`filter:${sf.id}`)}
-            >
-              <span className="inline-flex items-center gap-2 truncate">
-                <Filter className="w-3.5 h-3.5 shrink-0" />
-                {sf.name}
-              </span>
-              <span className="text-[9px] uppercase text-slate-500">{sf.match}</span>
-            </button>
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/filter:flex gap-0.5">
-              <button
-                type="button"
-                title="Edit filter"
-                onClick={() => {
-                  setEditingFilter(sf);
-                  setIsFilterModalOpen(true);
-                }}
-                className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[9px]"
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                title="Delete filter"
-                onClick={() => handleDeleteFilter(sf)}
-                className="w-5 h-5 flex items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex items-center justify-between px-3 mb-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            Folders & lists
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setShowNewFolderInput((v) => !v)}
-              className="text-[11px] text-slate-400 hover:text-indigo-300"
-              title="New folder"
-            >
-              <FolderIcon className="w-3 h-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowNewListInput((v) => !v)}
-              className="text-[11px] text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
-            >
-              <Plus className="w-3 h-3" />
-              New
-            </button>
-          </div>
-        </div>
-
-        {showNewFolderInput && (
-          <form onSubmit={handleCreateFolder} className="flex gap-1.5 px-1 mb-1">
-            <input
-              type="text"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              placeholder="Folder name"
-              autoFocus
-              className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-lg"
-            >
-              Add
-            </button>
-          </form>
-        )}
-
-        {showNewListInput && (
-          <form onSubmit={handleCreateList} className="space-y-1.5 px-1 mb-1">
-            <input
-              type="text"
-              value={newListName}
-              onChange={(e) => setNewListName(e.target.value)}
-              placeholder="List name"
-              autoFocus
-              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-            <select
-              value={newListFolderId}
-              onChange={(e) => setNewListFolderId(e.target.value)}
-              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="">No folder</option>
-              {activeFolders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              className="w-full px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg"
-            >
-              Add list
-            </button>
-          </form>
-        )}
-
-        {activeFolders.map((folder) => {
-          const listsInFolder = userLists.filter((l) => l.folderId === folder.id);
-          return (
-            <div key={folder.id} className="mb-1">
-              <div className="relative group/folder flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
-                <span className="inline-flex items-center gap-1.5 truncate">
-                  <FolderIcon className="w-3 h-3 text-amber-400/80" />
-                  {folder.name}
-                </span>
-                <button
-                  type="button"
-                  title={`Delete folder ${folder.name}`}
-                  onClick={() => handleDeleteFolder(folder)}
-                  className="hidden group-hover/folder:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
-              </div>
-              {listsInFolder.map((list) => (
-                <div key={list.id} className="relative group/list pl-2">
-                  <button
-                    type="button"
-                    className={navBtn(activeView === `list:${list.id}`)}
-                    onClick={() => goView(`list:${list.id}`)}
-                  >
-                    <span className="inline-flex items-center gap-2 truncate">
-                      <ListIcon className="w-3.5 h-3.5 shrink-0" />
-                      {list.name}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    title={`Delete ${list.name}`}
-                    onClick={() => handleDeleteList(list)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-
-        {unfiledLists.map((list) => (
-          <div key={list.id} className="relative group/list">
-            <button
-              type="button"
-              className={navBtn(activeView === `list:${list.id}`)}
-              onClick={() => goView(`list:${list.id}`)}
-            >
-              <span className="inline-flex items-center gap-2 truncate">
-                <ListIcon className="w-3.5 h-3.5 shrink-0" />
-                {list.name}
-              </span>
-            </button>
-            <button
-              type="button"
-              title={`Delete ${list.name}`}
-              onClick={() => handleDeleteList(list)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md bg-rose-950 text-rose-300 border border-rose-800"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <StatsStrip stats={tempoStats} />
-
-      <p className="px-3 pt-2 text-[10px] text-slate-600">
-        Press <kbd className="px-1 rounded bg-slate-900 text-slate-400">?</kbd> for shortcuts
-      </p>
-    </div>
+    <SidebarNav
+      activeView={activeView}
+      todayCount={todayCount}
+      tomorrowCount={tomorrowCount}
+      next7Count={next7Count}
+      inboxCount={inboxCount}
+      openCount={open.length}
+      completedCount={completedOneOffs.length}
+      activeFolders={activeFolders}
+      unfiledLists={unfiledLists}
+      userLists={userLists}
+      activeSavedFilters={activeSavedFilters}
+      allTags={allTags}
+      selectedTag={selectedTag}
+      showNewListInput={showNewListInput}
+      showNewFolderInput={showNewFolderInput}
+      newListName={newListName}
+      newFolderName={newFolderName}
+      newListFolderId={newListFolderId}
+      onGo={goView}
+      onSelectTag={setSelectedTag}
+      onNewList={handleCreateList}
+      onNewFolder={handleCreateFolder}
+      onDeleteList={handleDeleteList}
+      onDeleteFolder={handleDeleteFolder}
+      onDeleteFilter={handleDeleteFilter}
+      setShowNewListInput={setShowNewListInput}
+      setShowNewFolderInput={setShowNewFolderInput}
+      setNewListName={setNewListName}
+      setNewFolderName={setNewFolderName}
+      setNewListFolderId={setNewListFolderId}
+      onOpenFilterModal={() => {
+        setEditingFilter(null);
+        setIsFilterModalOpen(true);
+      }}
+      onEditFilter={(f) => {
+        setEditingFilter(f);
+        setIsFilterModalOpen(true);
+      }}
+    />
   );
 
+  const renderTaskRows = (tasks: Task[], dense: boolean) =>
+    tasks.map((task) => (
+      <TaskCard
+        key={task.id}
+        task={task}
+        listName={showListNameOnCards ? listNameById.get(task.listId) : undefined}
+        showListName={showListNameOnCards}
+        selected={selectedTaskId === task.id}
+        dense={dense}
+        onComplete={handleComplete}
+        onSelect={selectTask}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onTogglePin={handleTogglePin}
+        onToggleSubtask={handleToggleSubtask}
+      />
+    ));
+
   return (
-    <div className="h-dvh bg-slate-950 text-slate-100 flex flex-col overflow-hidden selection:bg-indigo-500/30 selection:text-indigo-200">
-      <header className="shrink-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2.5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <button
-              type="button"
-              className="lg:hidden p-2 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl"
-              onClick={() => setSidebarOpen(true)}
-              title="Open sidebar (\\)"
-            >
-              <Menu className="w-4 h-4" />
-            </button>
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black text-lg shrink-0">
-              T
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold text-slate-100 tracking-tight">Tempo</h1>
-                <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hidden sm:inline">
-                  Sync
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 truncate hidden md:block">
-                Silent Drive sync · reminders · install
-              </p>
-            </div>
-          </div>
+    <div className="h-dvh bg-tt-surface text-tt-text flex overflow-hidden">
+      <IconRail
+        activeView={activeView}
+        syncPhase={syncStatus.phase}
+        onTasks={() => goView('today')}
+        onCalendar={() => goView('calendar-month')}
+        onSearch={() => searchRef.current?.focus()}
+        onSync={() => void syncNow(true)}
+        onSettings={() => setIsSettingsModalOpen(true)}
+      />
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <button
-              type="button"
-              onClick={() => setShowShortcutsHelp(true)}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl hidden sm:inline-flex"
-              title="Keyboard shortcuts (?)"
-            >
-              <Keyboard className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setDetailOpenMobile(true)}
-              className="xl:hidden p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl"
-              title="Open detail pane"
-            >
-              <PanelRightOpen className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void syncNow(true)}
-              className={`p-2 border border-slate-800 rounded-xl ${
-                syncStatus.phase === 'syncing'
-                  ? 'text-indigo-400'
-                  : syncStatus.phase === 'error'
-                    ? 'text-rose-400'
-                    : syncStatus.phase === 'ok'
-                      ? 'text-emerald-400'
-                      : 'text-slate-400 hover:text-slate-200'
-              } hover:bg-slate-900`}
-              title={
-                syncStatus.lastError
-                  ? `Sync error: ${syncStatus.lastError}`
-                  : syncStatus.lastSyncedAt
-                    ? `Last sync ${new Date(syncStatus.lastSyncedAt).toLocaleString()} (click to sync)`
-                    : 'Sync with Google Drive'
-              }
-            >
-              <Cloud className={`w-4 h-4 ${syncStatus.phase === 'syncing' ? 'animate-pulse' : ''}`} />
-            </button>
-            <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-slate-800 rounded-xl"
-              title="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button
-              onClick={openCapture}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-md shadow-indigo-600/25"
-              title="New task (n)"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New</span>
-            </button>
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex w-[232px] shrink-0 flex-col border-r border-tt-border">
+        {sidebar}
+      </aside>
+
+      {/* Mobile drawer */}
+      {sidebarOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex">
+          <div className="w-[280px] max-w-[85vw] bg-tt-sidebar shadow-2xl flex flex-col">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-tt-border">
+              <div className="w-9 h-9 rounded-full bg-tt-blue text-white flex items-center justify-center font-bold">
+                T
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold">Tempo</div>
+                <div className="text-[11px] text-tt-secondary">Local-first tasks</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="p-1.5 text-tt-secondary hover:text-tt-text"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">{sidebar}</div>
           </div>
+          <div className="flex-1 bg-black/40" onClick={() => setSidebarOpen(false)} />
         </div>
-      </header>
+      )}
 
-      {/* Three-pane shell */}
-      <div className="flex-1 flex min-h-0 relative">
-        {/* Desktop sidebar */}
-        <aside className="hidden lg:flex w-56 xl:w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-950/60">
-          {sidebar}
-        </aside>
+      <div
+        className={`flex-1 flex flex-col min-w-0 min-h-0 ${
+          mobileEmptyInbox ? 'xl:bg-tt-surface' : ''
+        }`}
+        style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+        data-tempo-mobile-empty-inbox={mobileEmptyInbox ? '1' : '0'}
+      >
+        {/* Mobile top bar */}
+        <header
+          className="xl:hidden shrink-0 flex items-center gap-2 px-3 h-12"
+          style={
+            mobileEmptyInbox
+              ? { background: '#000000', borderBottom: 'none' }
+              : { background: '#FFFFFF', borderBottom: '1px solid #E8E8ED' }
+          }
+        >
+          <button
+            type="button"
+            className={`p-2 -ml-1 ${mobileEmptyInbox ? 'text-white' : 'text-tt-text'}`}
+            onClick={() => setSidebarOpen(true)}
+            title="Menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <h1
+            className={`flex-1 text-[17px] font-bold truncate ${
+              mobileEmptyInbox ? 'text-white' : 'text-tt-text'
+            }`}
+          >
+            {viewTitleText}
+          </h1>
+          <button
+            type="button"
+            className={`p-2 ${mobileEmptyInbox ? 'text-white/80' : 'text-tt-secondary'}`}
+            onClick={() => setShowShortcutsHelp(true)}
+            title="More"
+          >
+            <MoreVertical className="w-5 h-5" />
+          </button>
+        </header>
 
-        {/* Mobile sidebar drawer */}
-        {sidebarOpen && (
-          <div className="lg:hidden fixed inset-0 z-50 flex">
-            <div className="w-72 max-w-[85vw] bg-slate-950 border-r border-slate-800 shadow-2xl flex flex-col">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
-                <span className="text-xs font-bold text-slate-300">Navigate</span>
+        <div className="flex-1 flex min-h-0">
+          {/* Center pane */}
+          <section
+            className={`flex-1 min-w-0 flex flex-col min-h-0 ${
+              mobileEmptyInbox ? 'xl:bg-tt-surface' : 'bg-tt-surface'
+            }`}
+            style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+          >
+            {/* Desktop list header */}
+            <div className="hidden xl:flex shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2">
+              <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setSidebarOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-slate-200"
+                  onClick={() => setShowShortcutsHelp(true)}
+                  className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
+                  title="Shortcuts"
                 >
-                  <X className="w-4 h-4" />
+                  <Keyboard className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
+                  title="More"
+                >
+                  <MoreVertical className="w-4 h-4" />
                 </button>
               </div>
-              {sidebar}
             </div>
-            <div className="flex-1 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          </div>
-        )}
 
-        {/* Main column */}
-        <section className="flex-1 min-w-0 flex flex-col min-h-0">
-          <div className="shrink-0 px-3 sm:px-5 pt-4 space-y-3">
-            {!isCalendar && !isBoard && (
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => goView('today')}
-                  className={`p-3 rounded-2xl border text-left ${
-                    overdueTasks.length > 0
-                      ? 'bg-rose-950/20 border-rose-900/40'
-                      : 'bg-slate-900/60 border-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
-                    <span>Overdue</span>
-                    <Clock className={`w-3.5 h-3.5 ${overdueTasks.length ? 'text-rose-400' : ''}`} />
-                  </div>
-                  <div
-                    className={`text-xl font-bold ${
-                      overdueTasks.length ? 'text-rose-400' : 'text-slate-200'
-                    }`}
-                  >
-                    {overdueTasks.length}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goView('today')}
-                  className={`p-3 rounded-2xl border text-left ${
-                    dueTodayTasks.length > 0
-                      ? 'bg-amber-950/20 border-amber-900/40'
-                      : 'bg-slate-900/60 border-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
-                    <span>Due Today</span>
-                    <CalendarCheck
-                      className={`w-3.5 h-3.5 ${dueTodayTasks.length ? 'text-amber-400' : ''}`}
-                    />
-                  </div>
-                  <div
-                    className={`text-xl font-bold ${
-                      dueTodayTasks.length ? 'text-amber-400' : 'text-slate-200'
-                    }`}
-                  >
-                    {dueTodayTasks.length}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goView('all')}
-                  className="p-3 rounded-2xl border border-slate-800 bg-slate-900/60 text-left"
-                >
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-0.5">
-                    <span>Open</span>
-                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                  </div>
-                  <div className="text-xl font-bold text-slate-200">{open.length}</div>
-                </button>
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h2 className="text-base font-bold text-slate-100">
-                {resolveViewTitle(activeView, activeLists, activeSavedFilters)}
-                {!isCalendar && (
-                  <span className="ml-2 text-xs font-medium text-slate-500">
-                    {displayedTasks.length}
-                  </span>
-                )}
-              </h2>
-              <div className="relative flex-1 sm:max-w-xs">
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            {/* Search (desktop + when focused on mobile via tab) */}
+            <div
+              className={`shrink-0 px-3 sm:px-5 pb-2 ${
+                mobileEmptyInbox ? 'hidden xl:block' : ''
+              }`}
+            >
+              <div className="relative hidden xl:block mb-2">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
                 <input
                   ref={searchRef}
-                  type="text"
-                  placeholder="Search… (/)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  placeholder="Search"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-tt-sidebar border border-transparent focus:border-tt-blue focus:bg-white text-sm outline-none"
                 />
               </div>
+              {!isCalendar && !isBoard && activeView !== 'completed' && (
+                <div className="hidden xl:block">
+                  <QuickAddBar onClick={openCapture} />
+                </div>
+              )}
+              {/* Mobile search field when on search from bottom bar — always available collapsed */}
+              {!mobileEmptyInbox && (
+                <div className="xl:hidden mb-1">
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search tasks"
+                    className="w-full px-3 py-2 rounded-xl bg-tt-sidebar text-sm outline-none focus:ring-1 focus:ring-tt-blue"
+                  />
+                </div>
+              )}
             </div>
 
-            {allTags.length > 0 && !isCalendar && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-                <button
-                  onClick={() => setSelectedTag(null)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 ${
-                    selectedTag === null
-                      ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                      : 'bg-slate-900 text-slate-400 border border-slate-800'
-                  }`}
-                >
-                  All tags
-                </button>
-                {allTags.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium shrink-0 ${
-                      selectedTag === tag
-                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                        : 'bg-slate-900 text-slate-400 border border-slate-800'
-                    }`}
-                  >
-                    #{tag}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-3">
-            {isBoard && (
-              <KanbanBoard
-                tasks={displayedTasks}
-                lists={activeLists}
-                mode={activeView === 'board-list' ? 'list' : 'status'}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={selectTask}
-                onMoveToList={handleMoveToList}
-              />
-            )}
-
-            {activeView === 'calendar-month' && (
-              <>
-                <CalendarMonthView
-                  tasks={activeTasks}
-                  year={calYear}
-                  monthIndex={calMonth}
-                  selectedDateStr={calSelectedDate}
-                  onMonthChange={(y, m) => {
-                    setCalYear(y);
-                    setCalMonth(m);
-                  }}
-                  onSelectDate={setCalSelectedDate}
-                  onSelectTask={selectTask}
-                />
-                {calSelectedDate && (
-                  <div className="pt-2 space-y-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                      {calSelectedDate}
-                    </h3>
-                    {displayedTasks.length === 0 ? (
-                      <p className="text-xs text-slate-500">No tasks this day.</p>
-                    ) : (
-                      displayedTasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className={
-                            selectedTaskId === task.id ? 'ring-2 ring-indigo-500 rounded-2xl' : ''
-                          }
-                          onClick={() => selectTask(task)}
-                        >
-                          <TaskCard
-                            task={task}
-                            listName={listNameById.get(task.listId)}
-                            onComplete={handleComplete}
-                            onEdit={handleEdit}
-                            onDelete={handleDelete}
-                            onTogglePin={handleTogglePin}
-                            onToggleSubtask={handleToggleSubtask}
-                          />
-                        </div>
-                      ))
-                    )}
+            <div
+              className="flex-1 overflow-y-auto min-h-0 pb-20 xl:pb-4"
+              style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+            >
+              {mobileEmptyInbox ? (
+                <>
+                  <div className="xl:hidden h-full min-h-[70vh] flex flex-col" style={{ background: '#000000' }}>
+                    <EmptyInboxState />
                   </div>
-                )}
-              </>
-            )}
-
-            {activeView === 'calendar-agenda' && (
-              <CalendarAgendaView
-                tasks={activeTasks}
-                selectedTaskId={selectedTaskId}
-                onSelectTask={selectTask}
-              />
-            )}
-
-            {!isCalendar && !isBoard &&
-              (displayedTasks.length === 0 ? (
-                <div className="py-16 text-center border border-dashed border-slate-800 rounded-3xl bg-slate-900/30">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 mx-auto flex items-center justify-center mb-3">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <h3 className="text-base font-semibold text-slate-200">
-                    {activeView === 'today' ? 'All caught up!' : 'No tasks here'}
-                  </h3>
-                  <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
-                    Press <kbd className="px-1 rounded bg-slate-800">n</kbd> to capture a task.
+                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
+                    No tasks here — add one
                   </p>
-                  <div className="mt-4 flex items-center justify-center gap-2">
+                </>
+              ) : isBoard ? (
+                <div className="px-3 sm:px-5">
+                  <div className="flex gap-2 mb-3">
                     <button
-                      onClick={openCapture}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                      type="button"
+                      onClick={() => goView('board-status')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        activeView === 'board-status'
+                          ? 'bg-tt-blue text-white'
+                          : 'bg-tt-sidebar text-tt-secondary'
+                      }`}
                     >
-                      <Zap className="w-3.5 h-3.5" />
-                      Quick capture
+                      By status
                     </button>
                     <button
-                      onClick={openFullEditor}
-                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                      type="button"
+                      onClick={() => goView('board-list')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        activeView === 'board-list'
+                          ? 'bg-tt-blue text-white'
+                          : 'bg-tt-sidebar text-tt-secondary'
+                      }`}
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      Full editor
+                      By list
                     </button>
                   </div>
+                  <KanbanBoard
+                    tasks={displayedTasks}
+                    lists={activeLists}
+                    mode={activeView === 'board-list' ? 'list' : 'status'}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={selectTask}
+                    onMoveToList={handleMoveToList}
+                  />
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3">
-                  {displayedTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className={
-                        selectedTaskId === task.id ? 'ring-2 ring-indigo-500/80 rounded-2xl' : ''
-                      }
-                      onClick={() => selectTask(task)}
+              ) : isCalendar ? (
+                <div className="px-3 sm:px-5 space-y-3">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => goView('calendar-month')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        activeView === 'calendar-month'
+                          ? 'bg-tt-blue text-white'
+                          : 'bg-tt-sidebar text-tt-secondary'
+                      }`}
                     >
-                      <TaskCard
-                        task={task}
-                        listName={
-                          showListNameOnCards ? listNameById.get(task.listId) : undefined
-                        }
-                        onComplete={handleComplete}
-                        onEdit={handleEdit}
-                        onDelete={handleDelete}
-                        onTogglePin={handleTogglePin}
-                        onToggleSubtask={handleToggleSubtask}
-                      />
+                      Month
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => goView('calendar-agenda')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        activeView === 'calendar-agenda'
+                          ? 'bg-tt-blue text-white'
+                          : 'bg-tt-sidebar text-tt-secondary'
+                      }`}
+                    >
+                      Agenda
+                    </button>
+                  </div>
+                  {activeView === 'calendar-month' ? (
+                    <CalendarMonthView
+                      year={calYear}
+                      monthIndex={calMonth}
+                      selectedDateStr={calSelectedDate}
+                      tasks={activeTasks}
+                      onSelectDate={setCalSelectedDate}
+                      onMonthChange={(y, m) => {
+                        setCalYear(y);
+                        setCalMonth(m);
+                      }}
+                      onSelectTask={selectTask}
+                    />
+                  ) : (
+                    <CalendarAgendaView
+                      tasks={activeTasks}
+                      onSelectTask={selectTask}
+                      selectedTaskId={selectedTaskId}
+                      selectedDateStr={calSelectedDate}
+                      onSelectDate={setCalSelectedDate}
+                    />
+                  )}
+                  {activeView === 'calendar-month' && calSelectedDate && (
+                    <div className="border-t border-tt-border pt-2">
+                      {renderTaskRows(displayedTasks, true)}
+                      {displayedTasks.length === 0 && (
+                        <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
+                      )}
                     </div>
-                  ))}
+                  )}
                 </div>
-              ))}
-          </div>
-        </section>
-
-        {/* Desktop detail pane */}
-        <aside className="hidden xl:flex w-80 shrink-0 flex-col border-l border-slate-800 bg-slate-950/40">
-          <TaskDetailPane
-            task={selectedTask}
-            listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
-            onClose={() => setSelectedTaskId(null)}
-            onComplete={handleComplete}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onTogglePin={handleTogglePin}
-            onToggleSubtask={handleToggleSubtask}
-          />
-        </aside>
-
-        {/* Mobile/tablet detail drawer */}
-        {detailOpenMobile && (
-          <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
-            <div className="flex-1 bg-black/50" onClick={() => setDetailOpenMobile(false)} />
-            <div className="w-full max-w-md bg-slate-950 border-l border-slate-800 shadow-2xl">
-              <TaskDetailPane
-                task={selectedTask}
-                listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
-                onClose={() => setDetailOpenMobile(false)}
-                onComplete={handleComplete}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onTogglePin={handleTogglePin}
-                onToggleSubtask={handleToggleSubtask}
-              />
+              ) : activeView === 'completed' ? (
+                <div>
+                  {displayedTasks.length === 0 ? (
+                    <p className="text-sm text-tt-muted px-4 py-10 text-center">No completed tasks</p>
+                  ) : (
+                    renderTaskRows(displayedTasks, false)
+                  )}
+                </div>
+              ) : taskGroups.length === 0 ? (
+                <p className="text-sm text-tt-muted px-4 py-10 text-center">No tasks here — add one</p>
+              ) : (
+                taskGroups.map((g) => {
+                  const collapsed = !!collapsedGroups[g.id];
+                  return (
+                    <div key={g.id}>
+                      <TaskGroupHeader
+                        label={g.label}
+                        count={g.tasks.length}
+                        collapsed={collapsed}
+                        onToggle={() => toggleGroup(g.id)}
+                        tone={g.id === 'overdue' ? 'overdue' : 'default'}
+                      />
+                      {!collapsed && renderTaskRows(g.tasks, true)}
+                    </div>
+                  );
+                })
+              )}
             </div>
-          </div>
-        )}
+          </section>
+
+          {/* Desktop detail */}
+          <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-tt-border">
+            <TaskDetailPane
+              task={selectedTask}
+              listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
+              onClose={() => setSelectedTaskId(null)}
+              onComplete={handleComplete}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onTogglePin={handleTogglePin}
+              onToggleSubtask={handleToggleSubtask}
+              onPatch={handlePatchTask}
+            />
+          </aside>
+        </div>
+
+        {/* Mobile FAB */}
+        <button
+          type="button"
+          onClick={openCapture}
+          className={`xl:hidden fixed bottom-[4.5rem] right-4 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center ${
+            mobileEmptyInbox
+              ? 'shadow-[0_0_24px_rgba(71,114,250,0.55)]'
+              : 'shadow-lg shadow-tt-blue/30'
+          }`}
+          title="Add task"
+        >
+          <Plus className="w-7 h-7" strokeWidth={2.5} />
+        </button>
+
+        <MobileBottomBar
+          activeView={activeView}
+          dark={mobileEmptyInbox}
+          onTasks={() => goView(mobileEmptyInbox ? 'inbox' : 'today')}
+          onCalendar={() => goView('calendar-month')}
+          onSettings={() => setIsSettingsModalOpen(true)}
+        />
       </div>
+
+      {/* Mobile detail drawer */}
+      {detailOpenMobile && (
+        <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
+          <div className="flex-1 bg-black/40" onClick={() => setDetailOpenMobile(false)} />
+          <div className="w-full max-w-md bg-tt-surface shadow-2xl">
+            <TaskDetailPane
+              task={selectedTask}
+              listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
+              onClose={() => setDetailOpenMobile(false)}
+              onComplete={handleComplete}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onTogglePin={handleTogglePin}
+              onToggleSubtask={handleToggleSubtask}
+              onPatch={handlePatchTask}
+            />
+          </div>
+        </div>
+      )}
+
 
       <QuickCaptureModal
         isOpen={isQuickCaptureOpen}
@@ -1201,22 +934,22 @@ export function App() {
       <InstallPrompt />
 
       {showShortcutsHelp && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white border border-tt-border rounded-3xl p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-slate-100 inline-flex items-center gap-2">
-                <Keyboard className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-tt-blue" />
                 Shortcuts
               </h3>
               <button
                 type="button"
                 onClick={() => setShowShortcutsHelp(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-200"
+                className="p-1.5 text-tt-secondary hover:text-tt-text"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <ul className="space-y-2 text-xs text-slate-300">
+            <ul className="space-y-2 text-xs text-tt-text">
               {[
                 ['n / c', 'New task (capture)'],
                 ['/', 'Focus search'],
@@ -1230,8 +963,8 @@ export function App() {
                 ['?', 'This help'],
               ].map(([key, desc]) => (
                 <li key={key} className="flex items-center justify-between gap-3">
-                  <span className="text-slate-400">{desc}</span>
-                  <kbd className="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 font-mono text-[11px]">
+                  <span className="text-tt-secondary">{desc}</span>
+                  <kbd className="px-2 py-1 rounded-lg bg-tt-sidebar text-tt-text font-mono text-[11px]">
                     {key}
                   </kbd>
                 </li>

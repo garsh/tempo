@@ -23,8 +23,8 @@ export default defineConfig({
         short_name: 'Tempo',
         description:
           'Local-first tasks with smart lists, calendar, board, and Google Drive sync.',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#4772FA',
+        background_color: '#FFFFFF',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',
@@ -68,6 +68,9 @@ export default defineConfig({
       workbox: {
         importScripts: ['sw-notify.js'],
         navigateFallback: '/index.html',
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
       },
     }),
   ],

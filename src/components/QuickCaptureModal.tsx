@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { TaskInput, TaskList } from '../types/task';
+import type { TaskInput, TaskList, TaskPriority } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import { parseQuickCapture } from '../domain/quickCapture';
 import { formatDueLabel } from '../domain/recurrence';
-import { X, Zap, Calendar, Flag, Tag } from 'lucide-react';
+import { X, Send, Calendar, Flag, Tag, List as ListIcon } from 'lucide-react';
 
 interface QuickCaptureModalProps {
   isOpen: boolean;
@@ -13,6 +13,13 @@ interface QuickCaptureModalProps {
   defaultListId?: string;
   initialText?: string;
 }
+
+const PRI_CHIP: { id: TaskPriority; label: string; color: string }[] = [
+  { id: 'high', label: 'High', color: '#E03131' },
+  { id: 'medium', label: 'Med', color: '#FAA80C' },
+  { id: 'low', label: 'Low', color: '#4772FA' },
+  { id: 'none', label: 'None', color: '#C7C7CC' },
+];
 
 export function QuickCaptureModal({
   isOpen,
@@ -24,28 +31,31 @@ export function QuickCaptureModal({
 }: QuickCaptureModalProps) {
   const [text, setText] = useState(initialText);
   const [listId, setListId] = useState(defaultListId);
+  const [priorityOverride, setPriorityOverride] = useState<TaskPriority | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setText(initialText);
       setListId(defaultListId);
+      setPriorityOverride(null);
     }
   }, [isOpen, initialText, defaultListId]);
 
   const parsed = useMemo(() => parseQuickCapture(text), [text]);
+  const priority = priorityOverride ?? parsed.priority;
 
   if (!isOpen) return null;
 
   const activeLists = lists.filter((l) => !l.deletedAt);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!parsed.title.trim()) return;
     onSave({
       title: parsed.title.trim(),
       listId,
       dueAt: parsed.dueAt,
-      priority: parsed.priority,
+      priority,
       tags: parsed.tags.length ? parsed.tags : undefined,
       recurrence: null,
     });
@@ -53,94 +63,85 @@ export function QuickCaptureModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] p-4 bg-slate-950/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-5">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-              <Zap className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-100">Quick capture</h2>
-              <p className="text-[11px] text-slate-500">
-                Try: <code className="text-slate-400">Buy milk tomorrow 5pm #Errands !high</code>
-              </p>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-start justify-center sm:pt-[12vh] bg-black/40">
+      <button type="button" className="absolute inset-0" aria-label="Dismiss" onClick={onClose} />
+      <div className="relative w-full sm:max-w-lg bg-white border border-tt-border rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 pb-6">
+        <div className="sm:hidden w-10 h-1 rounded-full bg-tt-border mx-auto mb-3" />
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-bold text-tt-text">Add task</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800"
+            className="p-1.5 text-tt-secondary hover:text-tt-text rounded-lg hover:bg-tt-sidebar"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-          <input
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <textarea
             autoFocus
-            type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="What needs doing?"
-            className="w-full px-3.5 py-3 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-sm"
+            rows={3}
+            placeholder="What needs doing? Try: Buy milk tomorrow 5pm #Errands !high"
+            className="w-full px-3 py-2.5 rounded-xl bg-tt-sidebar border border-transparent focus:border-tt-blue focus:bg-white text-[15px] outline-none resize-none"
           />
 
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            {parsed.dueAt && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-indigo-950/50 text-indigo-300 border border-indigo-800/40">
-                <Calendar className="w-3 h-3" />
-                {formatDueLabel(parsed.dueAt)}
-              </span>
-            )}
-            {parsed.priority !== 'none' && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-rose-950/40 text-rose-300 border border-rose-800/40">
+          <div className="flex flex-wrap gap-1.5">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-tt-sidebar text-xs text-tt-secondary">
+              <Calendar className="w-3 h-3 text-tt-blue" />
+              {parsed.dueAt ? formatDueLabel(parsed.dueAt) : 'No date'}
+            </span>
+            {PRI_CHIP.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPriorityOverride(p.id)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${
+                  priority === p.id
+                    ? 'border-current bg-white font-semibold'
+                    : 'border-transparent bg-tt-sidebar text-tt-secondary'
+                }`}
+                style={priority === p.id ? { color: p.color } : undefined}
+              >
                 <Flag className="w-3 h-3" />
-                {parsed.priority}
-              </span>
-            )}
-            {parsed.tags.map((t) => (
+                {p.label}
+              </button>
+            ))}
+            {parsed.tags.map((tag) => (
               <span
-                key={t}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700"
+                key={tag}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-tt-blue-soft text-tt-blue text-xs font-medium"
               >
                 <Tag className="w-3 h-3" />
-                #{t}
+                {tag}
               </span>
             ))}
           </div>
 
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-              List
+          <div className="flex items-center gap-2">
+            <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl bg-tt-sidebar text-xs text-tt-secondary">
+              <ListIcon className="w-3.5 h-3.5" />
+              <select
+                value={listId}
+                onChange={(e) => setListId(e.target.value)}
+                className="flex-1 bg-transparent outline-none text-tt-text font-medium"
+              >
+                {activeLists.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
             </label>
-            <select
-              value={listId}
-              onChange={(e) => setListId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-950/70 border border-slate-700/80 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-            >
-              {activeLists.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200"
-            >
-              Cancel
-            </button>
             <button
               type="submit"
               disabled={!parsed.title.trim()}
-              className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-semibold"
+              className="w-11 h-11 rounded-full bg-tt-blue hover:bg-tt-blue-hover disabled:opacity-40 text-white flex items-center justify-center shadow-md shadow-tt-blue/25"
+              title="Save"
             >
-              Add task
+              <Send className="w-5 h-5" />
             </button>
           </div>
         </form>

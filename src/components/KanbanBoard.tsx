@@ -79,25 +79,25 @@ export function KanbanBoard({
       {columns.map((col) => (
         <div
           key={col.id}
-          className="w-64 shrink-0 flex flex-col rounded-2xl border border-slate-800 bg-slate-900/40"
+          className="w-64 shrink-0 flex flex-col rounded-2xl border border-tt-border bg-tt-sidebar/40"
         >
-          <div className="px-3 py-2.5 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-200">{col.title}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+          <div className="px-3 py-2.5 border-b border-tt-border flex items-center justify-between">
+            <span className="text-xs font-bold text-tt-text">{col.title}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-tt-sidebar text-tt-secondary">
               {col.tasks.length}
             </span>
           </div>
           <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[calc(100dvh-16rem)]">
             {col.tasks.length === 0 ? (
-              <p className="text-[11px] text-slate-600 px-1 py-3 text-center">Empty</p>
+              <p className="text-[11px] text-tt-muted px-1 py-3 text-center">Empty</p>
             ) : (
               col.tasks.map((t) => (
                 <div
                   key={t.id}
                   className={`rounded-xl border p-2.5 cursor-pointer transition-colors ${
                     selectedTaskId === t.id
-                      ? 'border-indigo-500 bg-indigo-950/40'
-                      : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
+                      ? 'border-tt-blue bg-tt-blue-soft/60'
+                      : 'border-tt-border bg-tt-sidebar hover:border-tt-border'
                   }`}
                   onClick={() => onSelectTask(t)}
                   draggable={mode === 'list' && !!onMoveToList}
@@ -105,16 +105,16 @@ export function KanbanBoard({
                     e.dataTransfer.setData('text/task-id', t.id);
                   }}
                 >
-                  <div className="text-sm font-semibold text-slate-100 line-clamp-2">{t.title}</div>
+                  <div className="text-sm font-semibold text-tt-text line-clamp-2">{t.title}</div>
                   {t.priority && t.priority !== 'none' && (
-                    <div className="text-[10px] text-slate-500 mt-1 capitalize">{t.priority}</div>
+                    <div className="text-[10px] text-tt-muted mt-1 capitalize">{t.priority}</div>
                   )}
                   {t.tags && t.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {t.tags.slice(0, 3).map((tag) => (
                         <span
                           key={tag}
-                          className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400"
+                          className="text-[9px] px-1.5 py-0.5 rounded-full bg-tt-sidebar text-tt-secondary"
                         >
                           #{tag}
                         </span>
@@ -127,7 +127,7 @@ export function KanbanBoard({
           </div>
           {mode === 'list' && onMoveToList && col.id !== '_other' && (
             <div
-              className="m-2 mt-0 rounded-xl border border-dashed border-slate-800 px-2 py-2 text-[10px] text-slate-600 text-center"
+              className="m-2 mt-0 rounded-xl border border-dashed border-tt-border px-2 py-2 text-[10px] text-tt-muted text-center"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
