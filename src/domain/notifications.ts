@@ -44,8 +44,9 @@ function readFiredMap(): Record<string, number> {
 }
 
 function writeFiredMap(map: Record<string, number>): void {
-  // Cap size to avoid unbounded growth
-  const entries = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 200);
+  const entries = Object.entries(map)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 200);
   localStorage.setItem(STORAGE_FIRED, JSON.stringify(Object.fromEntries(entries)));
 }
 
@@ -86,8 +87,34 @@ export function markNotified(tasks: Task[]): void {
   writeFiredMap(map);
 }
 
+/** Drop fired entries for a task (e.g. after complete or due change). */
+export function clearFiredForTask(taskId: string): void {
+  const map = readFiredMap();
+  let changed = false;
+  for (const key of Object.keys(map)) {
+    if (key.startsWith(`${taskId}::`)) {
+      delete map[key];
+      changed = true;
+    }
+  }
+  if (changed) writeFiredMap(map);
+}
+
+async function showViaServiceWorker(title: string, options: NotificationOptions): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return false;
+    await reg.showNotification(title, options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Show browser notifications for due tasks. Returns how many were shown.
+ * Show browser notifications for due tasks. Prefers the service worker
+ * (more reliable for installed PWAs), falls back to `new Notification`.
  */
 export function notifyDueTasks(tasks: Task[]): number {
   if (!notificationsSupported()) return 0;
@@ -97,28 +124,40 @@ export function notifyDueTasks(tasks: Task[]): number {
   const due = getTasksNeedingNotification(tasks);
   if (due.length === 0) return 0;
 
+  // Fire async SW path without blocking; mark notified immediately to avoid duplicates
+  markNotified(due);
+
   for (const task of due) {
     const body = task.dueAt
       ? `Due: ${task.dueAt.replace('T', ' ')}${task.notes ? ` — ${task.notes.slice(0, 80)}` : ''}`
       : task.notes?.slice(0, 100) || 'Task is due';
-    try {
-      new Notification(`Tempo: ${task.title}`, {
-        body,
-        tag: notificationKey(task),
-        silent: false,
-      });
-    } catch {
-      // Ignore — some browsers require service worker for Notification in insecure contexts
-    }
+    const options: NotificationOptions = {
+      body,
+      tag: notificationKey(task),
+      silent: false,
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
+      // Keep notification until user interacts when supported
+      requireInteraction: false,
+      data: { taskId: task.id, url: '/' },
+    };
+
+    void (async () => {
+      const viaSw = await showViaServiceWorker(`Tempo: ${task.title}`, options);
+      if (viaSw) return;
+      try {
+        new Notification(`Tempo: ${task.title}`, options);
+      } catch {
+        /* insecure context / unsupported */
+      }
+    })();
   }
 
-  markNotified(due);
   return due.length;
 }
 
 /**
  * Milliseconds until the next future due deadline among open tasks, or null.
- * Used to schedule a wake-up timer while the app is open.
  */
 export function msUntilNextDue(tasks: Task[], now: Date = new Date()): number | null {
   let soonest: number | null = null;
@@ -130,4 +169,14 @@ export function msUntilNextDue(tasks: Task[], now: Date = new Date()): number | 
     if (soonest === null || delta < soonest) soonest = delta;
   }
   return soonest;
+}
+
+/** Register a click handler so tapping a notification focuses Tempo. */
+export function registerNotificationClickHandler(): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'NOTIFICATION_CLICK') {
+      window.focus();
+    }
+  });
 }

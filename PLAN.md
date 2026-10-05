@@ -133,11 +133,11 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 5 — Sync & polish
 
-- [ ] Background / startup Drive sync polish (feel invisible)
-- [ ] Notification reliability
-- [ ] Custom SVG/PNG app icons + PWA install polish
-- [ ] Optional import from TickTick / CSV
-- [ ] Stats only if clearly useful
+- [x] Background / startup Drive sync polish (feel invisible)
+- [x] Notification reliability
+- [x] Custom SVG/PNG app icons + PWA install polish
+- [x] Optional import from TickTick / CSV
+- [x] Stats only if clearly useful
 
 *Done when:* sync is invisible and alerts are trustworthy.
 

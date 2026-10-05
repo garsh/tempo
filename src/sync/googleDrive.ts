@@ -6,7 +6,7 @@ const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 
-/** Sync payload version: Task + lists + folders (Phase 2). */
+/** Sync payload version: Task + lists + folders + filters. */
 export const SYNC_VERSION = 4;
 
 export interface DriveSyncResult {
@@ -17,6 +17,13 @@ export interface DriveSyncResult {
   filtersCount: number;
   syncedAt: number;
   error?: string;
+}
+
+export class DriveConflictError extends Error {
+  constructor(message = 'Drive upload conflict (412)') {
+    super(message);
+    this.name = 'DriveConflictError';
+  }
 }
 
 export async function getOrCreateAppDataFile(accessToken: string): Promise<string> {
@@ -91,7 +98,7 @@ export async function uploadDriveBackup(
   accessToken: string,
   data: SyncData,
   etag?: string | null
-): Promise<void> {
+): Promise<string | null> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -107,17 +114,23 @@ export async function uploadDriveBackup(
     body: JSON.stringify(data, null, 2),
   });
 
+  if (res.status === 412) {
+    throw new DriveConflictError();
+  }
+
   if (!res.ok) {
     throw new Error(`Failed to upload to Drive: ${res.status} ${res.statusText}`);
   }
+
+  return res.headers.get('ETag');
 }
 
-export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyncResult> {
-  await ensureInboxList();
-
-  const fileId = await getOrCreateAppDataFile(accessToken);
-  const { data: remoteData, etag } = await downloadDriveBackup(fileId, accessToken);
-
+async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
+  tasks: Task[];
+  lists: TaskList[];
+  folders: Folder[];
+  filters: SavedFilter[];
+}> {
   const localTasks = await db.tasks.toArray();
   const localLists = await db.lists.toArray();
   const localFolders = await db.folders.toArray();
@@ -141,24 +154,55 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
 
   await ensureInboxList();
 
-  const now = Date.now();
-  const syncPayload: SyncData = {
-    version: SYNC_VERSION,
-    exportedAt: now,
+  return {
     tasks: mergedTasks,
     lists: await db.lists.toArray(),
     folders: await db.folders.toArray(),
-    savedFilters: await db.savedFilters.toArray(),
+    filters: await db.savedFilters.toArray(),
+  };
+}
+
+/**
+ * Full Drive sync with ETag / If-Match. On 412 conflict, re-download, re-merge, retry once.
+ */
+export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyncResult> {
+  await ensureInboxList();
+
+  const fileId = await getOrCreateAppDataFile(accessToken);
+
+  const attempt = async (): Promise<DriveSyncResult> => {
+    const { data: remoteData, etag } = await downloadDriveBackup(fileId, accessToken);
+    const merged = await mergeRemoteIntoLocal(remoteData);
+
+    const now = Date.now();
+    const syncPayload: SyncData = {
+      version: SYNC_VERSION,
+      exportedAt: now,
+      tasks: merged.tasks,
+      lists: merged.lists,
+      folders: merged.folders,
+      savedFilters: merged.filters,
+    };
+
+    await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
+
+    return {
+      success: true,
+      tasksCount: merged.tasks.length,
+      listsCount: merged.lists.length,
+      foldersCount: merged.folders.length,
+      filtersCount: merged.filters.length,
+      syncedAt: now,
+    };
   };
 
-  await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
-
-  return {
-    success: true,
-    tasksCount: mergedTasks.length,
-    listsCount: syncPayload.lists.length,
-    foldersCount: syncPayload.folders?.length ?? 0,
-    filtersCount: syncPayload.savedFilters?.length ?? 0,
-    syncedAt: now,
-  };
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err instanceof DriveConflictError) {
+      // Another client wrote — merge again and retry upload once
+      return await attempt();
+    }
+    throw err;
+  }
 }

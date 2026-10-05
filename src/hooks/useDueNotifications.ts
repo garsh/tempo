@@ -4,28 +4,32 @@ import {
   isNotificationsEnabled,
   msUntilNextDue,
   notifyDueTasks,
+  registerNotificationClickHandler,
 } from '../domain/notifications';
 
 const POLL_MS = 60_000;
 
 /**
  * While the app is open (and notifications are enabled), fire due reminders
- * immediately, on an interval, when the tab becomes visible, and shortly
- * before the next timed due.
+ * immediately, on an interval, when the tab becomes visible / online,
+ * and shortly before the next timed due.
  */
 export function useDueNotifications(tasks: Task[]): void {
   const tasksRef = useRef(tasks);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
 
   useEffect(() => {
+    registerNotificationClickHandler();
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     const clearTimer = () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
       }
     };
 
@@ -41,7 +45,7 @@ export function useDueNotifications(tasks: Task[]): void {
       const until = msUntilNextDue(tasksRef.current);
       const delay =
         until !== null ? Math.min(Math.max(until + 250, 1000), POLL_MS) : POLL_MS;
-      timerRef.current = setTimeout(() => {
+      timer = setTimeout(() => {
         run();
         scheduleNext();
       }, delay);
@@ -58,6 +62,18 @@ export function useDueNotifications(tasks: Task[]): void {
     };
     document.addEventListener('visibilitychange', onVisibility);
 
+    const onOnline = () => {
+      run();
+      scheduleNext();
+    };
+    window.addEventListener('online', onOnline);
+
+    const onFocus = () => {
+      run();
+      scheduleNext();
+    };
+    window.addEventListener('focus', onFocus);
+
     const poll = setInterval(() => {
       run();
       scheduleNext();
@@ -67,6 +83,9 @@ export function useDueNotifications(tasks: Task[]): void {
       clearTimer();
       clearInterval(poll);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [tasks]);
+    // Stable once — tasks read via ref so we don't thrash timers on every Dexie update
+  }, []);
 }
