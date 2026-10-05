@@ -1,13 +1,13 @@
-/** Pastel pill colors for calendar event chips (TickTick-like). */
+/** Pastel pill colors for calendar event chips (TickTick-like; no purple/violet). */
 export const CAL_PILL_COLORS = [
   '#C8E6C9', // green
   '#BBDEFB', // blue
   '#FFE0B2', // orange
-  '#E1BEE7', // purple
   '#F8BBD0', // pink
   '#B2EBF2', // cyan
   '#DCEDC8', // light green
-  '#D1C4E9', // deep purple
+  '#FFCCBC', // deep orange
+  '#B3E5FC', // light blue
 ] as const;
 
 export const LIST_DOT_COLORS = [

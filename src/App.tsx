@@ -484,9 +484,9 @@ export function App() {
 
   const viewTitleText = resolveViewTitle(activeView, activeLists, activeSavedFilters);
 
-  /** TickTick new-install empty Inbox: pure-black mobile chrome */
-  const mobileEmptyInbox =
-    activeView === 'inbox' && displayedTasks.length === 0;
+  /** TickTick new-install empty Inbox: pure-black mobile chrome (narrow). */
+  const inboxOpenCount = filterInbox(activeTasks).length;
+  const mobileEmptyInbox = activeView === 'inbox' && inboxOpenCount === 0;
 
   const sidebar = (
     <SidebarNav
@@ -594,16 +594,19 @@ export function App() {
 
       <div
         className={`flex-1 flex flex-col min-w-0 min-h-0 ${
-          mobileEmptyInbox ? 'bg-black xl:bg-tt-surface' : ''
+          mobileEmptyInbox ? 'xl:bg-tt-surface' : ''
         }`}
+        style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+        data-tempo-mobile-empty-inbox={mobileEmptyInbox ? '1' : '0'}
       >
         {/* Mobile top bar */}
         <header
-          className={`xl:hidden shrink-0 flex items-center gap-2 px-3 h-12 ${
+          className="xl:hidden shrink-0 flex items-center gap-2 px-3 h-12"
+          style={
             mobileEmptyInbox
-              ? 'bg-black border-b border-transparent'
-              : 'bg-tt-surface border-b border-tt-border'
-          }`}
+              ? { background: '#000000', borderBottom: 'none' }
+              : { background: '#FFFFFF', borderBottom: '1px solid #E8E8ED' }
+          }
         >
           <button
             type="button"
@@ -634,8 +637,9 @@ export function App() {
           {/* Center pane */}
           <section
             className={`flex-1 min-w-0 flex flex-col min-h-0 ${
-              mobileEmptyInbox ? 'bg-black xl:bg-tt-surface' : 'bg-tt-surface'
+              mobileEmptyInbox ? 'xl:bg-tt-surface' : 'bg-tt-surface'
             }`}
+            style={mobileEmptyInbox ? { background: '#000000' } : undefined}
           >
             {/* Desktop list header */}
             <div className="hidden xl:flex shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2">
@@ -693,8 +697,20 @@ export function App() {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto min-h-0 pb-20 xl:pb-4">
-              {isBoard ? (
+            <div
+              className="flex-1 overflow-y-auto min-h-0 pb-20 xl:pb-4"
+              style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+            >
+              {mobileEmptyInbox ? (
+                <>
+                  <div className="xl:hidden h-full min-h-[70vh] flex flex-col" style={{ background: '#000000' }}>
+                    <EmptyInboxState />
+                  </div>
+                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
+                    No tasks here — add one
+                  </p>
+                </>
+              ) : isBoard ? (
                 <div className="px-3 sm:px-5">
                   <div className="flex gap-2 mb-3">
                     <button
@@ -795,18 +811,7 @@ export function App() {
                   )}
                 </div>
               ) : taskGroups.length === 0 ? (
-                <>
-                  <div className="xl:hidden h-full min-h-[60vh] flex flex-col bg-black">
-                    {activeView === 'inbox' ? (
-                      <EmptyInboxState />
-                    ) : (
-                      <p className="text-sm text-[#8E8E93] px-4 py-10 text-center">No tasks here — add one</p>
-                    )}
-                  </div>
-                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
-                    No tasks here — add one
-                  </p>
-                </>
+                <p className="text-sm text-tt-muted px-4 py-10 text-center">No tasks here — add one</p>
               ) : (
                 taskGroups.map((g) => {
                   const collapsed = !!collapsedGroups[g.id];

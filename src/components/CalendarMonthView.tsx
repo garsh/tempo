@@ -85,19 +85,25 @@ export function CalendarMonthView({
               key={cell.dateStr}
               type="button"
               onClick={() => onSelectDate(cell.dateStr)}
-              className={`min-h-[4.75rem] sm:min-h-[5.75rem] p-1 border-r border-b border-tt-border text-left align-top transition-colors ${
-                selected ? 'bg-tt-blue-soft/50' : 'bg-white hover:bg-tt-sidebar/60'
-              } ${!cell.inCurrentMonth ? 'opacity-35' : ''}`}
+              className={`min-h-[4.75rem] sm:min-h-[5.75rem] p-1 border-r border-b text-left align-top transition-colors ${
+                !cell.inCurrentMonth ? 'opacity-35' : ''
+              } ${selected && !isToday ? 'hover:bg-tt-sidebar/60' : 'bg-white hover:bg-tt-sidebar/60'}`}
+              style={{
+                borderColor: '#E8E8ED',
+                backgroundColor: selected ? '#E8EEFE' : '#FFFFFF',
+                boxShadow: isToday && selected ? 'inset 0 0 0 2px #4772FA' : undefined,
+              }}
             >
               <div className="flex justify-center mb-0.5">
                 <span
-                  className={`inline-flex w-6 h-6 items-center justify-center text-[12px] font-semibold rounded-full ${
+                  className="inline-flex w-6 h-6 items-center justify-center text-[12px] font-semibold rounded-full"
+                  style={
                     isToday
-                      ? 'bg-tt-blue text-white'
+                      ? { backgroundColor: '#4772FA', color: '#FFFFFF' }
                       : selected
-                        ? 'text-tt-blue'
-                        : 'text-tt-text'
-                  }`}
+                        ? { color: '#4772FA', backgroundColor: 'transparent' }
+                        : { color: '#1C1C1E', backgroundColor: 'transparent' }
+                  }
                 >
                   {cell.date.getDate()}
                 </span>
