@@ -1,4 +1,4 @@
-import type { Task, TaskList } from '../types/task';
+import type { Folder, Task, TaskList } from '../types/task';
 
 type Mergeable = {
   id: string;
@@ -6,10 +6,6 @@ type Mergeable = {
   deletedAt?: number | null;
 };
 
-/**
- * Generic item-level LWW merge for entities that share id / updatedAt / deletedAt.
- * Optional `mergeExtras` lets callers union fields (e.g. completionHistory) after LWW.
- */
 function mergeEntities<T extends Mergeable>(
   localItems: T[],
   remoteItems: T[],
@@ -89,9 +85,6 @@ function resolveConflict<T extends Mergeable>(
   return mergeExtras ? mergeExtras(local, remote, base) : base;
 }
 
-/**
- * Merges local and remote tasks using Item-Level LWW + Set Union for completionHistory.
- */
 export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
   return mergeEntities(localTasks, remoteTasks, (local, remote, winner) => {
     const allCompletions = Array.from(
@@ -105,25 +98,22 @@ export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
   });
 }
 
-/**
- * Resolves conflict between a local and remote representation of the exact same task.
- * Exported for unit tests.
- */
 export function resolveTaskConflict(local: Task, remote: Task): Task {
   return mergeTasks([local], [remote])[0];
 }
 
-/**
- * Merges local and remote lists using Item-Level LWW.
- */
 export function mergeLists(localLists: TaskList[], remoteLists: TaskList[]): TaskList[] {
   return mergeEntities(localLists, remoteLists);
 }
 
-/**
- * Resolves conflict between a local and remote list.
- * Exported for unit tests.
- */
 export function resolveListConflict(local: TaskList, remote: TaskList): TaskList {
   return mergeLists([local], [remote])[0];
+}
+
+export function mergeFolders(localFolders: Folder[], remoteFolders: Folder[]): Folder[] {
+  return mergeEntities(localFolders, remoteFolders);
+}
+
+export function resolveFolderConflict(local: Folder, remote: Folder): Folder {
+  return mergeFolders([local], [remote])[0];
 }

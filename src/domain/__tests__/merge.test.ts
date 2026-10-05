@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mergeLists, mergeTasks, resolveListConflict, resolveTaskConflict } from '../merge';
-import type { Task, TaskList } from '../../types/task';
+import { mergeFolders, mergeLists, mergeTasks, resolveListConflict, resolveTaskConflict } from '../merge';
+import type { Folder, Task, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
 describe('Merge & Conflict Resolution Engine', () => {
@@ -136,5 +136,25 @@ describe('Merge & Conflict Resolution Engine', () => {
     const remote: TaskList = { ...baseList, name: 'Home Old', updatedAt: 1000 };
     const resolved = resolveListConflict(local, remote);
     expect(resolved.name).toBe('Home Renamed');
+  });
+
+  it('merges folders with LWW', () => {
+    const a: Folder = {
+      id: 'f1',
+      name: 'Personal',
+      sortOrder: 1,
+      createdAt: 1000,
+      updatedAt: 1000,
+    };
+    const b: Folder = {
+      id: 'f1',
+      name: 'Personal Renamed',
+      sortOrder: 1,
+      createdAt: 1000,
+      updatedAt: 2000,
+    };
+    const merged = mergeFolders([a], [b]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].name).toBe('Personal Renamed');
   });
 });

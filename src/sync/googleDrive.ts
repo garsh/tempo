@@ -1,25 +1,23 @@
 import { db, ensureInboxList } from '../db/db';
-import { mergeLists, mergeTasks } from '../domain/merge';
-import type { SyncData, Task, TaskList } from '../types/task';
+import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
+import type { Folder, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 
-/** Sync payload version for Task + lists model (Phase 0). */
-export const SYNC_VERSION = 2;
+/** Sync payload version: Task + lists + folders (Phase 2). */
+export const SYNC_VERSION = 3;
 
 export interface DriveSyncResult {
   success: boolean;
   tasksCount: number;
   listsCount: number;
+  foldersCount: number;
   syncedAt: number;
   error?: string;
 }
 
-/**
- * Search or create the tempo_backup.json file inside user's appDataFolder
- */
 export async function getOrCreateAppDataFile(accessToken: string): Promise<string> {
   const query = encodeURIComponent(`name='${BACKUP_FILENAME}' and trashed=false`);
   const searchRes = await fetch(
@@ -58,9 +56,6 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
   return createdFile.id;
 }
 
-/**
- * Download remote backup from Google Drive
- */
 export async function downloadDriveBackup(
   fileId: string,
   accessToken: string
@@ -90,9 +85,6 @@ export async function downloadDriveBackup(
   }
 }
 
-/**
- * Upload merged payload to Google Drive
- */
 export async function uploadDriveBackup(
   fileId: string,
   accessToken: string,
@@ -119,9 +111,6 @@ export async function uploadDriveBackup(
   }
 }
 
-/**
- * High-level Sync: Fetch remote -> Merge tasks & lists -> Save locally -> Upload remote
- */
 export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyncResult> {
   await ensureInboxList();
 
@@ -130,15 +119,19 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
 
   const localTasks = await db.tasks.toArray();
   const localLists = await db.lists.toArray();
+  const localFolders = await db.folders.toArray();
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
+  const remoteFolders: Folder[] = remoteData?.folders || [];
 
   const mergedTasks = mergeTasks(localTasks, remoteTasks);
   const mergedLists = mergeLists(localLists, remoteLists);
+  const mergedFolders = mergeFolders(localFolders, remoteFolders);
 
-  await db.transaction('rw', db.tasks, db.lists, async () => {
+  await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
     await db.tasks.bulkPut(mergedTasks);
     await db.lists.bulkPut(mergedLists);
+    await db.folders.bulkPut(mergedFolders);
   });
 
   await ensureInboxList();
@@ -149,6 +142,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
     exportedAt: now,
     tasks: mergedTasks,
     lists: await db.lists.toArray(),
+    folders: await db.folders.toArray(),
   };
 
   await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
@@ -157,6 +151,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
     success: true,
     tasksCount: mergedTasks.length,
     listsCount: syncPayload.lists.length,
+    foldersCount: syncPayload.folders?.length ?? 0,
     syncedAt: now,
   };
 }

@@ -8,6 +8,7 @@ import {
   hasDueTime,
   isCompleted,
   isRecurring,
+  subtaskProgress,
 } from '../domain/recurrence';
 import {
   Check,
@@ -21,6 +22,7 @@ import {
   List as ListIcon,
   Flag,
   Pin,
+  CheckSquare,
 } from 'lucide-react';
 
 interface TaskCardProps {
@@ -30,6 +32,7 @@ interface TaskCardProps {
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
   onTogglePin?: (id: string) => void;
+  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
 }
 
 const PRIORITY_STYLE: Record<
@@ -61,6 +64,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onEdit,
   onDelete,
   onTogglePin,
+  onToggleSubtask,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
@@ -245,6 +249,28 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">{task.notes}</p>
           )}
 
+          {task.subtasks && task.subtasks.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {task.subtasks.map((st) => (
+                <label
+                  key={st.id}
+                  className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={st.completed}
+                    disabled={!onToggleSubtask || completed}
+                    onChange={() => onToggleSubtask?.(task.id, st.id)}
+                    className="rounded border-slate-600"
+                  />
+                  <span className={st.completed ? 'line-through text-slate-500' : ''}>
+                    {st.title}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
             {getUrgencyBadge()}
 
@@ -256,6 +282,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 {PRIORITY_STYLE[priority].label}
               </span>
             )}
+
+            {task.subtasks && task.subtasks.length > 0 && (() => {
+              const { done, total } = subtaskProgress(task.subtasks);
+              return (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 border border-emerald-800/40">
+                  <CheckSquare className="w-2.5 h-2.5" />
+                  {done}/{total}
+                </span>
+              );
+            })()}
 
             {listName && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">

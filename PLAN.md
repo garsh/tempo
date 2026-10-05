@@ -107,10 +107,10 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 2 — Structure & depth
 
-- [ ] Subtasks / check items
-- [ ] Folders (group lists)
-- [ ] Richer recurrence: weekdays, monthly-by-date, end on date/count; keep `after_completion`
-- [ ] Sections inside a list — optional if subtasks cover enough
+- [x] Subtasks / check items
+- [x] Folders (group lists)
+- [x] Richer recurrence: weekdays, monthly-by-date, end on date/count; keep `after_completion`
+- [x] Sections inside a list — optional if subtasks cover enough *(skipped: subtasks cover multi-step projects)*
 
 *Done when:* a multi-step project and an “every weekday” chore both feel natural.
 
