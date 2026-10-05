@@ -130,3 +130,6 @@ export type SmartView =
   | 'all'
   | 'completed'
   | `list:${string}`;
+
+/** App navigation including calendar (Phase 3). */
+export type AppView = SmartView | 'calendar-month' | 'calendar-agenda';
