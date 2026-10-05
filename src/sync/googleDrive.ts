@@ -1,19 +1,20 @@
 import { db, ensureInboxList } from '../db/db';
-import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
-import type { Folder, SyncData, Task, TaskList } from '../types/task';
+import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../domain/merge';
+import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 
 /** Sync payload version: Task + lists + folders (Phase 2). */
-export const SYNC_VERSION = 3;
+export const SYNC_VERSION = 4;
 
 export interface DriveSyncResult {
   success: boolean;
   tasksCount: number;
   listsCount: number;
   foldersCount: number;
+  filtersCount: number;
   syncedAt: number;
   error?: string;
 }
@@ -120,18 +121,22 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
   const localTasks = await db.tasks.toArray();
   const localLists = await db.lists.toArray();
   const localFolders = await db.folders.toArray();
+  const localFilters = await db.savedFilters.toArray();
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
   const remoteFolders: Folder[] = remoteData?.folders || [];
+  const remoteFilters: SavedFilter[] = remoteData?.savedFilters || [];
 
   const mergedTasks = mergeTasks(localTasks, remoteTasks);
   const mergedLists = mergeLists(localLists, remoteLists);
   const mergedFolders = mergeFolders(localFolders, remoteFolders);
+  const mergedFilters = mergeSavedFilters(localFilters, remoteFilters);
 
-  await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
+  await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
     await db.tasks.bulkPut(mergedTasks);
     await db.lists.bulkPut(mergedLists);
     await db.folders.bulkPut(mergedFolders);
+    await db.savedFilters.bulkPut(mergedFilters);
   });
 
   await ensureInboxList();
@@ -143,6 +148,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
     tasks: mergedTasks,
     lists: await db.lists.toArray(),
     folders: await db.folders.toArray(),
+    savedFilters: await db.savedFilters.toArray(),
   };
 
   await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
@@ -152,6 +158,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
     tasksCount: mergedTasks.length,
     listsCount: syncPayload.lists.length,
     foldersCount: syncPayload.folders?.length ?? 0,
+    filtersCount: syncPayload.savedFilters?.length ?? 0,
     syncedAt: now,
   };
 }

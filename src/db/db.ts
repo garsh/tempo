@@ -2,6 +2,8 @@ import Dexie, { type Table } from 'dexie';
 import type {
   Folder,
   FolderInput,
+  SavedFilter,
+  SavedFilterInput,
   Subtask,
   Task,
   TaskInput,
@@ -15,6 +17,7 @@ export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
   lists!: Table<TaskList, string>;
   folders!: Table<Folder, string>;
+  savedFilters!: Table<SavedFilter, string>;
 
   constructor() {
     super('TempoDatabase');
@@ -37,6 +40,14 @@ export class TempoDatabase extends Dexie {
       tasks: 'id, listId, dueAt, updatedAt, deletedAt, completedAt',
       lists: 'id, folderId, sortOrder, updatedAt, deletedAt',
       folders: 'id, sortOrder, updatedAt, deletedAt',
+    });
+
+    // v4: Saved filters (Phase 4)
+    this.version(4).stores({
+      tasks: 'id, listId, dueAt, updatedAt, deletedAt, completedAt',
+      lists: 'id, folderId, sortOrder, updatedAt, deletedAt',
+      folders: 'id, sortOrder, updatedAt, deletedAt',
+      savedFilters: 'id, updatedAt, deletedAt',
     });
   }
 }
@@ -535,5 +546,48 @@ export async function softDeleteFolder(id: string): Promise<void> {
         updatedAt: now,
       });
     }
+  });
+}
+
+export async function saveSavedFilter(filter: SavedFilterInput): Promise<SavedFilter> {
+  const now = Date.now();
+  if (filter.id) {
+    const existing = await db.savedFilters.get(filter.id);
+    const full: SavedFilter = {
+      ...(existing || {}),
+      ...filter,
+      id: filter.id,
+      name: filter.name,
+      match: filter.match,
+      criteria: filter.criteria,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      deletedAt: existing?.deletedAt ?? null,
+    };
+    await db.savedFilters.put(full);
+    return full;
+  }
+
+  const full: SavedFilter = {
+    id: crypto.randomUUID(),
+    name: filter.name,
+    match: filter.match,
+    criteria: filter.criteria,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  await db.savedFilters.put(full);
+  return full;
+}
+
+export async function softDeleteSavedFilter(id: string): Promise<void> {
+  const filter = await db.savedFilters.get(id);
+  if (!filter) return;
+  const now = Date.now();
+  await db.savedFilters.put({
+    ...filter,
+    deletedAt: now,
+    updatedAt: now,
   });
 }

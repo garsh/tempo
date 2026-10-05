@@ -33,13 +33,9 @@ export interface RecurrenceRule {
   type: RecurrenceType;
   intervalValue: number;
   intervalUnit: IntervalUnit;
-  /** Weekly: which weekdays fire (e.g. Mon–Fri). Empty/undefined = same weekday as due. */
   weekdays?: Weekday[];
-  /** Monthly: day of month 1–31 (clamped to month length). Undefined = same DOM as due. */
   monthDay?: number;
-  /** Stop generating occurrences after this date (YYYY-MM-DD). */
   endOnDate?: string | null;
-  /** Stop after this many completions (uses completionHistory length). */
   endAfterCount?: number | null;
 }
 
@@ -50,23 +46,18 @@ export interface Subtask {
 }
 
 export interface Task {
-  id: string; // UUID v4
+  id: string;
   title: string;
   notes?: string;
-  listId: string; // Inbox or user list
-  /**
-   * Optional due instant.
-   * - Date-only: `YYYY-MM-DD` (all-day; overdue after that calendar day ends)
-   * - Date+time: `YYYY-MM-DDTHH:mm` local (no timezone suffix)
-   */
+  listId: string;
   dueAt?: string | null;
   priority?: TaskPriority;
   pinned?: boolean;
   tags?: string[];
   subtasks?: Subtask[];
-  recurrence?: RecurrenceRule | null; // optional — one-off when null/undefined
+  recurrence?: RecurrenceRule | null;
   completedAt?: number | null;
-  completionHistory: number[]; // epoch ms
+  completionHistory: number[];
   createdAt: number;
   updatedAt: number;
   deletedAt?: number | null;
@@ -82,7 +73,6 @@ export interface TaskList {
   deletedAt?: number | null;
 }
 
-/** Groups lists in the sidebar (Phase 2). */
 export interface Folder {
   id: string;
   name: string;
@@ -92,15 +82,48 @@ export interface Folder {
   deletedAt?: number | null;
 }
 
+/** Due bucket used by saved filters (Phase 4). */
+export type DueFilterBucket = 'overdue' | 'today' | 'tomorrow' | 'next7' | 'later' | 'none';
+
+/**
+ * Criteria for a saved filter. Empty arrays / undefined mean "any".
+ * Combined with `match` (AND = every set criterion must match; OR = any set criterion).
+ */
+export interface FilterCriteria {
+  tags?: string[];
+  priorities?: TaskPriority[];
+  dueBuckets?: DueFilterBucket[];
+  listIds?: string[];
+  /** Free-text substring (title / notes / tags). */
+  query?: string;
+  /** When true, only pinned tasks. */
+  pinnedOnly?: boolean;
+}
+
+/** User-saved smart filter (Phase 4). */
+export interface SavedFilter {
+  id: string;
+  name: string;
+  match: 'and' | 'or';
+  criteria: FilterCriteria;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+}
+
+export type SavedFilterInput = Omit<SavedFilter, 'id' | 'createdAt' | 'updatedAt'> & {
+  id?: string;
+};
+
 export interface SyncData {
   version: number;
   exportedAt: number;
   tasks: Task[];
   lists: TaskList[];
   folders?: Folder[];
+  savedFilters?: SavedFilter[];
 }
 
-/** Fields accepted when creating/updating a task via the UI. */
 export type TaskInput = Omit<
   Task,
   'id' | 'createdAt' | 'updatedAt' | 'completionHistory' | 'completedAt'
@@ -109,11 +132,7 @@ export type TaskInput = Omit<
   completedAt?: number | null;
 };
 
-/** Fields accepted when creating/updating a list via the UI. */
-export type TaskListInput = Omit<
-  TaskList,
-  'id' | 'createdAt' | 'updatedAt'
-> & {
+export type TaskListInput = Omit<TaskList, 'id' | 'createdAt' | 'updatedAt'> & {
   id?: string;
 };
 
@@ -121,7 +140,6 @@ export type FolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'> & {
   id?: string;
 };
 
-/** Smart-list / navigation views. */
 export type SmartView =
   | 'today'
   | 'tomorrow'
@@ -131,5 +149,10 @@ export type SmartView =
   | 'completed'
   | `list:${string}`;
 
-/** App navigation including calendar (Phase 3). */
-export type AppView = SmartView | 'calendar-month' | 'calendar-agenda';
+export type AppView =
+  | SmartView
+  | 'calendar-month'
+  | 'calendar-agenda'
+  | 'board-status'
+  | 'board-list'
+  | `filter:${string}`;

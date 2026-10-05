@@ -1,4 +1,4 @@
-import type { Folder, Task, TaskList } from '../types/task';
+import type { Folder, SavedFilter, Task, TaskList } from '../types/task';
 
 type Mergeable = {
   id: string;
@@ -116,4 +116,11 @@ export function mergeFolders(localFolders: Folder[], remoteFolders: Folder[]): F
 
 export function resolveFolderConflict(local: Folder, remote: Folder): Folder {
   return mergeFolders([local], [remote])[0];
+}
+
+export function mergeSavedFilters(
+  localFilters: SavedFilter[],
+  remoteFilters: SavedFilter[]
+): SavedFilter[] {
+  return mergeEntities(localFilters, remoteFilters);
 }

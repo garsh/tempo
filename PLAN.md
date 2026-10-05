@@ -125,9 +125,9 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 4 — Power find & board
 
-- [ ] Saved filters (AND/OR on tags / priority / due / list)
-- [ ] Kanban / board by status or list
-- [ ] Quick capture: global shortcut and/or PWA share; light NLP for due dates
+- [x] Saved filters (AND/OR on tags / priority / due / list)
+- [x] Kanban / board by status or list
+- [x] Quick capture: global shortcut and/or PWA share; light NLP for due dates
 
 *Done when:* power users can filter and board without leaving Tempo.
 
