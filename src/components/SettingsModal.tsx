@@ -290,7 +290,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-tt-blue">
+            <div className="p-2 rounded-xl bg-tt-blue-soft text-tt-blue">
               <Cloud className="w-5 h-5" />
             </div>
             <h2 className="text-lg font-bold text-tt-text">Settings & Sync</h2>
@@ -348,7 +348,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     value={clientId}
                     onChange={(e) => setClientId(e.target.value)}
                     placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"
-                    className="w-full px-3 py-2 bg-tt-sidebar border border-tt-border rounded-xl text-xs text-tt-text placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                    className="w-full px-3 py-2 bg-tt-sidebar border border-tt-border rounded-xl text-xs text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue"
                   />
                 </div>
                 <button
@@ -383,7 +383,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 disabled={isSyncing}
                 onClick={handleGoogleSync}
-                className="w-full py-2.5 px-4 rounded-xl bg-tt-blue hover:bg-tt-blue-hover disabled:bg-indigo-950 disabled:text-tt-blue text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-tt-blue/20 active:scale-98"
+                className="w-full py-2.5 px-4 rounded-xl bg-tt-blue hover:bg-tt-blue-hover disabled:bg-tt-blue-soft disabled:text-tt-blue text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-tt-blue/20 active:scale-98"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                 {isSyncing ? 'Syncing with Google Drive...' : 'Sign In with Google & Sync Now'}

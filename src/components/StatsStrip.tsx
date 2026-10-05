@@ -14,25 +14,25 @@ export function StatsStrip({ stats }: StatsStripProps) {
   ];
 
   return (
-    <div className="px-2 py-2 border-t border-slate-800/80">
-      <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold px-1 mb-1.5">
+    <div className="px-2 py-2 border-t border-tt-border/80">
+      <p className="text-[10px] uppercase tracking-wider text-tt-muted font-semibold px-1 mb-1.5">
         This week
       </p>
       <div className="grid grid-cols-5 gap-1">
         {cells.map((c) => (
           <div
             key={c.label}
-            className="rounded-lg bg-slate-900/70 border border-slate-800 px-1 py-1.5 text-center"
+            className="rounded-lg bg-white border border-tt-border px-1 py-1.5 text-center"
             title={c.label}
           >
             <div
               className={`text-sm font-bold tabular-nums ${
-                c.warn ? 'text-rose-400' : 'text-slate-100'
+                c.warn ? 'text-tt-overdue' : 'text-tt-text'
               }`}
             >
               {c.value}
             </div>
-            <div className="text-[9px] text-slate-500 truncate">{c.label}</div>
+            <div className="text-[9px] text-tt-muted truncate">{c.label}</div>
           </div>
         ))}
       </div>

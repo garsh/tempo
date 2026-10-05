@@ -289,6 +289,33 @@ export function App() {
     setSelectedTaskId(saved.id);
   };
 
+  const handlePatchTask = async (
+    id: string,
+    patch: Partial<{
+      dueAt: string | null;
+      priority: Task['priority'];
+      recurrence: Task['recurrence'];
+      notes: string;
+      title: string;
+      pinned: boolean;
+    }>
+  ) => {
+    const existing = await db.tasks.get(id);
+    if (!existing) return;
+    await saveTask({
+      id: existing.id,
+      title: patch.title ?? existing.title,
+      notes: patch.notes ?? existing.notes,
+      listId: existing.listId,
+      dueAt: patch.dueAt !== undefined ? patch.dueAt : existing.dueAt,
+      priority: patch.priority !== undefined ? patch.priority : existing.priority,
+      pinned: patch.pinned !== undefined ? patch.pinned : existing.pinned,
+      tags: existing.tags,
+      subtasks: existing.subtasks,
+      recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
+    });
+  };
+
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newListName.trim();
@@ -711,7 +738,13 @@ export function App() {
                       onSelectTask={selectTask}
                     />
                   ) : (
-                    <CalendarAgendaView tasks={displayedTasks} onSelectTask={selectTask} selectedTaskId={selectedTaskId} />
+                    <CalendarAgendaView
+                      tasks={activeTasks}
+                      onSelectTask={selectTask}
+                      selectedTaskId={selectedTaskId}
+                      selectedDateStr={calSelectedDate}
+                      onSelectDate={setCalSelectedDate}
+                    />
                   )}
                   {activeView === 'calendar-month' && calSelectedDate && (
                     <div className="border-t border-tt-border pt-2">
@@ -763,6 +796,7 @@ export function App() {
               onDelete={handleDelete}
               onTogglePin={handleTogglePin}
               onToggleSubtask={handleToggleSubtask}
+              onPatch={handlePatchTask}
             />
           </aside>
         </div>
@@ -804,6 +838,7 @@ export function App() {
               onDelete={handleDelete}
               onTogglePin={handleTogglePin}
               onToggleSubtask={handleToggleSubtask}
+              onPatch={handlePatchTask}
             />
           </div>
         </div>

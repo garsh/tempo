@@ -205,7 +205,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-tt-border/80">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-tt-blue">
+            <div className="p-2 rounded-xl bg-tt-blue-soft text-tt-blue">
               <Sparkles className="w-5 h-5" />
             </div>
             <h2 className="text-lg font-bold text-tt-text">
@@ -231,7 +231,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Buy milk, Water plants, Pay rent"
-              className="w-full px-3.5 py-2.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-indigo-500 text-sm"
+              className="w-full px-3.5 py-2.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue text-sm"
             />
           </div>
 
@@ -244,7 +244,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               placeholder="Add details..."
-              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-indigo-500 text-sm resize-none"
+              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue text-sm resize-none"
             />
           </div>
 
@@ -365,7 +365,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 onClick={() => setPinned((p) => !p)}
                 className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
                   pinned
-                    ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
+                    ? 'bg-amber-950/40 border-amber-500/50 text-tt-blue'
                     : 'bg-tt-sidebar/70 border-tt-border/80 text-tt-secondary hover:border-slate-600'
                 }`}
               >
@@ -384,7 +384,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 onClick={() => setIsRecurring(false)}
                 className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
                   !isRecurring
-                    ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
+                    ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
                     : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
                 }`}
               >
@@ -395,7 +395,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 onClick={() => setIsRecurring(true)}
                 className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
                   isRecurring
-                    ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
+                    ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
                     : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
                 }`}
               >
@@ -412,7 +412,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                   onClick={() => setRecurrenceType('after_completion')}
                   className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
                     recurrenceType === 'after_completion'
-                      ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
+                      ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
                       : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
                   }`}
                 >
@@ -426,7 +426,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                   onClick={() => setRecurrenceType('fixed_interval')}
                   className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
                     recurrenceType === 'fixed_interval'
-                      ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
+                      ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
                       : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
                   }`}
                 >
@@ -485,7 +485,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                         onClick={() => toggleWeekday(d)}
                         className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${
                           weekdays.includes(d)
-                            ? 'bg-tt-blue border-indigo-500 text-white'
+                            ? 'bg-tt-blue border-tt-blue text-white'
                             : 'bg-tt-sidebar border-tt-border text-tt-secondary'
                         }`}
                       >
@@ -626,7 +626,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl bg-tt-blue hover:bg-tt-blue-hover text-white font-medium text-sm transition-all shadow-lg shadow-indigo-600/25 active:scale-95"
+              className="px-5 py-2.5 rounded-xl bg-tt-blue hover:bg-tt-blue-hover text-white font-medium text-sm transition-all shadow-lg shadow-tt-blue/25 active:scale-95"
             >
               {initialTask ? 'Save Changes' : 'Create Task'}
             </button>

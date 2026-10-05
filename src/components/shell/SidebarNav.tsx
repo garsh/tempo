@@ -1,5 +1,6 @@
 import type { AppView, Folder, SavedFilter, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
+import { listDotColor } from '../../theme/listColors';
 import {
   Sun,
   Sunrise,
@@ -14,12 +15,6 @@ import {
   Filter,
   Columns3,
 } from 'lucide-react';
-
-const LIST_DOTS = ['#4772FA', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5AC8FA', '#FF2D55'];
-
-function listDot(i: number) {
-  return LIST_DOTS[i % LIST_DOTS.length];
-}
 
 function rowClass(active: boolean) {
   return `w-full flex items-center justify-between gap-2 px-3 py-[7px] rounded-lg text-[13px] transition-colors ${
@@ -118,7 +113,7 @@ export function SidebarNav(props: SidebarNavProps) {
         <span className="inline-flex items-center gap-2 truncate min-w-0">
           <span
             className="w-2.5 h-2.5 rounded-full shrink-0"
-            style={{ backgroundColor: listDot(idx) }}
+            style={{ backgroundColor: listDotColor(idx) }}
           />
           <span className="truncate">{list.name}</span>
         </span>

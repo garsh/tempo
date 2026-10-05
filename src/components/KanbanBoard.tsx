@@ -89,15 +89,15 @@ export function KanbanBoard({
           </div>
           <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[calc(100dvh-16rem)]">
             {col.tasks.length === 0 ? (
-              <p className="text-[11px] text-slate-600 px-1 py-3 text-center">Empty</p>
+              <p className="text-[11px] text-tt-muted px-1 py-3 text-center">Empty</p>
             ) : (
               col.tasks.map((t) => (
                 <div
                   key={t.id}
                   className={`rounded-xl border p-2.5 cursor-pointer transition-colors ${
                     selectedTaskId === t.id
-                      ? 'border-indigo-500 bg-indigo-950/40'
-                      : 'border-tt-border bg-slate-950/60 hover:border-tt-border'
+                      ? 'border-tt-blue bg-tt-blue-soft/60'
+                      : 'border-tt-border bg-tt-sidebar hover:border-tt-border'
                   }`}
                   onClick={() => onSelectTask(t)}
                   draggable={mode === 'list' && !!onMoveToList}
@@ -127,7 +127,7 @@ export function KanbanBoard({
           </div>
           {mode === 'list' && onMoveToList && col.id !== '_other' && (
             <div
-              className="m-2 mt-0 rounded-xl border border-dashed border-tt-border px-2 py-2 text-[10px] text-slate-600 text-center"
+              className="m-2 mt-0 rounded-xl border border-dashed border-tt-border px-2 py-2 text-[10px] text-tt-muted text-center"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();

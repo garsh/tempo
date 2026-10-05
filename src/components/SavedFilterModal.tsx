@@ -101,7 +101,7 @@ export function SavedFilterModal({
   const chip = (active: boolean) =>
     `px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
       active
-        ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+        ? 'bg-tt-blue-soft text-tt-blue border-tt-blue/40'
         : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:text-tt-text/80'
     }`;
 
@@ -110,7 +110,7 @@ export function SavedFilterModal({
       <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-3 border-b border-tt-border">
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-tt-blue">
+            <div className="p-2 rounded-xl bg-tt-blue-soft text-tt-blue">
               <Filter className="w-4 h-4" />
             </div>
             <h2 className="text-base font-bold text-tt-text">
@@ -148,7 +148,7 @@ export function SavedFilterModal({
                   onClick={() => setMatch(m)}
                   className={`px-3 py-2 rounded-xl border text-xs font-semibold uppercase ${
                     match === m
-                      ? 'bg-indigo-950/40 border-indigo-500 text-indigo-200'
+                      ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
                       : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary'
                   }`}
                 >
