@@ -1,9 +1,22 @@
 import { useState } from 'react';
 import { db, ensureInboxList } from '../db/db';
-import { loadGoogleScript, requestGoogleAccessToken } from '../sync/googleAuth';
+import {
+  getStoredClientId,
+  setStoredClientId,
+  loadGoogleScript,
+  requestGoogleAccessToken,
+  clearStoredToken,
+} from '../sync/googleAuth';
 import { SYNC_VERSION, syncWithGoogleDrive } from '../sync/googleDrive';
+import {
+  isAutoSyncEnabled,
+  setAutoSyncEnabled,
+  recordSyncSuccess,
+} from '../sync/autoSync';
 import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../types/task';
 import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../domain/merge';
+import { importTasksFromCsv } from '../domain/ticktickImport';
+import { computeTempoStats } from '../domain/stats';
 import {
   getNotificationPermission,
   isNotificationsEnabled,
@@ -23,18 +36,24 @@ import {
   Key,
   ExternalLink,
   Bell,
+  FileSpreadsheet,
+  BarChart3,
 } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSyncComplete?: () => void;
+  tasks?: Task[];
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onSyncComplete }) => {
-  const [clientId, setClientId] = useState<string>(() => {
-    return localStorage.getItem('tempo_google_client_id') || '';
-  });
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen,
+  onClose,
+  onSyncComplete,
+  tasks = [],
+}) => {
+  const [clientId, setClientId] = useState<string>(() => getStoredClientId());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
@@ -43,14 +62,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     const saved = localStorage.getItem('tempo_last_synced_at');
     return saved ? new Date(parseInt(saved)).toLocaleString() : null;
   });
+  const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
   const [notificationsOn, setNotificationsOn] = useState(() => isNotificationsEnabled());
   const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
 
   if (!isOpen) return null;
 
+  const stats = computeTempoStats(tasks);
+
   const handleSaveClientId = () => {
-    localStorage.setItem('tempo_google_client_id', clientId.trim());
+    setStoredClientId(clientId.trim());
     setSyncStatus({ type: 'success', message: 'Client ID saved locally.' });
+  };
+
+  const handleToggleAutoSync = () => {
+    const next = !autoSync;
+    setAutoSyncEnabled(next);
+    setAutoSync(next);
+    setSyncStatus({
+      type: 'success',
+      message: next
+        ? 'Background sync on — Tempo will sync on startup and every ~10 minutes while open.'
+        : 'Background sync off. Manual sync still available.',
+    });
   };
 
   const handleToggleNotifications = async () => {
@@ -71,10 +105,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       }
       setNotificationsEnabled(true);
       setNotificationsOn(true);
-      setSyncStatus({ type: 'success', message: 'Due-task reminders enabled.' });
+      setSyncStatus({
+        type: 'success',
+        message:
+          'Due-task reminders enabled. Installed PWA + service worker improve reliability.',
+      });
       try {
         new Notification('Tempo reminders on', {
           body: 'You will get a notification when a task becomes due while Tempo is open.',
+          icon: '/pwa-192x192.png',
         });
       } catch {
         /* ignore */
@@ -93,18 +132,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       return;
     }
 
-    localStorage.setItem('tempo_google_client_id', trimmedId);
+    setStoredClientId(trimmedId);
     setIsSyncing(true);
     setSyncStatus(null);
 
     try {
       await loadGoogleScript();
-      const token = await requestGoogleAccessToken(trimmedId);
+      clearStoredToken();
+      const token = await requestGoogleAccessToken(trimmedId, 'interactive');
       const result = await syncWithGoogleDrive(token);
 
       if (result.success) {
+        recordSyncSuccess(result.syncedAt);
         const timeStr = new Date(result.syncedAt).toLocaleString();
-        localStorage.setItem('tempo_last_synced_at', String(result.syncedAt));
         setLastSynced(timeStr);
         setSyncStatus({
           type: 'success',
@@ -125,14 +165,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const handleExportJson = async () => {
     await ensureInboxList();
-    const tasks = await db.tasks.toArray();
+    const allTasks = await db.tasks.toArray();
     const lists = await db.lists.toArray();
     const folders = await db.folders.toArray();
     const savedFilters = await db.savedFilters.toArray();
     const data: SyncData = {
       version: SYNC_VERSION,
       exportedAt: Date.now(),
-      tasks,
+      tasks: allTasks,
       lists,
       folders,
       savedFilters,
@@ -158,7 +198,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
         const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
         const incomingFolders: Folder[] = Array.isArray(parsed) ? [] : parsed.folders || [];
-        const incomingFilters: SavedFilter[] = Array.isArray(parsed) ? [] : parsed.savedFilters || [];
+        const incomingFilters: SavedFilter[] = Array.isArray(parsed)
+          ? []
+          : parsed.savedFilters || [];
 
         if (!Array.isArray(incomingTasks)) {
           throw new Error('Invalid format: tasks array missing.');
@@ -196,6 +238,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         setSyncStatus({
           type: 'error',
           message: `Import failed: ${(err as Error).message}`,
+        });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const result = importTasksFromCsv(content);
+        if (result.format === 'unknown' || result.tasks.length === 0) {
+          throw new Error(
+            'Unrecognized CSV. Export from TickTick (CSV) or use columns: title, list, due, priority, tags, notes, status.'
+          );
+        }
+
+        await ensureInboxList();
+        await db.transaction('rw', db.tasks, db.lists, async () => {
+          if (result.lists.length) await db.lists.bulkPut(result.lists);
+          if (result.tasks.length) await db.tasks.bulkPut(result.tasks);
+        });
+
+        setSyncStatus({
+          type: 'success',
+          message: `Imported ${result.tasks.length} tasks from ${result.format} CSV` +
+            (result.lists.length ? ` (${result.lists.length} lists)` : '') +
+            (result.skipped ? `, skipped ${result.skipped}` : '') +
+            '.',
+        });
+        if (onSyncComplete) onSyncComplete();
+      } catch (err) {
+        setSyncStatus({
+          type: 'error',
+          message: `CSV import failed: ${(err as Error).message}`,
         });
       }
     };
@@ -251,9 +333,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Syncs tasks and lists to your private Google Drive hidden application folder (
-              <code className="text-indigo-300 bg-indigo-950/40 px-1 py-0.5 rounded">drive.appdata</code>
-              ).
+              Syncs privately to Drive AppData. Startup + periodic background sync stays silent when
+              your session token is still valid; conflicts (412) re-merge automatically.
             </p>
 
             <div>
@@ -278,6 +359,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   Save
                 </button>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="text-[11px] text-slate-400 leading-snug">
+                Background sync (startup / ~10 min / on return)
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleAutoSync}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 ${
+                  autoSync
+                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
+              >
+                {autoSync ? 'Auto On' : 'Auto Off'}
+              </button>
             </div>
 
             <div className="pt-2">
@@ -335,8 +433,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               Due Reminders
             </span>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Browser notifications when a task&apos;s due date/time is reached while Tempo is open
-              (or when you return to the tab). Works for date-only and timed dues.
+              Fires when a due date/time is reached while Tempo is open, on focus, when you come
+              back online, and via the service worker when installed as a PWA.
             </p>
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] text-slate-500">
@@ -353,6 +451,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               >
                 {notificationsOn ? 'Reminders On' : 'Enable Reminders'}
               </button>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <BarChart3 className="w-3.5 h-3.5" />
+              Quick stats
+            </span>
+            <div className="grid grid-cols-5 gap-1.5 text-center">
+              {[
+                ['Open', stats.openCount],
+                ['Overdue', stats.overdueCount],
+                ['Today', stats.dueTodayCount],
+                ['Done/wk', stats.completedThisWeek],
+                ['Streak', stats.completionStreakDays],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-xl bg-slate-900 border border-slate-800 py-2">
+                  <div className="text-sm font-bold text-slate-100 tabular-nums">{value}</div>
+                  <div className="text-[9px] text-slate-500">{label}</div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -386,6 +505,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 />
               </label>
             </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Import TickTick / CSV
+            </span>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Optional one-shot import from a TickTick CSV export, or a simple CSV with{' '}
+              <code className="text-slate-300">title, list, due, priority, tags, notes, status</code>.
+            </p>
+            <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl cursor-pointer transition-colors">
+              <Upload className="w-3.5 h-3.5 text-cyan-400" />
+              Choose CSV file
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={handleImportCsv}
+                className="hidden"
+              />
+            </label>
           </div>
         </div>
 

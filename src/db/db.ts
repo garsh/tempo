@@ -12,6 +12,7 @@ import type {
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import { calculateNextDueDate, formatDate, isRecurring } from '../domain/recurrence';
+import { clearFiredForTask } from '../domain/notifications';
 
 export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
@@ -348,6 +349,7 @@ export async function completeTask(id: string): Promise<Task | null> {
     };
   }
 
+    clearFiredForTask(id);
   await db.tasks.put(updated);
   return updated;
 }

@@ -30,7 +30,9 @@ import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorti
 import { tasksDueOnDate } from './domain/calendar';
 import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
+import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { computeTempoStats } from './domain/stats';
 import { TaskCard } from './components/TaskCard';
 import { TaskModal } from './components/TaskModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -41,6 +43,8 @@ import { QuickCaptureModal } from './components/QuickCaptureModal';
 
 import { KanbanBoard } from './components/KanbanBoard';
 import { SavedFilterModal } from './components/SavedFilterModal';
+import { InstallPrompt } from './components/InstallPrompt';
+import { StatsStrip } from './components/StatsStrip';
 import {
   Plus,
   Settings,
@@ -64,6 +68,7 @@ import {
   Columns3,
   Filter,
   Zap,
+  Cloud,
 } from 'lucide-react';
 
 function resolveViewTitle(
@@ -106,6 +111,9 @@ function navBtn(active: boolean) {
 }
 
 const EMPTY_SAVED_FILTERS: SavedFilter[] = [];
+const EMPTY_TASKS: Task[] = [];
+const EMPTY_LISTS: TaskList[] = [];
+const EMPTY_FOLDERS: Folder[] = [];
 
 export function App() {
   const [activeView, setActiveView] = useState<AppView>('today');
@@ -158,12 +166,15 @@ export function App() {
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
-  const allTasks = useLiveQuery(() => db.tasks.toArray(), []) || [];
-  const allLists = useLiveQuery(() => db.lists.toArray(), []) || [];
-  const allFolders = useLiveQuery(() => db.folders.toArray(), []) || [];
+  const allTasks = useLiveQuery(() => db.tasks.toArray(), []) ?? EMPTY_TASKS;
+  const allLists = useLiveQuery(() => db.lists.toArray(), []) ?? EMPTY_LISTS;
+  const allFolders = useLiveQuery(() => db.folders.toArray(), []) ?? EMPTY_FOLDERS;
   const allSavedFilters = useLiveQuery(() => db.savedFilters.toArray(), []) ?? EMPTY_SAVED_FILTERS;
 
   useDueNotifications(allTasks);
+
+  const { status: syncStatus, syncNow } = useAutoSync();
+  const tempoStats = useMemo(() => computeTempoStats(allTasks), [allTasks]);
 
   const activeLists = [...allLists]
     .filter((l) => !l.deletedAt)
@@ -754,6 +765,8 @@ export function App() {
         ))}
       </div>
 
+      <StatsStrip stats={tempoStats} />
+
       <p className="px-3 pt-2 text-[10px] text-slate-600">
         Press <kbd className="px-1 rounded bg-slate-900 text-slate-400">?</kbd> for shortcuts
       </p>
@@ -780,11 +793,11 @@ export function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold text-slate-100 tracking-tight">Tempo</h1>
                 <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hidden sm:inline">
-                  Shell
+                  Sync
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 truncate hidden md:block">
-                Filters · board · capture · calendar
+                Silent Drive sync · reminders · install
               </p>
             </div>
           </div>
@@ -805,6 +818,28 @@ export function App() {
               title="Open detail pane"
             >
               <PanelRightOpen className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void syncNow(true)}
+              className={`p-2 border border-slate-800 rounded-xl ${
+                syncStatus.phase === 'syncing'
+                  ? 'text-indigo-400'
+                  : syncStatus.phase === 'error'
+                    ? 'text-rose-400'
+                    : syncStatus.phase === 'ok'
+                      ? 'text-emerald-400'
+                      : 'text-slate-400 hover:text-slate-200'
+              } hover:bg-slate-900`}
+              title={
+                syncStatus.lastError
+                  ? `Sync error: ${syncStatus.lastError}`
+                  : syncStatus.lastSyncedAt
+                    ? `Last sync ${new Date(syncStatus.lastSyncedAt).toLocaleString()} (click to sync)`
+                    : 'Sync with Google Drive'
+              }
+            >
+              <Cloud className={`w-4 h-4 ${syncStatus.phase === 'syncing' ? 'animate-pulse' : ''}`} />
             </button>
             <button
               onClick={() => setIsSettingsModalOpen(true)}
@@ -1160,7 +1195,10 @@ export function App() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
+        tasks={allTasks}
       />
+
+      <InstallPrompt />
 
       {showShortcutsHelp && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
