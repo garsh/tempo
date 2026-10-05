@@ -1,10 +1,21 @@
 import { useState } from 'react';
-import { db } from '../db/db';
+import { db, ensureInboxList } from '../db/db';
 import { loadGoogleScript, requestGoogleAccessToken } from '../sync/googleAuth';
-import { syncWithGoogleDrive } from '../sync/googleDrive';
-import type { PeriodicTask, SyncData } from '../types/task';
-import { mergeTasks } from '../domain/merge';
-import { X, Cloud, HardDrive, Download, Upload, CheckCircle2, AlertCircle, RefreshCw, Key, ExternalLink } from 'lucide-react';
+import { SYNC_VERSION, syncWithGoogleDrive } from '../sync/googleDrive';
+import type { SyncData, Task, TaskList } from '../types/task';
+import { mergeLists, mergeTasks } from '../domain/merge';
+import {
+  X,
+  Cloud,
+  HardDrive,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Key,
+  ExternalLink,
+} from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -17,7 +28,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     return localStorage.getItem('tempo_google_client_id') || '';
   });
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(
+    null
+  );
   const [lastSynced, setLastSynced] = useState<string | null>(() => {
     const saved = localStorage.getItem('tempo_last_synced_at');
     return saved ? new Date(parseInt(saved)).toLocaleString() : null;
@@ -52,7 +65,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         setLastSynced(timeStr);
         setSyncStatus({
           type: 'success',
-          message: `Synced ${result.tasksCount} routines with Google Drive!`,
+          message: `Synced ${result.tasksCount} tasks and ${result.listsCount} lists with Google Drive!`,
         });
         if (onSyncComplete) onSyncComplete();
       }
@@ -68,11 +81,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   };
 
   const handleExportJson = async () => {
+    await ensureInboxList();
     const tasks = await db.tasks.toArray();
+    const lists = await db.lists.toArray();
     const data: SyncData = {
-      version: 1,
+      version: SYNC_VERSION,
       exportedAt: Date.now(),
       tasks,
+      lists,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -91,20 +107,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     reader.onload = async (event) => {
       try {
         const content = event.target?.result as string;
-        const parsed = JSON.parse(content) as SyncData | PeriodicTask[];
-        const incomingTasks = Array.isArray(parsed) ? parsed : parsed.tasks;
+        const parsed = JSON.parse(content) as SyncData | Task[];
+        const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
+        const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
 
         if (!Array.isArray(incomingTasks)) {
           throw new Error('Invalid format: tasks array missing.');
         }
 
-        const local = await db.tasks.toArray();
-        const merged = mergeTasks(local, incomingTasks);
-        await db.tasks.bulkPut(merged);
+        const localTasks = await db.tasks.toArray();
+        const localLists = await db.lists.toArray();
+        const mergedTasks = mergeTasks(localTasks, incomingTasks);
+        const mergedLists = mergeLists(localLists, incomingLists);
+
+        await db.transaction('rw', db.tasks, db.lists, async () => {
+          await db.tasks.bulkPut(mergedTasks);
+          if (mergedLists.length > 0) {
+            await db.lists.bulkPut(mergedLists);
+          }
+        });
+        await ensureInboxList();
 
         setSyncStatus({
           type: 'success',
-          message: `Successfully imported and merged ${incomingTasks.length} tasks!`,
+          message: `Imported ${incomingTasks.length} tasks and ${incomingLists.length} lists!`,
         });
         if (onSyncComplete) onSyncComplete();
       } catch (err) {
@@ -136,7 +162,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           </button>
         </div>
 
-        {/* Sync Status Banner */}
         {syncStatus && (
           <div
             className={`mt-4 p-3 rounded-2xl flex items-center gap-2.5 text-xs ${
@@ -155,7 +180,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         )}
 
         <div className="mt-5 space-y-6">
-          {/* Section 1: Google Drive Sync */}
           <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
@@ -168,9 +192,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Syncs routines directly to your private Google Drive hidden application folder (
-              <code className="text-indigo-300 bg-indigo-950/40 px-1 py-0.5 rounded">drive.appdata</code>).
-              Your data stays 100% yours.
+              Syncs tasks and lists to your private Google Drive hidden application folder (
+              <code className="text-indigo-300 bg-indigo-950/40 px-1 py-0.5 rounded">drive.appdata</code>
+              ).
             </p>
 
             <div>
@@ -216,24 +240,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                   How do I get a Google Client ID? (2 min setup)
                 </summary>
                 <div className="mt-2 space-y-1.5 pl-2 text-slate-400 border-l border-slate-800">
-                  <p>1. Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" className="text-indigo-400 underline inline-flex items-center gap-0.5">Google Cloud Console <ExternalLink className="w-2.5 h-2.5" /></a> and create a project.</p>
-                  <p>2. Enable the <strong>Google Drive API</strong>.</p>
-                  <p>3. In <strong>Credentials</strong>, create an <strong>OAuth Client ID</strong> for a <em>Web Application</em>.</p>
-                  <p>4. Add your app's origin URL (e.g. <code className="text-slate-300">http://localhost:5173</code>) to <strong>Authorized JavaScript Origins</strong>.</p>
+                  <p>
+                    1. Go to{' '}
+                    <a
+                      href="https://console.cloud.google.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-400 underline inline-flex items-center gap-0.5"
+                    >
+                      Google Cloud Console <ExternalLink className="w-2.5 h-2.5" />
+                    </a>{' '}
+                    and create a project.
+                  </p>
+                  <p>
+                    2. Enable the <strong>Google Drive API</strong>.
+                  </p>
+                  <p>
+                    3. In <strong>Credentials</strong>, create an <strong>OAuth Client ID</strong> for
+                    a <em>Web Application</em>.
+                  </p>
+                  <p>
+                    4. Add your app&apos;s origin URL (e.g.{' '}
+                    <code className="text-slate-300">http://localhost:5180</code>) to{' '}
+                    <strong>Authorized JavaScript Origins</strong>.
+                  </p>
                   <p>5. Paste the Client ID above and click Sign In.</p>
                 </div>
               </details>
             </div>
           </div>
 
-          {/* Section 2: Local & File Backup */}
           <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
               <HardDrive className="w-3.5 h-3.5" />
               Offline File Backup & Restore
             </span>
             <p className="text-xs text-slate-400">
-              Export your data as a portable JSON file, or restore from a previous backup without logging in.
+              Export tasks and lists as JSON, or restore from a previous backup.
             </p>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">

@@ -86,11 +86,11 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 0 — Model reset (foundation)
 
-- [ ] Replace `PeriodicTask` (required recurrence) with general **Task** + optional `recurrence`
-- [ ] **Lists** model: built-in **Inbox** + user-created lists
-- [ ] Update Dexie schema, repositories, seed data, merge/sync payload shape
-- [ ] CRUD UI: create one-off *or* recurring tasks; assign to Inbox or a list
-- [ ] No backward-compat migration required (app not in use)
+- [x] Replace `PeriodicTask` (required recurrence) with general **Task** + optional `recurrence`
+- [x] **Lists** model: built-in **Inbox** + user-created lists
+- [x] Update Dexie schema, repositories, seed data, merge/sync payload shape
+- [x] CRUD UI: create one-off *or* recurring tasks; assign to Inbox or a list
+- [x] No backward-compat migration required (app not in use)
 
 *Done when:* one-off and recurring tasks both work; nothing forces recurrence.
 

@@ -1,40 +1,42 @@
-import type { PeriodicTask } from '../types/task';
+import type { Task, TaskList } from '../types/task';
+
+type Mergeable = {
+  id: string;
+  updatedAt: number;
+  deletedAt?: number | null;
+};
 
 /**
- * Merges local and remote tasks using Item-Level Last-Write-Wins (LWW)
- * and Set Union for completion histories.
+ * Generic item-level LWW merge for entities that share id / updatedAt / deletedAt.
+ * Optional `mergeExtras` lets callers union fields (e.g. completionHistory) after LWW.
  */
-export function mergeTasks(
-  localTasks: PeriodicTask[],
-  remoteTasks: PeriodicTask[]
-): PeriodicTask[] {
-  const mergedMap = new Map<string, PeriodicTask>();
-
-  const remoteMap = new Map<string, PeriodicTask>();
-  for (const remote of remoteTasks) {
+function mergeEntities<T extends Mergeable>(
+  localItems: T[],
+  remoteItems: T[],
+  mergeExtras?: (local: T, remote: T, winner: T) => T
+): T[] {
+  const mergedMap = new Map<string, T>();
+  const remoteMap = new Map<string, T>();
+  for (const remote of remoteItems) {
     remoteMap.set(remote.id, remote);
   }
 
   const localIds = new Set<string>();
 
-  // Process all local tasks
-  for (const local of localTasks) {
+  for (const local of localItems) {
     localIds.add(local.id);
     const remote = remoteMap.get(local.id);
 
     if (!remote) {
-      // Exists only locally
       mergedMap.set(local.id, { ...local });
       continue;
     }
 
-    // Exists in both: resolve conflicts
-    const merged = resolveTaskConflict(local, remote);
+    const merged = resolveConflict(local, remote, mergeExtras);
     mergedMap.set(local.id, merged);
   }
 
-  // Process tasks that only exist in remote
-  for (const remote of remoteTasks) {
+  for (const remote of remoteItems) {
     if (!localIds.has(remote.id)) {
       mergedMap.set(remote.id, { ...remote });
     }
@@ -43,60 +45,85 @@ export function mergeTasks(
   return Array.from(mergedMap.values());
 }
 
-/**
- * Resolves conflict between a local and remote representation of the exact same task
- */
-export function resolveTaskConflict(
-  local: PeriodicTask,
-  remote: PeriodicTask
-): PeriodicTask {
-  // 1. Merge completion history (Set Union)
-  const allCompletions = Array.from(
-    new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])
-  ).sort((a, b) => a - b);
-
-  // 2. Handle deletion tombstones
+function resolveConflict<T extends Mergeable>(
+  local: T,
+  remote: T,
+  mergeExtras?: (local: T, remote: T, winner: T) => T
+): T {
   const localDeleted = !!local.deletedAt;
   const remoteDeleted = !!remote.deletedAt;
 
+  let base: T;
+
   if (localDeleted || remoteDeleted) {
-    // If both are deleted, take the later deletion
     if (localDeleted && remoteDeleted) {
       const winner = local.deletedAt! >= remote.deletedAt! ? local : remote;
-      return {
+      base = {
         ...winner,
-        completionHistory: allCompletions,
         updatedAt: Math.max(local.updatedAt, remote.updatedAt),
-      };
-    }
-
-    // One is deleted, one is not
-    const deletedTask = localDeleted ? local : remote;
-    const activeTask = localDeleted ? remote : local;
-
-    // If the active task was updated AFTER the deletion occurred, revive it!
-    // Otherwise, the deletion tombstone wins.
-    if (activeTask.updatedAt > deletedTask.deletedAt!) {
-      return {
-        ...activeTask,
-        deletedAt: null,
-        completionHistory: allCompletions,
       };
     } else {
-      return {
-        ...deletedTask,
-        completionHistory: allCompletions,
-        updatedAt: Math.max(local.updatedAt, remote.updatedAt),
-      };
+      const deletedItem = localDeleted ? local : remote;
+      const activeItem = localDeleted ? remote : local;
+
+      if (activeItem.updatedAt > deletedItem.deletedAt!) {
+        base = {
+          ...activeItem,
+          deletedAt: null,
+        };
+      } else {
+        base = {
+          ...deletedItem,
+          updatedAt: Math.max(local.updatedAt, remote.updatedAt),
+        };
+      }
     }
+  } else {
+    const winner = local.updatedAt >= remote.updatedAt ? local : remote;
+    base = {
+      ...winner,
+      updatedAt: Math.max(local.updatedAt, remote.updatedAt),
+    };
   }
 
-  // 3. Both are active: Last-Write-Wins based on updatedAt
-  const winner = local.updatedAt >= remote.updatedAt ? local : remote;
+  return mergeExtras ? mergeExtras(local, remote, base) : base;
+}
 
-  return {
-    ...winner,
-    completionHistory: allCompletions,
-    updatedAt: Math.max(local.updatedAt, remote.updatedAt),
-  };
+/**
+ * Merges local and remote tasks using Item-Level LWW + Set Union for completionHistory.
+ */
+export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
+  return mergeEntities(localTasks, remoteTasks, (local, remote, winner) => {
+    const allCompletions = Array.from(
+      new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])
+    ).sort((a, b) => a - b);
+
+    return {
+      ...winner,
+      completionHistory: allCompletions,
+    };
+  });
+}
+
+/**
+ * Resolves conflict between a local and remote representation of the exact same task.
+ * Exported for unit tests.
+ */
+export function resolveTaskConflict(local: Task, remote: Task): Task {
+  return mergeTasks([local], [remote])[0];
+}
+
+/**
+ * Merges local and remote lists using Item-Level LWW.
+ */
+export function mergeLists(localLists: TaskList[], remoteLists: TaskList[]): TaskList[] {
+  return mergeEntities(localLists, remoteLists);
+}
+
+/**
+ * Resolves conflict between a local and remote list.
+ * Exported for unit tests.
+ */
+export function resolveListConflict(local: TaskList, remote: TaskList): TaskList {
+  return mergeLists([local], [remote])[0];
 }

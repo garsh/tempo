@@ -1,23 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { mergeTasks, resolveTaskConflict } from '../merge';
-import type { PeriodicTask } from '../../types/task';
+import { mergeLists, mergeTasks, resolveListConflict, resolveTaskConflict } from '../merge';
+import type { Task, TaskList } from '../../types/task';
+import { INBOX_LIST_ID } from '../../types/task';
 
 describe('Merge & Conflict Resolution Engine', () => {
-  const baseTask: PeriodicTask = {
+  const baseTask: Task = {
     id: 'task-1',
     title: 'Water Fern',
-    recurrenceType: 'after_completion',
-    intervalValue: 3,
-    intervalUnit: 'days',
-    dueDate: '2026-09-25',
+    listId: INBOX_LIST_ID,
+    dueAt: '2026-09-25',
+    recurrence: {
+      type: 'after_completion',
+      intervalValue: 3,
+      intervalUnit: 'days',
+    },
     createdAt: 1000,
     updatedAt: 1000,
     completionHistory: [500],
   };
 
+  const baseList: TaskList = {
+    id: 'list-1',
+    name: 'Home',
+    sortOrder: 1,
+    createdAt: 1000,
+    updatedAt: 1000,
+  };
+
   it('keeps local-only and adds remote-only tasks', () => {
-    const localTask: PeriodicTask = { ...baseTask, id: 'local-only' };
-    const remoteTask: PeriodicTask = { ...baseTask, id: 'remote-only' };
+    const localTask: Task = { ...baseTask, id: 'local-only' };
+    const remoteTask: Task = { ...baseTask, id: 'remote-only' };
 
     const merged = mergeTasks([localTask], [remoteTask]);
     expect(merged.length).toBe(2);
@@ -26,15 +38,15 @@ describe('Merge & Conflict Resolution Engine', () => {
   });
 
   it('resolves metadata conflicts using Last-Write-Wins (LWW)', () => {
-    const local: PeriodicTask = {
+    const local: Task = {
       ...baseTask,
       title: 'Water Fern in Living Room',
-      updatedAt: 2000, // Newer
+      updatedAt: 2000,
     };
-    const remote: PeriodicTask = {
+    const remote: Task = {
       ...baseTask,
       title: 'Water Small Fern',
-      updatedAt: 1500, // Older
+      updatedAt: 1500,
     };
 
     const resolved = resolveTaskConflict(local, remote);
@@ -43,14 +55,12 @@ describe('Merge & Conflict Resolution Engine', () => {
   });
 
   it('unions completion history when tasks are checked off across devices', () => {
-    // Phone completed at 1500
-    const phoneVersion: PeriodicTask = {
+    const phoneVersion: Task = {
       ...baseTask,
       completionHistory: [500, 1500],
       updatedAt: 1500,
     };
-    // Laptop completed at 2500
-    const laptopVersion: PeriodicTask = {
+    const laptopVersion: Task = {
       ...baseTask,
       completionHistory: [500, 2500],
       updatedAt: 2500,
@@ -61,11 +71,11 @@ describe('Merge & Conflict Resolution Engine', () => {
   });
 
   it('respects soft-delete tombstones', () => {
-    const activeLocal: PeriodicTask = {
+    const activeLocal: Task = {
       ...baseTask,
       updatedAt: 1000,
     };
-    const deletedRemote: PeriodicTask = {
+    const deletedRemote: Task = {
       ...baseTask,
       deletedAt: 1800,
       updatedAt: 1800,
@@ -76,20 +86,55 @@ describe('Merge & Conflict Resolution Engine', () => {
   });
 
   it('resurrects a task if an update occurred after a deletion', () => {
-    const deletedRemote: PeriodicTask = {
+    const deletedRemote: Task = {
       ...baseTask,
       deletedAt: 1500,
       updatedAt: 1500,
     };
-    const updatedLocal: PeriodicTask = {
+    const updatedLocal: Task = {
       ...baseTask,
       title: 'Resurrected Task',
       deletedAt: null,
-      updatedAt: 2000, // updated after deletion
+      updatedAt: 2000,
     };
 
     const resolved = resolveTaskConflict(updatedLocal, deletedRemote);
     expect(resolved.deletedAt).toBeNull();
     expect(resolved.title).toBe('Resurrected Task');
+  });
+
+  it('merges one-off and recurring fields via LWW', () => {
+    const local: Task = {
+      ...baseTask,
+      recurrence: null,
+      listId: 'list-work',
+      updatedAt: 3000,
+    };
+    const remote: Task = {
+      ...baseTask,
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 1,
+        intervalUnit: 'weeks',
+      },
+      listId: INBOX_LIST_ID,
+      updatedAt: 2000,
+    };
+
+    const resolved = resolveTaskConflict(local, remote);
+    expect(resolved.recurrence).toBeNull();
+    expect(resolved.listId).toBe('list-work');
+  });
+
+  it('merges lists with LWW and soft-delete rules', () => {
+    const localOnly: TaskList = { ...baseList, id: 'local-list' };
+    const remoteOnly: TaskList = { ...baseList, id: 'remote-list', name: 'Work' };
+    const merged = mergeLists([localOnly], [remoteOnly]);
+    expect(merged.length).toBe(2);
+
+    const local: TaskList = { ...baseList, name: 'Home Renamed', updatedAt: 2000 };
+    const remote: TaskList = { ...baseList, name: 'Home Old', updatedAt: 1000 };
+    const resolved = resolveListConflict(local, remote);
+    expect(resolved.name).toBe('Home Renamed');
   });
 });
