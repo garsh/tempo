@@ -1,4 +1,4 @@
-import type { IntervalUnit, PeriodicTask, RecurrenceType, TaskUrgency } from '../types/task';
+import type { IntervalUnit, RecurrenceRule, RecurrenceType, Task, TaskUrgency } from '../types/task';
 
 /**
  * Format a Date to YYYY-MM-DD in local time
@@ -33,36 +33,43 @@ export function addInterval(baseDate: Date, value: number, unit: IntervalUnit): 
   return result;
 }
 
+export type NextDueInput = {
+  recurrence: RecurrenceRule;
+  dueAt?: string | null;
+};
+
 /**
- * Calculate the next due date when a task is completed.
+ * Calculate the next due date when a recurring task is completed.
  *
- * - 'after_completion': The next due date is calculated strictly relative to the completion date.
- * - 'fixed_interval': The cadence remains locked to the schedule. If completed, advances from the existing due date.
- *                     If heavily overdue, catches up to the earliest future or today's date.
+ * - 'after_completion': next due = completion + interval
+ * - 'fixed_interval': cadence locked to schedule; catches up if heavily overdue
  */
 export function calculateNextDueDate(
-  task: Pick<PeriodicTask, 'recurrenceType' | 'intervalValue' | 'intervalUnit' | 'dueDate'>,
+  task: NextDueInput,
   completionDate: Date = new Date()
 ): string {
+  const { recurrence } = task;
   const normalizedCompletionDate = new Date(
     completionDate.getFullYear(),
     completionDate.getMonth(),
     completionDate.getDate()
   );
 
-  if (task.recurrenceType === 'after_completion') {
-    const nextDate = addInterval(normalizedCompletionDate, task.intervalValue, task.intervalUnit);
+  if (recurrence.type === 'after_completion') {
+    const nextDate = addInterval(
+      normalizedCompletionDate,
+      recurrence.intervalValue,
+      recurrence.intervalUnit
+    );
     return formatDate(nextDate);
   }
 
-  // fixed_interval
-  let currentDue = parseDate(task.dueDate);
-  let nextDue = addInterval(currentDue, task.intervalValue, task.intervalUnit);
+  // fixed_interval — fall back to completion date if no dueAt set
+  const dueBase = task.dueAt ? parseDate(task.dueAt) : normalizedCompletionDate;
+  let nextDue = addInterval(dueBase, recurrence.intervalValue, recurrence.intervalUnit);
 
-  // If the task was very overdue and nextDue is still before or equal to completionDate,
-  // advance until it lands in the future relative to completion.
   while (nextDue <= normalizedCompletionDate) {
-    nextDue = addInterval(nextDue, task.intervalValue, task.intervalUnit);
+    nextDue = addInterval(nextDue, recurrence.intervalValue, recurrence.intervalUnit);
   }
 
   return formatDate(nextDue);
@@ -87,9 +94,14 @@ export function getDaysDifference(dueDateStr: string, referenceDate: Date = new 
 }
 
 /**
- * Get urgency category for a task
+ * Get urgency category for a task with an optional due date.
+ * Tasks without dueAt return 'none'.
  */
-export function getTaskUrgency(dueDateStr: string, referenceDate: Date = new Date()): TaskUrgency {
+export function getTaskUrgency(
+  dueDateStr: string | null | undefined,
+  referenceDate: Date = new Date()
+): TaskUrgency {
+  if (!dueDateStr) return 'none';
   const diff = getDaysDifference(dueDateStr, referenceDate);
   if (diff < 0) return 'overdue';
   if (diff === 0) return 'due_today';
@@ -98,22 +110,45 @@ export function getTaskUrgency(dueDateStr: string, referenceDate: Date = new Dat
 }
 
 /**
- * Human-readable recurrence label
+ * Human-readable recurrence label from a RecurrenceRule
  */
 export function formatRecurrenceLabel(
-  recurrenceType: RecurrenceType,
-  intervalValue: number,
-  intervalUnit: IntervalUnit
+  recurrenceType: RecurrenceType | RecurrenceRule,
+  intervalValue?: number,
+  intervalUnit?: IntervalUnit
 ): string {
-  const unitSingular = intervalUnit.replace(/s$/, '');
-  const unitText = intervalValue === 1 ? unitSingular : intervalUnit;
+  let type: RecurrenceType;
+  let value: number;
+  let unit: IntervalUnit;
 
-  if (recurrenceType === 'after_completion') {
-    return intervalValue === 1
-      ? `1 ${unitSingular} after completion`
-      : `${intervalValue} ${unitText} after completion`;
+  if (typeof recurrenceType === 'object' && recurrenceType !== null) {
+    type = recurrenceType.type;
+    value = recurrenceType.intervalValue;
+    unit = recurrenceType.intervalUnit;
+  } else {
+    type = recurrenceType;
+    value = intervalValue ?? 1;
+    unit = intervalUnit ?? 'days';
   }
 
-  // fixed_interval
-  return intervalValue === 1 ? `Every ${unitSingular}` : `Every ${intervalValue} ${unitText}`;
+  const unitSingular = unit.replace(/s$/, '');
+  const unitText = value === 1 ? unitSingular : unit;
+
+  if (type === 'after_completion') {
+    return value === 1
+      ? `1 ${unitSingular} after completion`
+      : `${value} ${unitText} after completion`;
+  }
+
+  return value === 1 ? `Every ${unitSingular}` : `Every ${value} ${unitText}`;
+}
+
+/** True when the task has an active recurrence rule. */
+export function isRecurring(task: Pick<Task, 'recurrence'>): boolean {
+  return !!task.recurrence;
+}
+
+/** True when a one-off task has been completed (or a recurring one marked done this cycle — we use completedAt only for one-offs). */
+export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boolean {
+  return !task.recurrence && !!task.completedAt;
 }

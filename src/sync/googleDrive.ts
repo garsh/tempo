@@ -1,14 +1,18 @@
-import { db } from '../db/db';
-import { mergeTasks } from '../domain/merge';
-import type { PeriodicTask, SyncData } from '../types/task';
+import { db, ensureInboxList } from '../db/db';
+import { mergeLists, mergeTasks } from '../domain/merge';
+import type { SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 
+/** Sync payload version for Task + lists model (Phase 0). */
+export const SYNC_VERSION = 2;
+
 export interface DriveSyncResult {
   success: boolean;
   tasksCount: number;
+  listsCount: number;
   syncedAt: number;
   error?: string;
 }
@@ -34,7 +38,6 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
     return searchData.files[0].id;
   }
 
-  // Create file in appDataFolder
   const createRes = await fetch(`${DRIVE_API_URL}/files`, {
     method: 'POST',
     headers: {
@@ -117,33 +120,43 @@ export async function uploadDriveBackup(
 }
 
 /**
- * High-level Sync function: Fetch remote -> Merge with local -> Save locally -> Upload remote
+ * High-level Sync: Fetch remote -> Merge tasks & lists -> Save locally -> Upload remote
  */
 export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyncResult> {
+  await ensureInboxList();
+
   const fileId = await getOrCreateAppDataFile(accessToken);
   const { data: remoteData, etag } = await downloadDriveBackup(fileId, accessToken);
 
   const localTasks = await db.tasks.toArray();
-  const remoteTasks: PeriodicTask[] = remoteData?.tasks || [];
+  const localLists = await db.lists.toArray();
+  const remoteTasks: Task[] = remoteData?.tasks || [];
+  const remoteLists: TaskList[] = remoteData?.lists || [];
 
-  const merged = mergeTasks(localTasks, remoteTasks);
+  const mergedTasks = mergeTasks(localTasks, remoteTasks);
+  const mergedLists = mergeLists(localLists, remoteLists);
 
-  // Write merged tasks to IndexedDB
-  await db.tasks.bulkPut(merged);
+  await db.transaction('rw', db.tasks, db.lists, async () => {
+    await db.tasks.bulkPut(mergedTasks);
+    await db.lists.bulkPut(mergedLists);
+  });
+
+  await ensureInboxList();
 
   const now = Date.now();
   const syncPayload: SyncData = {
-    version: 1,
+    version: SYNC_VERSION,
     exportedAt: now,
-    tasks: merged,
+    tasks: mergedTasks,
+    lists: await db.lists.toArray(),
   };
 
-  // Upload back to Drive
   await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
 
   return {
     success: true,
-    tasksCount: merged.length,
+    tasksCount: mergedTasks.length,
+    listsCount: syncPayload.lists.length,
     syncedAt: now,
   };
 }

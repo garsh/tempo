@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { completeTask, db, saveTask, seedInitialTasksIfEmpty, softDeleteTask } from './db/db';
-import type { PeriodicTask } from './types/task';
-import { getTaskUrgency } from './domain/recurrence';
+import {
+  completeTask,
+  db,
+  saveList,
+  saveTask,
+  seedInitialTasksIfEmpty,
+  softDeleteList,
+  softDeleteTask,
+} from './db/db';
+import type { Task, TaskInput, TaskList } from './types/task';
+import { INBOX_LIST_ID } from './types/task';
+import { getTaskUrgency, isCompleted } from './domain/recurrence';
 import { TaskCard } from './components/TaskCard';
 import { TaskModal } from './components/TaskModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -14,53 +23,77 @@ import {
   Layers,
   Search,
   CheckCircle2,
+  Inbox,
+  List as ListIcon,
+  Trash2,
 } from 'lucide-react';
 
-type TabView = 'due' | 'upcoming' | 'all';
+type TabView = 'due' | 'upcoming' | 'all' | 'completed';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<TabView>('due');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState<string | 'all'>('all');
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<PeriodicTask | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [newListName, setNewListName] = useState('');
+  const [showNewListInput, setShowNewListInput] = useState(false);
 
-  // Seed sample data on first run
   useEffect(() => {
     seedInitialTasksIfEmpty();
   }, []);
 
-  // Live query from IndexedDB
   const allTasks = useLiveQuery(() => db.tasks.toArray(), []) || [];
+  const allLists = useLiveQuery(() => db.lists.toArray(), []) || [];
 
-  // Filter out soft-deleted tasks
+  const activeLists = allLists
+    .filter((l) => !l.deletedAt)
+    .sort((a, b) => {
+      if (a.id === INBOX_LIST_ID) return -1;
+      if (b.id === INBOX_LIST_ID) return 1;
+      return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name);
+    });
+
+  const listNameById = new Map(activeLists.map((l) => [l.id, l.name]));
+
   const activeTasks = allTasks.filter((t) => !t.deletedAt);
+  const openTasks = activeTasks.filter((t) => !isCompleted(t));
+  const completedOneOffs = activeTasks.filter((t) => isCompleted(t));
 
-  // Extract all unique tags
-  const allTags = Array.from(
-    new Set(activeTasks.flatMap((t) => t.tags || []))
-  ).filter(Boolean);
+  const allTags = Array.from(new Set(openTasks.flatMap((t) => t.tags || []))).filter(Boolean);
 
-  // Categorize tasks
-  const overdueTasks = activeTasks.filter((t) => getTaskUrgency(t.dueDate) === 'overdue');
-  const dueTodayTasks = activeTasks.filter((t) => getTaskUrgency(t.dueDate) === 'due_today');
-  const upcomingTasks = activeTasks.filter((t) => getTaskUrgency(t.dueDate) === 'upcoming');
-  const laterTasks = activeTasks.filter((t) => getTaskUrgency(t.dueDate) === 'later');
+  const filterByList = (tasks: Task[]) => {
+    if (selectedListId === 'all') return tasks;
+    return tasks.filter((t) => t.listId === selectedListId);
+  };
 
-  // Filter based on active tab and search query
+  const listScopedOpen = filterByList(openTasks);
+  const listScopedCompleted = filterByList(completedOneOffs);
+
+  const overdueTasks = listScopedOpen.filter((t) => getTaskUrgency(t.dueAt) === 'overdue');
+  const dueTodayTasks = listScopedOpen.filter((t) => getTaskUrgency(t.dueAt) === 'due_today');
+  const upcomingTasks = listScopedOpen.filter((t) => getTaskUrgency(t.dueAt) === 'upcoming');
+  const laterOrNoDue = listScopedOpen.filter((t) => {
+    const u = getTaskUrgency(t.dueAt);
+    return u === 'later' || u === 'none';
+  });
+
   const getDisplayedTasks = () => {
-    let list: PeriodicTask[] = [];
+    let list: Task[] = [];
 
     if (activeTab === 'due') {
-      // Overdue first, then due today
       list = [...overdueTasks, ...dueTodayTasks];
     } else if (activeTab === 'upcoming') {
-      list = [...upcomingTasks, ...laterTasks];
+      list = [...upcomingTasks, ...laterOrNoDue];
+    } else if (activeTab === 'completed') {
+      list = [...listScopedCompleted].sort(
+        (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)
+      );
     } else {
-      // All routines
-      list = [...overdueTasks, ...dueTodayTasks, ...upcomingTasks, ...laterTasks];
+      list = [...overdueTasks, ...dueTodayTasks, ...upcomingTasks, ...laterOrNoDue];
     }
 
     if (selectedTag) {
@@ -86,7 +119,7 @@ export function App() {
     await completeTask(id);
   };
 
-  const handleEdit = (task: PeriodicTask) => {
+  const handleEdit = (task: Task) => {
     setEditingTask(task);
     setIsTaskModalOpen(true);
   };
@@ -95,19 +128,34 @@ export function App() {
     await softDeleteTask(id);
   };
 
-  const handleSave = async (
-    taskData: Omit<PeriodicTask, 'id' | 'createdAt' | 'updatedAt' | 'completionHistory'> & { id?: string }
-  ) => {
+  const handleSave = async (taskData: TaskInput) => {
     await saveTask(taskData);
     setEditingTask(null);
   };
 
+  const handleCreateList = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newListName.trim();
+    if (!name) return;
+    const list = await saveList({ name });
+    setNewListName('');
+    setShowNewListInput(false);
+    setSelectedListId(list.id);
+  };
+
+  const handleDeleteList = async (list: TaskList) => {
+    if (list.id === INBOX_LIST_ID) return;
+    await softDeleteList(list.id);
+    if (selectedListId === list.id) setSelectedListId('all');
+  };
+
+  const defaultListForNew =
+    selectedListId === 'all' ? INBOX_LIST_ID : selectedListId;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Top Header */}
       <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3.5">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
-          {/* Logo & Brand */}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center shadow-lg shadow-indigo-600/30 text-white font-black text-xl">
               T
@@ -116,16 +164,15 @@ export function App() {
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-slate-100 tracking-tight">Tempo</h1>
                 <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Periodic
+                  Tasks
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
-                Recurring routines & maintenance tracker
+                One-off & recurring tasks · local-first
               </p>
             </div>
           </div>
 
-          {/* Header Action Buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsSettingsModalOpen(true)}
@@ -143,16 +190,94 @@ export function App() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs sm:text-sm transition-all shadow-md shadow-indigo-600/25 active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Routine</span>
+              <span className="hidden sm:inline">New Task</span>
               <span className="sm:hidden">New</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-8 py-6 space-y-6">
-        {/* Quick Stats / Overview Banner */}
+        {/* Lists row */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Lists
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowNewListInput((v) => !v)}
+              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              New list
+            </button>
+          </div>
+
+          {showNewListInput && (
+            <form onSubmit={handleCreateList} className="flex gap-2">
+              <input
+                type="text"
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                placeholder="List name"
+                autoFocus
+                className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl"
+              >
+                Add
+              </button>
+            </form>
+          )}
+
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+            <button
+              onClick={() => setSelectedListId('all')}
+              className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-colors inline-flex items-center gap-1 shrink-0 ${
+                selectedListId === 'all'
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                  : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-300'
+              }`}
+            >
+              <Layers className="w-3 h-3" />
+              All
+            </button>
+            {activeLists.map((list) => (
+              <div key={list.id} className="relative group/list shrink-0">
+                <button
+                  onClick={() => setSelectedListId(list.id)}
+                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-colors inline-flex items-center gap-1 ${
+                    selectedListId === list.id
+                      ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-300'
+                  }`}
+                >
+                  {list.id === INBOX_LIST_ID ? (
+                    <Inbox className="w-3 h-3" />
+                  ) : (
+                    <ListIcon className="w-3 h-3" />
+                  )}
+                  {list.name}
+                </button>
+                {list.id !== INBOX_LIST_ID && (
+                  <button
+                    type="button"
+                    title={`Delete ${list.name}`}
+                    onClick={() => handleDeleteList(list)}
+                    className="absolute -top-1 -right-1 hidden group-hover/list:flex w-4 h-4 items-center justify-center rounded-full bg-rose-900 text-rose-200 border border-rose-700"
+                  >
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Stats */}
         <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
           <div
             onClick={() => setActiveTab('due')}
@@ -164,9 +289,15 @@ export function App() {
           >
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
               <span className="font-medium">Overdue</span>
-              <Clock className={`w-3.5 h-3.5 ${overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-500'}`} />
+              <Clock
+                className={`w-3.5 h-3.5 ${overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-500'}`}
+              />
             </div>
-            <div className={`text-xl sm:text-2xl font-bold ${overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+            <div
+              className={`text-xl sm:text-2xl font-bold ${
+                overdueTasks.length > 0 ? 'text-rose-400' : 'text-slate-200'
+              }`}
+            >
               {overdueTasks.length}
             </div>
           </div>
@@ -181,9 +312,15 @@ export function App() {
           >
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
               <span className="font-medium">Due Today</span>
-              <CalendarCheck className={`w-3.5 h-3.5 ${dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-500'}`} />
+              <CalendarCheck
+                className={`w-3.5 h-3.5 ${dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}
+              />
             </div>
-            <div className={`text-xl sm:text-2xl font-bold ${dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-200'}`}>
+            <div
+              className={`text-xl sm:text-2xl font-bold ${
+                dueTodayTasks.length > 0 ? 'text-amber-400' : 'text-slate-200'
+              }`}
+            >
               {dueTodayTasks.length}
             </div>
           </div>
@@ -193,23 +330,22 @@ export function App() {
             className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-              <span className="font-medium">Total Routines</span>
+              <span className="font-medium">Open Tasks</span>
               <Layers className="w-3.5 h-3.5 text-indigo-400" />
             </div>
             <div className="text-xl sm:text-2xl font-bold text-slate-200">
-              {activeTasks.length}
+              {listScopedOpen.length}
             </div>
           </div>
         </div>
 
-        {/* View Tabs & Search */}
+        {/* Tabs & search */}
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            {/* View Switcher Tabs */}
-            <div className="flex p-1 bg-slate-900/90 border border-slate-800 rounded-2xl">
+            <div className="flex p-1 bg-slate-900/90 border border-slate-800 rounded-2xl overflow-x-auto">
               <button
                 onClick={() => setActiveTab('due')}
-                className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                   activeTab === 'due'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -217,9 +353,13 @@ export function App() {
               >
                 Due & Overdue
                 {overdueTasks.length + dueTodayTasks.length > 0 && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    activeTab === 'due' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-300'
-                  }`}>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                      activeTab === 'due'
+                        ? 'bg-indigo-800 text-indigo-100'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
                     {overdueTasks.length + dueTodayTasks.length}
                   </span>
                 )}
@@ -227,40 +367,54 @@ export function App() {
 
               <button
                 onClick={() => setActiveTab('upcoming')}
-                className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                   activeTab === 'upcoming'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Upcoming
-                {upcomingTasks.length > 0 && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    activeTab === 'upcoming' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-800 text-slate-300'
-                  }`}>
-                    {upcomingTasks.length}
-                  </span>
-                )}
               </button>
 
               <button
                 onClick={() => setActiveTab('all')}
-                className={`flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
                   activeTab === 'all'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                All Routines
+                All Open
+              </button>
+
+              <button
+                onClick={() => setActiveTab('completed')}
+                className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all whitespace-nowrap ${
+                  activeTab === 'completed'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Completed
+                {listScopedCompleted.length > 0 && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                      activeTab === 'completed'
+                        ? 'bg-indigo-800 text-indigo-100'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {listScopedCompleted.length}
+                  </span>
+                )}
               </button>
             </div>
 
-            {/* Search Input */}
             <div className="relative flex-1 sm:max-w-xs">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search routines or tags..."
+                placeholder="Search tasks or tags..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 bg-slate-900/90 border border-slate-800 rounded-2xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
@@ -268,7 +422,6 @@ export function App() {
             </div>
           </div>
 
-          {/* Tags Filter pills */}
           {allTags.length > 0 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
               <button
@@ -279,7 +432,7 @@ export function App() {
                     : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-300'
                 }`}
               >
-                All
+                All tags
               </button>
               {allTags.map((tag) => (
                 <button
@@ -298,7 +451,7 @@ export function App() {
           )}
         </div>
 
-        {/* Task List Section */}
+        {/* Task list */}
         <div className="space-y-3">
           {displayedTasks.length === 0 ? (
             <div className="py-16 text-center border border-dashed border-slate-800 rounded-3xl bg-slate-900/30">
@@ -306,12 +459,16 @@ export function App() {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <h3 className="text-base font-semibold text-slate-200">
-                {activeTab === 'due' ? 'All caught up!' : 'No routines found'}
+                {activeTab === 'due'
+                  ? 'All caught up!'
+                  : activeTab === 'completed'
+                    ? 'No completed tasks yet'
+                    : 'No tasks found'}
               </h3>
               <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
                 {activeTab === 'due'
-                  ? 'There are no overdue or pending tasks for today. Great rhythm!'
-                  : 'Create your first recurring periodic routine to get started.'}
+                  ? 'Nothing overdue or due today. Create a one-off or recurring task anytime.'
+                  : 'Create a one-off or recurring task and assign it to Inbox or a list.'}
               </p>
               <button
                 onClick={() => {
@@ -321,7 +478,7 @@ export function App() {
                 className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Add a Routine
+                Add a Task
               </button>
             </div>
           ) : (
@@ -330,6 +487,11 @@ export function App() {
                 <TaskCard
                   key={task.id}
                   task={task}
+                  listName={
+                    selectedListId === 'all'
+                      ? listNameById.get(task.listId)
+                      : undefined
+                  }
                   onComplete={handleComplete}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
@@ -340,7 +502,6 @@ export function App() {
         </div>
       </main>
 
-      {/* Modals */}
       <TaskModal
         isOpen={isTaskModalOpen}
         onClose={() => {
@@ -349,6 +510,8 @@ export function App() {
         }}
         onSave={handleSave}
         initialTask={editingTask}
+        lists={activeLists}
+        defaultListId={defaultListForNew}
       />
 
       <SettingsModal
