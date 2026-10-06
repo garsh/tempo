@@ -15,9 +15,9 @@ export function CalendarTodayTip({ onGoToday }: { onGoToday: () => void }) {
   };
 
   return (
-    <div data-tempo-cal-today-tip="1" className="absolute left-[8px] top-[42px] z-20" role="note">
+    <div data-tempo-cal-today-tip="1" className="absolute left-[12px] top-[40px] z-20" role="note">
       <div
-        className="absolute -top-[6px] left-[28px] w-0 h-0"
+        className="absolute -top-[6px] left-[22px] w-0 h-0"
         style={{
           borderLeft: '7px solid transparent',
           borderRight: '7px solid transparent',
@@ -25,14 +25,14 @@ export function CalendarTodayTip({ onGoToday }: { onGoToday: () => void }) {
         }}
         aria-hidden
       />
-      <div className="flex items-center gap-2 rounded-[10px] bg-[#444546] text-white pl-3.5 pr-2 py-2.5 shadow-lg">
+      <div className="flex items-center gap-2 rounded-[10px] bg-[#444546] text-white pl-3.5 pr-1.5 py-2 shadow-lg">
         <button
           type="button"
           onClick={() => {
             onGoToday();
             dismiss();
           }}
-          className="text-[14px] font-medium whitespace-nowrap"
+          className="text-[13px] font-medium whitespace-nowrap"
         >
           Tap to go today
         </button>

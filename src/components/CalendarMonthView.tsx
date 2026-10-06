@@ -159,10 +159,10 @@ export function CalendarMonthView({
                 onClick={() => onSelectDate(cell.dateStr)}
                 aria-label={cell.dateStr}
                 aria-current={isSelected ? 'date' : undefined}
-                className="flex flex-col items-center justify-center h-[48px] bg-transparent"
+                className="flex flex-col items-center justify-center h-[44px] bg-transparent"
               >
                 <span
-                  className={`inline-flex w-[32px] h-[32px] items-center justify-center text-[15px] font-medium rounded-full ${
+                  className={`inline-flex w-[30px] h-[30px] items-center justify-center text-[14px] font-medium rounded-full ${
                     isSelected
                       ? 'bg-tt-blue text-white'
                       : cell.inCurrentMonth
@@ -240,7 +240,7 @@ export function CalendarMonthView({
                 key={task.id}
                 type="button"
                 onClick={() => onSelectTask(task)}
-                className="w-full flex items-center gap-3 px-4 min-h-[48px] text-left hover:bg-tt-hover border-b border-tt-border/60"
+                className="w-full flex items-center gap-3 px-4 min-h-[44px] text-left hover:bg-tt-hover border-b border-tt-border/60"
               >
                 <span
                   role="checkbox"
