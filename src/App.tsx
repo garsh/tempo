@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
+  applyBatchOp,
   completeTask,
+  completeTasks,
   db,
   saveFolder,
   saveList,
@@ -27,6 +29,10 @@ import {
   openTasks,
 } from './domain/smartLists';
 import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorting';
+import { groupAndSortTasks, sortTasks } from './domain/groupSort';
+import { toggleSelected } from './domain/batch';
+import { usePrefs, type TabId } from './prefs/prefs';
+import { getStoredClientId } from './sync/googleAuth';
 import { tasksDueOnDate } from './domain/calendar';
 import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
@@ -34,7 +40,7 @@ import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
 import { TaskModal } from './components/TaskModal';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import { TaskDetailPane } from './components/TaskDetailPane';
 import { CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
@@ -53,7 +59,13 @@ import { PlanDaySheet } from './components/PlanDaySheet';
 import { dueAtMovedToToday } from './domain/planDay';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { QuickAddBar } from './components/shell/QuickAddBar';
-import { groupTasksForListView } from './domain/taskGroups';
+import { MobileDrawer } from './components/drawer/MobileDrawer';
+import { AddListSheet, ItemActionSheet, ManageSmartListsSheet } from './components/drawer/DrawerSheets';
+import { summarizeAccount } from './sync/accountSummary';
+import { OverflowMenu } from './components/menu/OverflowMenu';
+import { GroupSortSheet } from './components/menu/GroupSortSheet';
+import { SelectionBar, SelectionHeader } from './components/menu/SelectionBar';
+import { listDotColor } from './theme/listColors';
 import {
   Plus,
   Search,
@@ -61,6 +73,7 @@ import {
   Keyboard,
   X,
   MoreVertical,
+  ArrowLeft,
 } from 'lucide-react';
 
 function resolveViewTitle(
@@ -86,6 +99,7 @@ function viewTitle(view: AppView, lists: TaskList[]): string {
   if (view === 'calendar-agenda') return 'Agenda';
   if (view === 'board-status') return 'Board · Status';
   if (view === 'board-list') return 'Board · Lists';
+  if (view === 'search') return 'Search';
   if (view.startsWith('list:')) {
     const id = view.slice(5);
     return lists.find((l) => l.id === id)?.name ?? 'List';
@@ -131,6 +145,26 @@ export function App() {
   const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const [prefs, updatePrefs] = usePrefs();
+  const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
+  const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
+  const [isGroupSortOpen, setIsGroupSortOpen] = useState(false);
+  const [isManageListsOpen, setIsManageListsOpen] = useState(false);
+  const [isAddListOpen, setIsAddListOpen] = useState(false);
+  const [itemAction, setItemAction] = useState<
+    { kind: 'list'; list: TaskList } | { kind: 'folder'; folder: Folder } | null
+  >(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+  const openSettings = useCallback((page: SettingsPageId = 'root') => {
+    setSettingsPage(page);
+    setIsSettingsModalOpen(true);
+    setSidebarOpen(false);
+  }, []);
 
   useEffect(() => {
     void initDatabase();
@@ -159,7 +193,7 @@ export function App() {
 
   useDueNotifications(allTasks);
 
-  const { status: syncStatus, syncNow } = useAutoSync();
+  const { status: syncStatus, syncNow, refreshStatus: refreshSyncStatus } = useAutoSync();
   const activeLists = [...allLists]
     .filter((l) => !l.deletedAt)
     .sort((a, b) => {
@@ -186,6 +220,11 @@ export function App() {
   const tomorrowCount = filterTomorrow(activeTasks).length;
   const next7Count = filterNext7Days(activeTasks).length;
   const inboxCount = filterInbox(activeTasks).length;
+  /**
+   * TickTick new-install empty Inbox (mobile): title row + illustration + FAB + tabs only.
+   * Layout only — colors always come from the theme variables.
+   */
+  const emptyInbox = activeView === 'inbox' && inboxCount === 0;
 
   const allTags = Array.from(new Set(open.flatMap((t) => t.tags || []))).filter(Boolean);
 
@@ -214,6 +253,8 @@ export function App() {
       case 'board-status':
       case 'board-list':
         return open;
+      case 'search':
+        return activeTasks;
       default:
         if (activeView.startsWith('list:')) {
           return filterByListId(activeTasks, activeView.slice(5));
@@ -235,11 +276,12 @@ export function App() {
       return sortTasksForDailyView(list);
     }
 
+    if (activeView === 'search' && !searchQuery.trim()) return [];
     let list = baseForView.filter(
       (t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag)
     );
     if (activeView !== 'completed' && !isCalendar) {
-      list = sortTasksForDailyView(list);
+      list = sortTasks(list, prefs.sortBy);
     }
     if (activeView === 'calendar-agenda') {
       return sortTasksForDailyView(list);
@@ -253,6 +295,7 @@ export function App() {
     isCalendar,
     calSelectedDate,
     activeTasks,
+    prefs.sortBy,
   ]);
 
   const selectedTask =
@@ -392,9 +435,61 @@ export function App() {
   };
 
   const goView = useCallback((view: AppView) => {
-    setActiveView(view);
+    setActiveView((prev) => {
+      // Mobile has no search field outside the Search view — don't leave a hidden filter on.
+      if (prev === 'search' && view !== 'search') setSearchQuery('');
+      return view;
+    });
+    setSidebarOpen(false);
+    setOverflowAnchor(null);
+  }, []);
+
+  const openSearch = useCallback(() => {
+    setSearchQuery('');
+    setActiveView('search');
     setSidebarOpen(false);
   }, []);
+
+  const handleTab = (tab: TabId) => {
+    if (tab === 'tasks') goView(emptyInbox ? 'inbox' : 'today');
+    else if (tab === 'calendar') goView('calendar-month');
+    else if (tab === 'board') goView('board-status');
+    else if (tab === 'search') openSearch();
+    else openSettings('root');
+  };
+
+  const selectableIds = () => displayedTasks.map((t) => t.id);
+  const runBatch = async (fn: (ids: string[]) => Promise<unknown>) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    await fn(ids);
+    exitSelectMode();
+  };
+  const batchComplete = () =>
+    runBatch((ids) =>
+      completeTasks(ids.filter((id) => {
+        const t = activeTasks.find((x) => x.id === id);
+        return t && !isCompleted(t);
+      }))
+    );
+  const batchMove = (listId: string) => runBatch((ids) => applyBatchOp(ids, { type: 'move', listId }));
+  const batchSetDate = (date: string | null) => runBatch((ids) => applyBatchOp(ids, { type: 'setDate', date }));
+  const batchDelete = () =>
+    runBatch(async (ids) => {
+      await applyBatchOp(ids, { type: 'delete' });
+      if (selectedTaskId && ids.includes(selectedTaskId)) {
+        setSelectedTaskId(null);
+        setDetailOpenMobile(false);
+      }
+    });
+
+  const createListFromSheet = async (name: string, folderId: string | null) => {
+    const list = await saveList({ name, folderId });
+    goView(`list:${list.id}`);
+  };
+  const createFolderFromSheet = async (name: string) => {
+    await saveFolder({ name });
+  };
 
   useKeyboardShortcuts({
     onCapture: openCapture,
@@ -418,6 +513,10 @@ export function App() {
       }
       if (isSettingsModalOpen) {
         setIsSettingsModalOpen(false);
+        return;
+      }
+      if (selectMode) {
+        exitSelectMode();
         return;
       }
       if (detailOpenMobile) {
@@ -461,12 +560,16 @@ export function App() {
 
 
 
+  // Settings › General › Default list (falls back to Inbox if that list is gone).
+  const prefDefaultList = activeLists.some((l) => l.id === prefs.defaultListId)
+    ? prefs.defaultListId
+    : INBOX_LIST_ID;
   const defaultListForNew =
     activeView === 'inbox'
       ? INBOX_LIST_ID
       : activeView.startsWith('list:')
         ? activeView.slice(5)
-        : INBOX_LIST_ID;
+        : prefDefaultList;
 
   const showListNameOnCards =
     activeView === 'today' ||
@@ -475,15 +578,31 @@ export function App() {
     activeView === 'all' ||
     activeView === 'completed' ||
     isCalendar ||
+    activeView === 'search' ||
     activeView.startsWith('filter:');
 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const listColorIndex = new Map(userLists.map((l, i) => [l.id, i]));
+  const listColor = (id: string) =>
+    id === INBOX_LIST_ID ? 'var(--tt-smart-orange)' : listDotColor(listColorIndex.get(id) ?? 0);
+  // ⋮ › Group & Sort + Hide Completed
   const taskGroups = useMemo(() => {
     if (isCalendar || isBoard || activeView === 'completed') return [];
-    return groupTasksForListView(displayedTasks, {
-      includeCompleted: activeView === 'today' || activeView === 'all' || activeView.startsWith('list:'),
+    const completedCapable =
+      activeView === 'today' ||
+      activeView === 'all' ||
+      activeView === 'search' ||
+      activeView.startsWith('list:');
+    return groupAndSortTasks(displayedTasks, {
+      groupBy: prefs.groupBy,
+      sortBy: prefs.sortBy,
+      includeCompleted: completedCapable && !prefs.hideCompleted,
+      lists: activeLists,
+      listColor,
     });
-  }, [displayedTasks, isCalendar, isBoard, activeView]);
+    // listColor / activeLists derive from allLists each render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayedTasks, isCalendar, isBoard, activeView, prefs.groupBy, prefs.sortBy, prefs.hideCompleted, allLists]);
 
   const toggleGroup = (id: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -491,11 +610,7 @@ export function App() {
 
   const viewTitleText = resolveViewTitle(activeView, activeLists, activeSavedFilters);
 
-  /**
-   * TickTick new-install empty Inbox (mobile): title row + illustration + FAB + tabs only.
-   * Layout only — colors always come from the system theme (prefers-color-scheme).
-   */
-  const emptyInbox = activeView === 'inbox' && inboxCount === 0;
+
   /** TickTick empty Today: same bare chrome as empty Inbox, plus tip banner + lightbulb. */
   const emptyToday = activeView === 'today' && todayCount === 0;
   const emptyState = emptyInbox || emptyToday;
@@ -543,8 +658,16 @@ export function App() {
         setEditingFilter(f);
         setIsFilterModalOpen(true);
       }}
+      smartLists={prefs.smartLists}
+      onManageSmartLists={() => setIsManageListsOpen(true)}
     />
   );
+
+  const accountSummary = summarizeAccount(syncStatus.account, syncStatus, !!getStoredClientId());
+  const listLike = !isCalendar && !isBoard && activeView !== 'completed';
+  const showBoardMode = prefs.viewMode === 'board' && listLike && activeView !== 'search' && !emptyState;
+  const openOverflow = (e: React.MouseEvent<HTMLElement>) =>
+    setOverflowAnchor(e.currentTarget.getBoundingClientRect());
 
   const renderTaskRows = (tasks: Task[], dense: boolean) =>
     tasks.map((task) => (
@@ -555,6 +678,10 @@ export function App() {
         showListName={showListNameOnCards}
         selected={selectedTaskId === task.id}
         dense={dense}
+        showDetails={prefs.showDetails}
+        selectMode={selectMode}
+        checked={selectedIds.has(task.id)}
+        onToggleCheck={(id) => setSelectedIds((prev) => toggleSelected(prev, id))}
         onComplete={handleComplete}
         onSelect={selectTask}
         onEdit={handleEdit}
@@ -573,7 +700,7 @@ export function App() {
         onCalendar={() => goView('calendar-month')}
         onSearch={() => searchRef.current?.focus()}
         onSync={() => void syncNow(true)}
-        onSettings={() => setIsSettingsModalOpen(true)}
+        onSettings={() => openSettings('root')}
       />
 
       {/* Desktop sidebar */}
@@ -581,31 +708,44 @@ export function App() {
         {sidebar}
       </aside>
 
-      {/* Mobile drawer */}
-      {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="w-[280px] max-w-[85vw] bg-tt-sidebar shadow-2xl flex flex-col">
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-tt-border">
-              <div className="w-9 h-9 rounded-full bg-tt-blue text-white flex items-center justify-center font-bold">
-                T
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold">Tempo</div>
-                <div className="text-[11px] text-tt-secondary">Local-first tasks</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(false)}
-                className="p-1.5 text-tt-secondary hover:text-tt-text"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 min-h-0">{sidebar}</div>
-          </div>
-          <div className="flex-1 bg-black/40" onClick={() => setSidebarOpen(false)} />
-        </div>
-      )}
+      {/* Mobile drawer (TickTick navy) */}
+      <MobileDrawer
+        open={sidebarOpen}
+        activeView={activeView}
+        account={syncStatus.account}
+        summary={accountSummary}
+        smartLists={prefs.smartLists}
+        counts={{
+          today: todayCount,
+          tomorrow: tomorrowCount,
+          next7: next7Count,
+          inbox: inboxCount,
+          all: open.length,
+          completed: completedOneOffs.length,
+        }}
+        folders={activeFolders}
+        userLists={userLists}
+        filters={activeSavedFilters}
+        tags={allTags}
+        selectedTag={selectedTag}
+        onClose={() => setSidebarOpen(false)}
+        onGo={goView}
+        onSelectTag={(tag) => {
+          setSelectedTag(tag);
+          setSidebarOpen(false);
+        }}
+        onSearch={openSearch}
+        onSettings={() => openSettings('root')}
+        onAccount={() => openSettings('account')}
+        onAdd={() => setIsAddListOpen(true)}
+        onManage={() => setIsManageListsOpen(true)}
+        onListMenu={(list) => setItemAction({ kind: 'list', list })}
+        onFolderMenu={(folder) => setItemAction({ kind: 'folder', folder })}
+        onEditFilter={(f) => {
+          setEditingFilter(f);
+          setIsFilterModalOpen(true);
+        }}
+      />
 
       <div
         className="flex-1 flex flex-col min-w-0 min-h-0 bg-tt-bg xl:bg-tt-surface"
@@ -613,46 +753,99 @@ export function App() {
         data-tempo-empty-today-view={emptyToday ? '1' : '0'}
       >
         {/* Mobile top bar — TickTick: hamburger | title | (Today: lightbulb) | ⋮ */}
-        <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
-          <button
-            type="button"
-            className="w-11 h-11 flex items-center justify-center text-tt-text"
-            onClick={() => setSidebarOpen(true)}
-            title="Menu"
-            aria-label="Menu"
-          >
-            <Menu className="w-6 h-6" strokeWidth={1.75} />
-          </button>
-          <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
-            {viewTitleText}
-          </h1>
-          {activeView === 'today' && (
+        {selectMode ? (
+          <div className="xl:hidden shrink-0 bg-tt-bg">
+            <SelectionHeader
+              count={selectedIds.size}
+              total={displayedTasks.length}
+              onExit={exitSelectMode}
+              onSelectAll={() =>
+                setSelectedIds((prev) =>
+                  prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
+                )
+              }
+            />
+          </div>
+        ) : activeView === 'search' ? (
+          <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-3 h-16 bg-tt-bg text-tt-text">
             <button
               type="button"
               className="w-11 h-11 flex items-center justify-center text-tt-text"
-              onClick={() => setIsPlanDayOpen(true)}
-              title="Plan your day"
-              aria-label="Plan your day"
+              onClick={() => goView(emptyInbox ? 'inbox' : 'today')}
+              aria-label="Close search"
             >
-              <LightbulbIcon />
+              <ArrowLeft className="w-6 h-6" strokeWidth={1.9} />
             </button>
-          )}
-          <button
-            type="button"
-            className="w-11 h-11 flex items-center justify-center text-tt-text"
-            onClick={() => setShowShortcutsHelp(true)}
-            title="More"
-            aria-label="More"
-          >
-            <MoreVertical className="w-5 h-5" strokeWidth={2.25} />
-          </button>
-        </header>
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search tasks"
+                aria-label="Search tasks"
+                className="w-full h-10 pl-9 pr-3 rounded-xl bg-tt-input text-[15px] outline-none focus:ring-1 focus:ring-tt-blue placeholder:text-tt-muted"
+              />
+            </div>
+          </header>
+        ) : (
+          <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
+            <button
+              type="button"
+              className="w-11 h-11 flex items-center justify-center text-tt-text"
+              onClick={() => setSidebarOpen(true)}
+              title="Menu"
+              aria-label="Menu"
+            >
+              <Menu className="w-6 h-6" strokeWidth={1.75} />
+            </button>
+            <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
+              {viewTitleText}
+            </h1>
+            {activeView === 'today' && (
+              <button
+                type="button"
+                className="w-11 h-11 flex items-center justify-center text-tt-text"
+                onClick={() => setIsPlanDayOpen(true)}
+                title="Plan your day"
+                aria-label="Plan your day"
+              >
+                <LightbulbIcon />
+              </button>
+            )}
+            <button
+              type="button"
+              className="w-11 h-11 flex items-center justify-center text-tt-text"
+              onClick={openOverflow}
+              title="More"
+              aria-label="More"
+              aria-haspopup="menu"
+              aria-expanded={!!overflowAnchor}
+            >
+              <MoreVertical className="w-5 h-5" strokeWidth={2.25} />
+            </button>
+          </header>
+        )}
 
         <div className="flex-1 flex min-h-0">
           {/* Center pane */}
           <section className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
             {/* Desktop list header */}
-            <div className="hidden xl:flex shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2">
+            {selectMode && (
+              <div className="hidden xl:block shrink-0">
+                <SelectionHeader
+                  count={selectedIds.size}
+                  total={displayedTasks.length}
+                  onExit={exitSelectMode}
+                  onSelectAll={() =>
+                    setSelectedIds((prev) =>
+                      prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
+                    )
+                  }
+                />
+              </div>
+            )}
+            <div className={`hidden ${selectMode ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
               <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
               <div className="flex items-center gap-1">
                 {activeView === 'today' && (
@@ -678,17 +871,20 @@ export function App() {
                   type="button"
                   className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
                   title="More"
+                  aria-label="More options"
+                  aria-haspopup="menu"
+                  onClick={openOverflow}
                 >
                   <MoreVertical className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {activeView === 'today' && <TodayTipBanner />}
+            {activeView === 'today' && !selectMode && <TodayTipBanner />}
 
             {/* Search (desktop + when focused on mobile via tab) */}
             <div
-              className={`shrink-0 px-3 sm:px-5 pb-2 ${emptyState ? 'hidden xl:block' : ''}`}
+              className="shrink-0 px-3 sm:px-5 pb-2 hidden xl:block"
             >
               <div className="relative hidden xl:block mb-2">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
@@ -703,18 +899,6 @@ export function App() {
               {!isCalendar && !isBoard && activeView !== 'completed' && (
                 <div className="hidden xl:block">
                   <QuickAddBar onClick={openCapture} />
-                </div>
-              )}
-              {/* Mobile search field when on search from bottom bar — always available collapsed */}
-              {!emptyState && (
-                <div className="xl:hidden mb-1">
-                  <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search tasks"
-                    aria-label="Search tasks"
-                    className="w-full px-3 py-2 rounded-xl bg-tt-input text-sm outline-none focus:ring-1 focus:ring-tt-blue placeholder:text-tt-muted"
-                  />
                 </div>
               )}
             </div>
@@ -840,21 +1024,40 @@ export function App() {
                     renderTaskRows(displayedTasks, false)
                   )}
                 </div>
+              ) : showBoardMode ? (
+                <div className="px-3 sm:px-5 pt-1" data-testid="view-board-mode">
+                  <KanbanBoard
+                    tasks={displayedTasks}
+                    lists={activeLists}
+                    mode="status"
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={selectTask}
+                    onMoveToList={handleMoveToList}
+                  />
+                </div>
               ) : taskGroups.length === 0 ? (
-                <p className="text-sm text-tt-muted px-4 py-10 text-center">No tasks here — add one</p>
+                <p className="text-sm text-tt-muted px-4 py-10 text-center">
+                  {activeView === 'search'
+                    ? searchQuery.trim()
+                      ? 'No matching tasks'
+                      : 'Search titles, notes and tags'
+                    : 'No tasks here — add one'}
+                </p>
               ) : (
                 taskGroups.map((g) => {
                   const collapsed = !!collapsedGroups[g.id];
                   return (
                     <div key={g.id}>
-                      <TaskGroupHeader
-                        label={g.label}
-                        count={g.tasks.length}
-                        collapsed={collapsed}
-                        onToggle={() => toggleGroup(g.id)}
-                        tone={g.id === 'overdue' ? 'overdue' : 'default'}
-                      />
-                      {!collapsed && renderTaskRows(g.tasks, true)}
+                      {g.label && (
+                        <TaskGroupHeader
+                          label={g.label}
+                          count={g.tasks.length}
+                          collapsed={collapsed}
+                          onToggle={() => toggleGroup(g.id)}
+                          tone={g.id === 'overdue' ? 'overdue' : 'default'}
+                        />
+                      )}
+                      {(!collapsed || !g.label) && renderTaskRows(g.tasks, true)}
                     </div>
                   );
                 })
@@ -879,6 +1082,7 @@ export function App() {
         </div>
 
         {/* Mobile FAB */}
+        {!selectMode && (
         <button
           type="button"
           onClick={openCapture}
@@ -889,13 +1093,20 @@ export function App() {
         >
           <Plus className="w-7 h-7" strokeWidth={2.25} />
         </button>
+        )}
 
-        <MobileBottomBar
-          activeView={activeView}
-          onTasks={() => goView(emptyInbox ? 'inbox' : 'today')}
-          onCalendar={() => goView('calendar-month')}
-          onSettings={() => setIsSettingsModalOpen(true)}
-        />
+        {selectMode ? (
+          <SelectionBar
+            count={selectedIds.size}
+            lists={activeLists}
+            onComplete={() => void batchComplete()}
+            onMove={(id) => void batchMove(id)}
+            onSetDate={(d) => void batchSetDate(d)}
+            onDelete={() => void batchDelete()}
+          />
+        ) : (
+          <MobileBottomBar activeView={activeView} tabs={prefs.tabs} onTab={handleTab} />
+        )}
       </div>
 
       {/* Mobile detail drawer */}
@@ -961,10 +1172,80 @@ export function App() {
         onAddTask={openCapture}
       />
 
-      <SettingsModal
+      <SettingsPage
+        key={isSettingsModalOpen ? `open-${settingsPage}` : 'closed'}
         isOpen={isSettingsModalOpen}
+        initialPage={settingsPage}
         onClose={() => setIsSettingsModalOpen(false)}
         tasks={allTasks}
+        lists={activeLists}
+        syncStatus={syncStatus}
+        onSyncStatusChange={() => refreshSyncStatus()}
+        onShowShortcuts={() => setShowShortcutsHelp(true)}
+      />
+
+      <OverflowMenu
+        open={!!overflowAnchor}
+        anchor={overflowAnchor}
+        viewMode={prefs.viewMode}
+        showDetails={prefs.showDetails}
+        hideCompleted={prefs.hideCompleted}
+        onClose={() => setOverflowAnchor(null)}
+        onViewMode={(viewMode) => {
+          updatePrefs({ viewMode });
+          if (viewMode === 'board' && !listLike) goView('board-status');
+          if (viewMode === 'list' && isBoard) goView('today');
+        }}
+        onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
+        onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
+        onGroupSort={() => setIsGroupSortOpen(true)}
+        onSelect={() => {
+          setSelectedIds(new Set());
+          setSelectMode(true);
+        }}
+      />
+
+      <GroupSortSheet
+        open={isGroupSortOpen}
+        groupBy={prefs.groupBy}
+        sortBy={prefs.sortBy}
+        onChange={(patch) => updatePrefs(patch)}
+        onClose={() => setIsGroupSortOpen(false)}
+      />
+
+      <ManageSmartListsSheet
+        open={isManageListsOpen}
+        value={prefs.smartLists}
+        onChange={(smartLists) => updatePrefs({ smartLists })}
+        onClose={() => setIsManageListsOpen(false)}
+      />
+
+      <AddListSheet
+        open={isAddListOpen}
+        folders={activeFolders}
+        onClose={() => setIsAddListOpen(false)}
+        onCreateList={(name, folderId) => void createListFromSheet(name, folderId)}
+        onCreateFolder={(name) => void createFolderFromSheet(name)}
+        onNewFilter={() => {
+          setEditingFilter(null);
+          setIsFilterModalOpen(true);
+        }}
+      />
+
+      <ItemActionSheet
+        target={
+          itemAction
+            ? itemAction.kind === 'list'
+              ? { kind: 'list', name: itemAction.list.name }
+              : { kind: 'folder', name: itemAction.folder.name }
+            : null
+        }
+        onClose={() => setItemAction(null)}
+        onDelete={() => {
+          if (!itemAction) return;
+          if (itemAction.kind === 'list') void handleDeleteList(itemAction.list);
+          else void handleDeleteFolder(itemAction.folder);
+        }}
       />
 
       <InstallPrompt />
