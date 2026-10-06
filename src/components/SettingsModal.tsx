@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { db, ensureInboxList } from '../db/db';
+import { clearSampleTasks, db, ensureInboxList, isSampleId, loadSampleTasks } from '../db/db';
 import {
   getStoredClientId,
   setStoredClientId,
@@ -38,6 +38,8 @@ import {
   Bell,
   FileSpreadsheet,
   BarChart3,
+  Sparkles,
+  Trash2,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -65,6 +67,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
   const [notificationsOn, setNotificationsOn] = useState(() => isNotificationsEnabled());
   const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
+  const [sampleMsg, setSampleMsg] = useState<string | null>(null);
+  const hasSampleTasks = tasks.some((t) => isSampleId(t.id) && !t.deletedAt);
+
+  const handleLoadSamples = async () => {
+    const n = await loadSampleTasks();
+    setSampleMsg(`Loaded ${n} sample tasks.`);
+  };
+  const handleClearSamples = async () => {
+    const n = await clearSampleTasks();
+    setSampleMsg(n ? `Removed ${n} sample tasks.` : 'No sample tasks to remove.');
+  };
 
   if (!isOpen) return null;
 
@@ -473,6 +486,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3" data-tempo-sample-tasks="1">
+            <span className="text-xs font-bold uppercase tracking-wider text-tt-blue flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              Sample tasks
+            </span>
+            <p className="text-xs text-tt-secondary">
+              New installs start empty. Load a few demo lists and tasks to explore Tempo, and clear
+              them again when you&apos;re done (only sample items are removed).
+            </p>
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => void handleLoadSamples()}
+                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-blue hover:bg-tt-blue-hover text-white text-xs font-semibold rounded-xl transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Load sample tasks
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearSamples()}
+                disabled={!hasSampleTasks}
+                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-elevated hover:bg-tt-hover disabled:opacity-50 text-tt-text text-xs font-medium rounded-xl border border-tt-border transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-tt-overdue" />
+                Clear sample tasks
+              </button>
+            </div>
+            {sampleMsg && <p className="text-xs text-tt-secondary m-0">{sampleMsg}</p>}
           </div>
 
           <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">

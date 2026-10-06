@@ -36,6 +36,9 @@
   --tt-illus-tray-inner: #e7ebf5;
   --tt-illus-accent: #15224b;
   --tt-illus-plane-fold: #15224b;
+  --tt-illus-cloud: #ffffff;
+  /* paper-plane fold drawn over the sky blob (Today) */
+  --tt-illus-plane-fold-sky: #15224b;
 
   --tt-overdue: #e03131;
   --tt-pri-high: #e03131;
@@ -69,6 +72,8 @@
     --tt-illus-tray-inner: #cdcdcd;
     --tt-illus-accent: #606060;
     --tt-illus-plane-fold: #1c1c1e;
+    --tt-illus-cloud: #2a2a2c;
+    --tt-illus-plane-fold-sky: #22398a;
 
     --tt-pri-none: #5c5c60;
     --tt-shadow: rgb(0 0 0 / 0.6);
