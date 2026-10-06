@@ -4,6 +4,7 @@ import {
   loadGoogleScript,
 } from './googleAuth';
 import { syncWithGoogleDrive, type DriveSyncResult } from './googleDrive';
+import { fetchDriveAccount, getGoogleAccount, setGoogleAccount, type GoogleAccount } from './googleAccount';
 
 const LAST_SYNC_KEY = 'tempo_last_synced_at';
 const AUTO_SYNC_KEY = 'tempo_auto_sync_enabled';
@@ -19,6 +20,7 @@ export interface SyncStatusSnapshot {
   lastSyncedAt: number | null;
   lastError: string | null;
   autoSyncEnabled: boolean;
+  account: GoogleAccount | null;
 }
 
 export function isAutoSyncEnabled(): boolean {
@@ -59,7 +61,14 @@ export function readSyncStatusSnapshot(phase: SyncPhase = 'idle'): SyncStatusSna
     lastSyncedAt: getLastSyncedAt(),
     lastError: getLastSyncError(),
     autoSyncEnabled: isAutoSyncEnabled(),
+    account: getGoogleAccount(),
   };
+}
+
+/** Cache the Drive account (email/avatar) for the drawer + Settings. Never throws. */
+export async function refreshGoogleAccount(accessToken: string): Promise<void> {
+  const account = await fetchDriveAccount(accessToken);
+  if (account) setGoogleAccount(account);
 }
 
 let inflight: Promise<DriveSyncResult | null> | null = null;
@@ -88,6 +97,7 @@ export async function runDriveSync(opts: {
       const result = await syncWithGoogleDrive(token);
       if (result.success) {
         recordSyncSuccess(result.syncedAt);
+        await refreshGoogleAccount(token);
       }
       return result;
     } catch (err) {
