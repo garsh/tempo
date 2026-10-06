@@ -484,9 +484,11 @@ export function App() {
 
   const viewTitleText = resolveViewTitle(activeView, activeLists, activeSavedFilters);
 
-  /** TickTick new-install empty Inbox: pure-black mobile chrome (narrow). */
-  const inboxOpenCount = filterInbox(activeTasks).length;
-  const mobileEmptyInbox = activeView === 'inbox' && inboxOpenCount === 0;
+  /**
+   * TickTick new-install empty Inbox (mobile): title row + illustration + FAB + tabs only.
+   * Layout only — colors always come from the system theme (prefers-color-scheme).
+   */
+  const emptyInbox = activeView === 'inbox' && inboxCount === 0;
 
   const sidebar = (
     <SidebarNav
@@ -550,7 +552,7 @@ export function App() {
     ));
 
   return (
-    <div className="h-dvh bg-tt-surface text-tt-text flex overflow-hidden">
+    <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex overflow-hidden">
       <IconRail
         activeView={activeView}
         syncPhase={syncStatus.phase}
@@ -593,54 +595,37 @@ export function App() {
       )}
 
       <div
-        className={`flex-1 flex flex-col min-w-0 min-h-0 ${
-          mobileEmptyInbox ? 'xl:bg-tt-surface' : ''
-        }`}
-        style={mobileEmptyInbox ? { background: '#000000' } : undefined}
-        data-tempo-mobile-empty-inbox={mobileEmptyInbox ? '1' : '0'}
+        className="flex-1 flex flex-col min-w-0 min-h-0 bg-tt-bg xl:bg-tt-surface"
+        data-tempo-empty-inbox-view={emptyInbox ? '1' : '0'}
       >
-        {/* Mobile top bar */}
-        <header
-          className="xl:hidden shrink-0 flex items-center gap-2 px-3 h-12"
-          style={
-            mobileEmptyInbox
-              ? { background: '#000000', borderBottom: 'none' }
-              : { background: '#FFFFFF', borderBottom: '1px solid #E8E8ED' }
-          }
-        >
+        {/* Mobile top bar — TickTick: hamburger | title | ⋮ */}
+        <header className="xl:hidden shrink-0 flex items-center gap-1 pl-1 pr-1 h-16 bg-tt-bg text-tt-text">
           <button
             type="button"
-            className={`p-2 -ml-1 ${mobileEmptyInbox ? 'text-white' : 'text-tt-text'}`}
+            className="w-11 h-11 flex items-center justify-center text-tt-text"
             onClick={() => setSidebarOpen(true)}
             title="Menu"
+            aria-label="Menu"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-6 h-6" strokeWidth={1.75} />
           </button>
-          <h1
-            className={`flex-1 text-[17px] font-bold truncate ${
-              mobileEmptyInbox ? 'text-white' : 'text-tt-text'
-            }`}
-          >
+          <h1 className="flex-1 min-w-0 text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
             {viewTitleText}
           </h1>
           <button
             type="button"
-            className={`p-2 ${mobileEmptyInbox ? 'text-white/80' : 'text-tt-secondary'}`}
+            className="w-11 h-11 flex items-center justify-center text-tt-text"
             onClick={() => setShowShortcutsHelp(true)}
             title="More"
+            aria-label="More"
           >
-            <MoreVertical className="w-5 h-5" />
+            <MoreVertical className="w-5 h-5" strokeWidth={2.25} />
           </button>
         </header>
 
         <div className="flex-1 flex min-h-0">
           {/* Center pane */}
-          <section
-            className={`flex-1 min-w-0 flex flex-col min-h-0 ${
-              mobileEmptyInbox ? 'xl:bg-tt-surface' : 'bg-tt-surface'
-            }`}
-            style={mobileEmptyInbox ? { background: '#000000' } : undefined}
-          >
+          <section className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
             {/* Desktop list header */}
             <div className="hidden xl:flex shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2">
               <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
@@ -665,9 +650,7 @@ export function App() {
 
             {/* Search (desktop + when focused on mobile via tab) */}
             <div
-              className={`shrink-0 px-3 sm:px-5 pb-2 ${
-                mobileEmptyInbox ? 'hidden xl:block' : ''
-              }`}
+              className={`shrink-0 px-3 sm:px-5 pb-2 ${emptyInbox ? 'hidden xl:block' : ''}`}
             >
               <div className="relative hidden xl:block mb-2">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
@@ -676,7 +659,7 @@ export function App() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search"
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-tt-sidebar border border-transparent focus:border-tt-blue focus:bg-white text-sm outline-none"
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-tt-input border border-transparent focus:border-tt-blue focus:bg-tt-elevated text-sm outline-none placeholder:text-tt-muted"
                 />
               </div>
               {!isCalendar && !isBoard && activeView !== 'completed' && (
@@ -685,25 +668,25 @@ export function App() {
                 </div>
               )}
               {/* Mobile search field when on search from bottom bar — always available collapsed */}
-              {!mobileEmptyInbox && (
+              {!emptyInbox && (
                 <div className="xl:hidden mb-1">
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search tasks"
-                    className="w-full px-3 py-2 rounded-xl bg-tt-sidebar text-sm outline-none focus:ring-1 focus:ring-tt-blue"
+                    aria-label="Search tasks"
+                    className="w-full px-3 py-2 rounded-xl bg-tt-input text-sm outline-none focus:ring-1 focus:ring-tt-blue placeholder:text-tt-muted"
                   />
                 </div>
               )}
             </div>
 
             <div
-              className="flex-1 overflow-y-auto min-h-0 pb-20 xl:pb-4"
-              style={mobileEmptyInbox ? { background: '#000000' } : undefined}
+              className={`flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyInbox ? 'flex flex-col xl:block' : 'pb-20'}`}
             >
-              {mobileEmptyInbox ? (
+              {emptyInbox ? (
                 <>
-                  <div className="xl:hidden h-full min-h-[70vh] flex flex-col" style={{ background: '#000000' }}>
+                  <div className="xl:hidden flex-1 flex flex-col">
                     <EmptyInboxState />
                   </div>
                   <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
@@ -852,20 +835,17 @@ export function App() {
         <button
           type="button"
           onClick={openCapture}
-          className={`xl:hidden fixed bottom-[4.5rem] right-4 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center ${
-            mobileEmptyInbox
-              ? 'shadow-[0_0_24px_rgba(71,114,250,0.55)]'
-              : 'shadow-lg shadow-tt-blue/30'
-          }`}
+          className="xl:hidden fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)]"
+          style={{ bottom: 'calc(67px + env(safe-area-inset-bottom))' }}
           title="Add task"
+          aria-label="Add task"
         >
-          <Plus className="w-7 h-7" strokeWidth={2.5} />
+          <Plus className="w-7 h-7" strokeWidth={2.25} />
         </button>
 
         <MobileBottomBar
           activeView={activeView}
-          dark={mobileEmptyInbox}
-          onTasks={() => goView(mobileEmptyInbox ? 'inbox' : 'today')}
+          onTasks={() => goView(emptyInbox ? 'inbox' : 'today')}
           onCalendar={() => goView('calendar-month')}
           onSettings={() => setIsSettingsModalOpen(true)}
         />
@@ -875,7 +855,7 @@ export function App() {
       {detailOpenMobile && (
         <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
           <div className="flex-1 bg-black/40" onClick={() => setDetailOpenMobile(false)} />
-          <div className="w-full max-w-md bg-tt-surface shadow-2xl">
+          <div className="w-full max-w-md bg-tt-elevated shadow-2xl">
             <TaskDetailPane
               task={selectedTask}
               listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
@@ -935,7 +915,7 @@ export function App() {
 
       {showShortcutsHelp && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white border border-tt-border rounded-3xl p-6 shadow-2xl">
+          <div className="w-full max-w-md bg-tt-elevated border border-tt-border rounded-3xl p-6 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
                 <Keyboard className="w-5 h-5 text-tt-blue" />

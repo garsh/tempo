@@ -22,7 +22,7 @@ export function StatsStrip({ stats }: StatsStripProps) {
         {cells.map((c) => (
           <div
             key={c.label}
-            className="rounded-lg bg-white border border-tt-border px-1 py-1.5 text-center"
+            className="rounded-lg bg-tt-elevated border border-tt-border px-1 py-1.5 text-center"
             title={c.label}
           >
             <div

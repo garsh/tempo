@@ -1,22 +1,28 @@
-/** TickTick-inspired visual tokens (light chrome). */
+/**
+ * TickTick-inspired visual tokens.
+ *
+ * Values are CSS custom-property references (defined in `src/index.css`) so they
+ * follow `prefers-color-scheme` automatically when used in inline styles / SVG.
+ */
 export const TT = {
-  blue: '#4772FA',
-  blueSoft: '#E8EEFE',
-  blueHover: '#3B63E6',
-  sidebar: '#F5F5F7',
-  rail: '#2C2C2E',
-  railAlt: '#3A3A3C',
-  surface: '#FFFFFF',
-  border: '#E8E8ED',
-  text: '#1C1C1E',
-  textSecondary: '#8E8E93',
-  textMuted: '#AEAEB2',
-  overdue: '#E03131',
+  blue: 'var(--tt-blue)',
+  blueSoft: 'var(--tt-blue-soft)',
+  blueHover: 'var(--tt-blue-hover)',
+  bg: 'var(--tt-bg)',
+  sidebar: 'var(--tt-sidebar)',
+  rail: 'var(--tt-rail)',
+  surface: 'var(--tt-surface)',
+  elevated: 'var(--tt-elevated)',
+  border: 'var(--tt-border)',
+  text: 'var(--tt-text)',
+  textSecondary: 'var(--tt-secondary)',
+  textMuted: 'var(--tt-muted)',
+  overdue: 'var(--tt-overdue)',
   priority: {
-    high: '#E03131',
-    medium: '#FAA80C',
-    low: '#4772FA',
-    none: '#C7C7CC',
+    high: 'var(--tt-pri-high)',
+    medium: 'var(--tt-pri-med)',
+    low: 'var(--tt-pri-low)',
+    none: 'var(--tt-pri-none)',
   },
 } as const;
 

@@ -287,7 +287,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-tt-blue-soft text-tt-blue">
@@ -307,14 +307,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div
             className={`mt-4 p-3 rounded-2xl flex items-center gap-2.5 text-xs ${
               syncStatus.type === 'success'
-                ? 'bg-emerald-950/50 border border-emerald-800/60 text-emerald-300'
-                : 'bg-rose-950/50 border border-rose-800/60 text-rose-300'
+                ? 'bg-tt-success/10 border border-tt-success/30 text-tt-success'
+                : 'bg-tt-overdue/10 border border-tt-overdue/30 text-tt-overdue'
             }`}
           >
             {syncStatus.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-tt-success" />
             ) : (
-              <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400" />
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-tt-overdue" />
             )}
             <span className="flex-1">{syncStatus.message}</span>
           </div>
@@ -354,7 +354,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveClientId}
-                  className="px-3 py-2 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl transition-colors"
+                  className="px-3 py-2 bg-tt-sidebar hover:bg-tt-hover text-tt-text text-xs font-medium rounded-xl transition-colors"
                 >
                   Save
                 </button>
@@ -371,7 +371,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 ${
                   autoSync
                     ? 'bg-tt-blue hover:bg-tt-blue-hover text-white'
-                    : 'bg-tt-sidebar hover:bg-black/[0.06] text-tt-text'
+                    : 'bg-tt-sidebar hover:bg-tt-hover text-tt-text'
                 }`}
               >
                 {autoSync ? 'Auto On' : 'Auto Off'}
@@ -428,7 +428,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-tt-pri-med flex items-center gap-1.5">
               <Bell className="w-3.5 h-3.5" />
               Due Reminders
             </span>
@@ -446,7 +446,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
                   notificationsOn
                     ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                    : 'bg-tt-sidebar hover:bg-black/[0.06] text-tt-text'
+                    : 'bg-tt-sidebar hover:bg-tt-hover text-tt-text'
                 }`}
               >
                 {notificationsOn ? 'Reminders On' : 'Enable Reminders'}
@@ -455,7 +455,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-tt-success flex items-center gap-1.5">
               <BarChart3 className="w-3.5 h-3.5" />
               Quick stats
             </span>
@@ -488,14 +488,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={handleExportJson}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl transition-colors"
+                className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-tt-hover text-tt-text text-xs font-medium rounded-xl transition-colors"
               >
                 <Download className="w-3.5 h-3.5 text-tt-blue" />
                 Export JSON
               </button>
 
-              <label className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
-                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+              <label className="flex items-center justify-center gap-1.5 py-2 px-3 bg-tt-sidebar hover:bg-tt-hover text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
+                <Upload className="w-3.5 h-3.5 text-tt-success" />
                 Import JSON
                 <input
                   type="file"
@@ -508,7 +508,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div className="p-4 rounded-2xl bg-tt-sidebar border border-tt-border space-y-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-tt-blue flex items-center gap-1.5">
               <FileSpreadsheet className="w-3.5 h-3.5" />
               Import TickTick / CSV
             </span>
@@ -516,8 +516,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               Optional one-shot import from a TickTick CSV export, or a simple CSV with{' '}
               <code className="text-tt-text/80">title, list, due, priority, tags, notes, status</code>.
             </p>
-            <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-tt-sidebar hover:bg-black/[0.06] text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
-              <Upload className="w-3.5 h-3.5 text-cyan-400" />
+            <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-tt-sidebar hover:bg-tt-hover text-tt-text text-xs font-medium rounded-xl cursor-pointer transition-colors">
+              <Upload className="w-3.5 h-3.5 text-tt-blue" />
               Choose CSV file
               <input
                 type="file"
@@ -532,7 +532,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="mt-6 flex justify-end">
           <button
             onClick={onClose}
-            className="px-5 py-2 text-xs font-semibold rounded-xl bg-tt-sidebar hover:bg-black/[0.06] text-tt-text transition-colors"
+            className="px-5 py-2 text-xs font-semibold rounded-xl bg-tt-sidebar hover:bg-tt-hover text-tt-text transition-colors"
           >
             Done
           </button>

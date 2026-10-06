@@ -1,28 +1,122 @@
 @import "tailwindcss";
 
-@theme {
-  --color-tt-blue: #4772fa;
-  --color-tt-blue-soft: #e8eefe;
-  --color-tt-blue-hover: #3b63e6;
-  --color-tt-sidebar: #f5f5f7;
-  --color-tt-rail: #2c2c2e;
-  --color-tt-surface: #ffffff;
-  --color-tt-border: #e8e8ed;
-  --color-tt-text: #1c1c1e;
-  --color-tt-secondary: #8e8e93;
-  --color-tt-muted: #aeaeb2;
-  --color-tt-overdue: #e03131;
-  --color-tt-pri-high: #e03131;
-  --color-tt-pri-med: #faa80c;
-  --color-tt-pri-low: #4772fa;
-  --color-tt-pri-none: #c7c7cc;
+/*
+ * Tempo theme — follows the OS via `prefers-color-scheme` (default LIGHT).
+ * Light = TickTick Android light (ref: ticktick-refs/android/brad-inbox-empty-light.png)
+ * Dark  = TickTick Android dark  (ref: ticktick-refs/android/brad-inbox-empty-dark.png)
+ * Never force a scheme from a view / empty state — only the media query decides.
+ */
+:root {
+  color-scheme: light dark;
+
+  --tt-blue: #4772fa;
+  --tt-blue-hover: #3b63e6;
+  --tt-blue-soft: #e8eefe;
+
+  /* App background (mobile page, TickTick light #F2F4F9) */
+  --tt-bg: #f2f4f9;
+  /* Panes on desktop (list, detail) */
+  --tt-surface: #ffffff;
+  /* Modals, popovers, sheets, cards */
+  --tt-elevated: #ffffff;
+  --tt-sidebar: #f5f5f7;
+  --tt-rail: #2c2c2e;
+  --tt-border: #e8e8ed;
+  --tt-input: #eef0f5;
+  --tt-hover: rgb(0 0 0 / 0.04);
+  --tt-text: #191919;
+  --tt-secondary: #8e8e93;
+  --tt-muted: #a4a5a8;
+  --tt-tab-icon: #8a8b8e;
+
+  /* Empty-state illustration */
+  --tt-illus-blob: #e9ebf0;
+  --tt-illus-stroke: #15224b;
+  --tt-illus-tray: #f2f4f9;
+  --tt-illus-tray-inner: #e7ebf5;
+  --tt-illus-accent: #15224b;
+  --tt-illus-plane-fold: #15224b;
+
+  --tt-overdue: #e03131;
+  --tt-pri-high: #e03131;
+  --tt-pri-med: #faa80c;
+  --tt-pri-low: #4772fa;
+  --tt-pri-none: #c7c7cc;
+  --tt-success: #34c759;
+  --tt-shadow: rgb(0 0 0 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tt-blue-soft: #18213d;
+
+    --tt-bg: #000000;
+    --tt-surface: #0f0f10;
+    --tt-elevated: #1c1c1e;
+    --tt-sidebar: #161617;
+    --tt-rail: #0a0a0a;
+    --tt-border: #2a2a2d;
+    --tt-input: #1c1c1e;
+    --tt-hover: rgb(255 255 255 / 0.06);
+    --tt-text: #ebebeb;
+    --tt-secondary: #8e8e93;
+    --tt-muted: #5c5c5c;
+    --tt-tab-icon: #494949;
+
+    --tt-illus-blob: #191919;
+    --tt-illus-stroke: #353535;
+    --tt-illus-tray: #dddee1;
+    --tt-illus-tray-inner: #cdcdcd;
+    --tt-illus-accent: #606060;
+    --tt-illus-plane-fold: #1c1c1e;
+
+    --tt-pri-none: #5c5c60;
+    --tt-shadow: rgb(0 0 0 / 0.6);
+  }
+}
+
+@theme inline {
+  --color-tt-blue: var(--tt-blue);
+  --color-tt-blue-soft: var(--tt-blue-soft);
+  --color-tt-blue-hover: var(--tt-blue-hover);
+  --color-tt-bg: var(--tt-bg);
+  --color-tt-surface: var(--tt-surface);
+  --color-tt-elevated: var(--tt-elevated);
+  --color-tt-sidebar: var(--tt-sidebar);
+  --color-tt-rail: var(--tt-rail);
+  --color-tt-border: var(--tt-border);
+  --color-tt-input: var(--tt-input);
+  --color-tt-hover: var(--tt-hover);
+  --color-tt-text: var(--tt-text);
+  --color-tt-secondary: var(--tt-secondary);
+  --color-tt-muted: var(--tt-muted);
+  --color-tt-tab-icon: var(--tt-tab-icon);
+  --color-tt-overdue: var(--tt-overdue);
+  --color-tt-pri-high: var(--tt-pri-high);
+  --color-tt-pri-med: var(--tt-pri-med);
+  --color-tt-pri-low: var(--tt-pri-low);
+  --color-tt-pri-none: var(--tt-pri-none);
+  --color-tt-success: var(--tt-success);
 }
 
 @layer base {
+  html,
   body {
-    @apply bg-tt-surface text-tt-text antialiased min-h-screen selection:bg-tt-blue/20 selection:text-tt-text;
+    background-color: var(--tt-bg);
+  }
+  body {
+    @apply text-tt-text antialiased min-h-screen selection:bg-tt-blue/20 selection:text-tt-text;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
       sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  input,
+  textarea,
+  select {
+    color: inherit;
+  }
+  select option {
+    background-color: var(--tt-elevated);
+    color: var(--tt-text);
   }
 }

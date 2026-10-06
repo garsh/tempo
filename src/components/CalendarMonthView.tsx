@@ -87,23 +87,19 @@ export function CalendarMonthView({
               onClick={() => onSelectDate(cell.dateStr)}
               className={`min-h-[4.75rem] sm:min-h-[5.75rem] p-1 border-r border-b text-left align-top transition-colors ${
                 !cell.inCurrentMonth ? 'opacity-35' : ''
-              } ${selected && !isToday ? 'hover:bg-tt-sidebar/60' : 'bg-white hover:bg-tt-sidebar/60'}`}
-              style={{
-                borderColor: '#E8E8ED',
-                backgroundColor: selected ? '#E8EEFE' : '#FFFFFF',
-                boxShadow: isToday && selected ? 'inset 0 0 0 2px #4772FA' : undefined,
-              }}
+              } border-tt-border ${
+                selected ? 'bg-tt-blue-soft' : 'bg-tt-elevated hover:bg-tt-hover'
+              } ${isToday && selected ? 'shadow-[inset_0_0_0_2px_var(--tt-blue)]' : ''}`}
             >
               <div className="flex justify-center mb-0.5">
                 <span
-                  className="inline-flex w-6 h-6 items-center justify-center text-[12px] font-semibold rounded-full"
-                  style={
+                  className={`inline-flex w-6 h-6 items-center justify-center text-[12px] font-semibold rounded-full ${
                     isToday
-                      ? { backgroundColor: '#4772FA', color: '#FFFFFF' }
+                      ? 'bg-tt-blue text-white'
                       : selected
-                        ? { color: '#4772FA', backgroundColor: 'transparent' }
-                        : { color: '#1C1C1E', backgroundColor: 'transparent' }
-                  }
+                        ? 'text-tt-blue'
+                        : 'text-tt-text'
+                  }`}
                 >
                   {cell.date.getDate()}
                 </span>
@@ -124,7 +120,7 @@ export function CalendarMonthView({
                         onSelectTask(t);
                       }
                     }}
-                    className="truncate text-[9px] sm:text-[10px] px-1 py-[1px] rounded font-medium text-tt-text/90 cursor-pointer leading-tight"
+                    className="truncate text-[9px] sm:text-[10px] px-1 py-[1px] rounded font-medium text-[#1c1c1e] cursor-pointer leading-tight"
                     style={{ backgroundColor: pillColorForId(t.listId || t.id) }}
                     title={t.title}
                   >

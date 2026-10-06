@@ -94,7 +94,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         }
       }}
       className={`group relative flex items-center gap-3 px-3 sm:px-4 border-b border-tt-border/80 cursor-pointer transition-colors ${rowPad} ${
-        selected ? 'bg-tt-blue-soft/70' : 'bg-transparent hover:bg-black/[0.03]'
+        selected ? 'bg-tt-blue-soft/70' : 'bg-transparent hover:bg-tt-hover'
       } ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
     >
       <button

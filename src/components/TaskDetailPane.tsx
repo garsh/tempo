@@ -103,8 +103,8 @@ export function TaskDetailPane({
           <rect x="38" y="30" width="44" height="6" rx="3" fill="currentColor" opacity="0.45" />
           <rect x="38" y="44" width="36" height="5" rx="2.5" fill="currentColor" opacity="0.35" />
           <rect x="38" y="56" width="40" height="5" rx="2.5" fill="currentColor" opacity="0.35" />
-          <circle cx="90" cy="78" r="10" fill="#E8EEFE" />
-          <path d="M86 78h8M90 74v8" stroke="#4772FA" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="90" cy="78" r="10" fill="var(--tt-blue-soft)" />
+          <path d="M86 78h8M90 74v8" stroke="var(--tt-blue)" strokeWidth="2" strokeLinecap="round" />
           <Sparkles className="hidden" />
         </svg>
         <p className="text-sm text-tt-muted">Select a task to see details</p>
@@ -181,7 +181,7 @@ export function TaskDetailPane({
             {task.dueAt ? formatDueLabel(task.dueAt) : 'Set date'}
           </button>
           {dateOpen && (
-            <div className="absolute left-0 top-full mt-1 z-20 w-52 rounded-xl border border-tt-border bg-white shadow-lg p-2 space-y-0.5">
+            <div className="absolute left-0 top-full mt-1 z-20 w-52 rounded-xl border border-tt-border bg-tt-elevated shadow-lg p-2 space-y-0.5">
               {[
                 ['Today', 0],
                 ['Tomorrow', 1],
@@ -242,7 +242,7 @@ export function TaskDetailPane({
             <Bell className="w-4 h-4" />
           </button>
           {remindOpen && (
-            <div className="absolute left-0 top-full mt-1 z-20 w-44 rounded-xl border border-tt-border bg-white shadow-lg p-2 space-y-0.5">
+            <div className="absolute left-0 top-full mt-1 z-20 w-44 rounded-xl border border-tt-border bg-tt-elevated shadow-lg p-2 space-y-0.5">
               {['09:00', '12:00', '17:00', '20:00'].map((t) => (
                 <button
                   key={t}
@@ -295,7 +295,7 @@ export function TaskDetailPane({
             <RefreshCw className="w-4 h-4" />
           </button>
           {repeatOpen && (
-            <div className="absolute left-0 top-full mt-1 z-20 w-48 rounded-xl border border-tt-border bg-white shadow-lg p-2 space-y-0.5">
+            <div className="absolute left-0 top-full mt-1 z-20 w-48 rounded-xl border border-tt-border bg-tt-elevated shadow-lg p-2 space-y-0.5">
               <button
                 type="button"
                 className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-tt-sidebar"
@@ -472,7 +472,7 @@ export function TaskDetailPane({
         <button
           type="button"
           onClick={() => onDelete(task.id)}
-          className="p-2 text-tt-secondary hover:text-tt-overdue hover:bg-red-50 rounded-lg"
+          className="p-2 text-tt-secondary hover:text-tt-overdue hover:bg-tt-overdue/10 rounded-lg"
           title="Delete"
         >
           <Trash2 className="w-4 h-4" />

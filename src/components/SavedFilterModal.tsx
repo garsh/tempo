@@ -107,7 +107,7 @@ export function SavedFilterModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="relative w-full max-w-lg bg-white border border-tt-border rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-lg bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between pb-3 border-b border-tt-border">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-xl bg-tt-blue-soft text-tt-blue">
@@ -270,7 +270,7 @@ export function SavedFilterModal({
               type="checkbox"
               checked={pinnedOnly}
               onChange={(e) => setPinnedOnly(e.target.checked)}
-              className="rounded border-slate-600"
+              className="rounded border-tt-border accent-tt-blue"
             />
             Pinned only
           </label>

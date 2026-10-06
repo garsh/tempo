@@ -144,7 +144,7 @@ export function CalendarAgendaView({
                     className={`mt-3 w-3.5 h-3.5 rounded-full border-2 shrink-0 z-[1] flex items-center justify-center ${
                       done
                         ? 'bg-tt-muted border-tt-muted text-white'
-                        : 'bg-white border-tt-border'
+                        : 'bg-tt-elevated border-tt-border'
                     }`}
                   >
                     {done && <Check className="w-2 h-2 stroke-[3]" />}
@@ -153,7 +153,7 @@ export function CalendarAgendaView({
                     className={`flex-1 rounded-xl border px-3 py-2.5 transition-colors ${
                       selected
                         ? 'border-tt-blue bg-tt-blue-soft/40'
-                        : 'border-tt-border bg-white hover:bg-tt-sidebar/50'
+                        : 'border-tt-border bg-tt-elevated hover:bg-tt-sidebar/50'
                     } ${done ? 'opacity-60' : ''}`}
                   >
                     <div className={`text-[12px] font-medium text-tt-blue mb-0.5`}>
