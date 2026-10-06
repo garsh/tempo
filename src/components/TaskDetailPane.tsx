@@ -24,6 +24,7 @@ import {
   Calendar,
   Pin,
 } from 'lucide-react';
+import { usePrefs } from '../prefs/prefs';
 
 type TaskPatch = Partial<{
   dueAt: string | null;
@@ -65,6 +66,7 @@ export function TaskDetailPane({
   onToggleSubtask,
   onPatch,
 }: TaskDetailPaneProps) {
+  const [{ timeFormat }] = usePrefs();
   const [dateOpen, setDateOpen] = useState(false);
   const [remindOpen, setRemindOpen] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
@@ -178,7 +180,7 @@ export function TaskDetailPane({
             title="Due date"
           >
             <Calendar className="w-3 h-3" />
-            {task.dueAt ? formatDueLabel(task.dueAt) : 'Set date'}
+            {task.dueAt ? formatDueLabel(task.dueAt, timeFormat) : 'Set date'}
           </button>
           {dateOpen && (
             <div className="absolute left-0 top-full mt-1 z-20 w-52 rounded-xl border border-tt-border bg-tt-elevated shadow-lg p-2 space-y-0.5">

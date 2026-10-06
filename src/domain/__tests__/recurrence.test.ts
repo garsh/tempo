@@ -167,3 +167,14 @@ describe('Recurrence Engine', () => {
     });
   });
 });
+
+describe('12/24h time format', () => {
+  it('formats clock times and due labels', async () => {
+    const { formatClockTime, formatDueLabel } = await import('../recurrence');
+    expect(formatClockTime('17:30', '12h')).toBe('5:30 PM');
+    expect(formatClockTime('00:05', '12h')).toBe('12:05 AM');
+    expect(formatClockTime('7:05', '24h')).toBe('07:05');
+    expect(formatDueLabel('2026-10-06T17:30', '24h')).toBe('2026-10-06 17:30');
+    expect(formatDueLabel('2026-10-06T17:30')).toBe('2026-10-06 5:30 PM');
+  });
+});

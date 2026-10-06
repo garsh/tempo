@@ -16,6 +16,13 @@
     <meta name="apple-mobile-web-app-title" content="Tempo" />
     <meta name="description" content="Local-first TickTick-style tasks: smart lists, calendar, board, reminders, and Google Drive sync." />
     <title>Tempo</title>
+    <script>
+      // Apply Settings › Appearance (Light/Dark override) before first paint to avoid a flash.
+      try {
+        var t = JSON.parse(localStorage.getItem('tempo_prefs_v1') || '{}').theme;
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
     <!-- Google Identity Services client -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>

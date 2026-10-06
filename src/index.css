@@ -4,7 +4,8 @@
  * Tempo theme — follows the OS via `prefers-color-scheme` (default LIGHT).
  * Light = TickTick Android light (ref: ticktick-refs/android/brad-inbox-empty-light.png)
  * Dark  = TickTick Android dark  (ref: ticktick-refs/android/brad-inbox-empty-dark.png)
- * Never force a scheme from a view / empty state — only the media query decides.
+ * Never force a scheme from a view / empty state. Settings › Appearance may pin
+ * Light/Dark via <html data-theme>, which overrides the media query.
  */
 :root {
   color-scheme: light dark;
@@ -47,10 +48,26 @@
   --tt-pri-none: #c7c7cc;
   --tt-success: #34c759;
   --tt-shadow: rgb(0 0 0 / 0.12);
+
+  /* Left drawer — TickTick keeps it navy even in light mode */
+  --tt-drawer: #232c57;
+  --tt-drawer-pill: #293565;
+  --tt-drawer-divider: rgb(255 255 255 / 0.1);
+  --tt-drawer-text: #ffffff;
+  --tt-drawer-muted: rgb(255 255 255 / 0.6);
+  --tt-smart-orange: #ff5900;
+  /* Overflow menu card + settings rows */
+  --tt-menu: #ffffff;
+  --tt-menu-divider: #f1f1f1;
+  --tt-chevron: #bababa;
+  --tt-icon-green: #0cce9c;
+  --tt-icon-amber: #ffb000;
+  --tt-scrim: rgb(0 0 0 / 0.4);
 }
 
+/* Dark: OS dark unless the user pinned Light; or the user pinned Dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --tt-blue-soft: #18213d;
 
     --tt-bg: #000000;
@@ -77,7 +94,59 @@
 
     --tt-pri-none: #5c5c60;
     --tt-shadow: rgb(0 0 0 / 0.6);
+
+    --tt-drawer: #1c1c1e;
+    --tt-drawer-pill: #2e3352;
+    --tt-drawer-divider: rgb(255 255 255 / 0.08);
+    --tt-menu: #2c2c2e;
+    --tt-menu-divider: #3a3a3c;
+    --tt-chevron: #5c5c60;
+    --tt-scrim: rgb(0 0 0 / 0.6);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --tt-blue-soft: #18213d;
+
+  --tt-bg: #000000;
+  --tt-surface: #0f0f10;
+  --tt-elevated: #1c1c1e;
+  --tt-sidebar: #161617;
+  --tt-rail: #0a0a0a;
+  --tt-border: #2a2a2d;
+  --tt-input: #1c1c1e;
+  --tt-hover: rgb(255 255 255 / 0.06);
+  --tt-text: #ebebeb;
+  --tt-secondary: #8e8e93;
+  --tt-muted: #5c5c5c;
+  --tt-tab-icon: #494949;
+
+  --tt-illus-blob: #191919;
+  --tt-illus-stroke: #353535;
+  --tt-illus-tray: #dddee1;
+  --tt-illus-tray-inner: #cdcdcd;
+  --tt-illus-accent: #606060;
+  --tt-illus-plane-fold: #1c1c1e;
+  --tt-illus-cloud: #2a2a2c;
+  --tt-illus-plane-fold-sky: #22398a;
+
+  --tt-pri-none: #5c5c60;
+  --tt-shadow: rgb(0 0 0 / 0.6);
+
+  --tt-drawer: #1c1c1e;
+  --tt-drawer-pill: #2e3352;
+  --tt-drawer-divider: rgb(255 255 255 / 0.08);
+  --tt-menu: #2c2c2e;
+  --tt-menu-divider: #3a3a3c;
+  --tt-chevron: #5c5c60;
+  --tt-scrim: rgb(0 0 0 / 0.6);
+
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @theme inline {
@@ -102,6 +171,18 @@
   --color-tt-pri-low: var(--tt-pri-low);
   --color-tt-pri-none: var(--tt-pri-none);
   --color-tt-success: var(--tt-success);
+  --color-tt-drawer: var(--tt-drawer);
+  --color-tt-drawer-pill: var(--tt-drawer-pill);
+  --color-tt-drawer-divider: var(--tt-drawer-divider);
+  --color-tt-drawer-text: var(--tt-drawer-text);
+  --color-tt-drawer-muted: var(--tt-drawer-muted);
+  --color-tt-smart-orange: var(--tt-smart-orange);
+  --color-tt-menu: var(--tt-menu);
+  --color-tt-menu-divider: var(--tt-menu-divider);
+  --color-tt-chevron: var(--tt-chevron);
+  --color-tt-icon-green: var(--tt-icon-green);
+  --color-tt-icon-amber: var(--tt-icon-amber);
+  --color-tt-scrim: var(--tt-scrim);
 }
 
 @layer base {

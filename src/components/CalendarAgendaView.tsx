@@ -1,9 +1,11 @@
 import { useMemo } from 'react';
 import type { Task } from '../types/task';
-import { tasksDueOnDate } from '../domain/calendar';
+import { startOfWeek, tasksDueOnDate } from '../domain/calendar';
+import { usePrefs, type TimeFormat } from '../prefs/prefs';
 import {
   formatDate,
   hasDueTime,
+  formatClockTime,
   isCompleted,
   splitDueAt,
 } from '../domain/recurrence';
@@ -19,14 +21,13 @@ interface CalendarAgendaViewProps {
   dayCount?: number;
 }
 
-function weekAround(centerStr: string): { dateStr: string; date: Date; label: string; dayNum: number }[] {
+function weekAround(
+  centerStr: string,
+  weekStart: number
+): { dateStr: string; date: Date; label: string; dayNum: number }[] {
   const [y, m, d] = centerStr.split('-').map(Number);
-  const center = new Date(y, m - 1, d);
-  // Start Monday of that week
-  const dow = center.getDay();
-  const mondayOffset = dow === 0 ? -6 : 1 - dow;
-  const monday = new Date(center);
-  monday.setDate(center.getDate() + mondayOffset);
+  // Week strip starts on Settings › Date & Time › Week starts on
+  const monday = startOfWeek(new Date(y, m - 1, d), weekStart);
   const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const days = [];
   for (let i = 0; i < 7; i++) {
@@ -42,9 +43,10 @@ function weekAround(centerStr: string): { dateStr: string; date: Date; label: st
   return days;
 }
 
-function timeLabel(dueAt: string | null | undefined): string {
+function timeLabel(dueAt: string | null | undefined, timeFormat: TimeFormat): string {
   if (!dueAt || !hasDueTime(dueAt)) return 'All day';
-  return splitDueAt(dueAt).time || 'All day';
+  const t = splitDueAt(dueAt).time;
+  return t ? formatClockTime(t, timeFormat) : 'All day';
 }
 
 /**
@@ -59,7 +61,8 @@ export function CalendarAgendaView({
 }: CalendarAgendaViewProps) {
   const todayStr = formatDate(new Date());
   const focus = selectedDateStr || todayStr;
-  const week = useMemo(() => weekAround(focus), [focus]);
+  const [{ weekStart, timeFormat }] = usePrefs();
+  const week = useMemo(() => weekAround(focus, weekStart), [focus, weekStart]);
 
   const dayTasks = useMemo(() => {
     const due = tasksDueOnDate(tasks, focus);
@@ -138,7 +141,7 @@ export function CalendarAgendaView({
                   className={`relative w-full flex gap-3 text-left ${selected ? '' : ''}`}
                 >
                   <div className="w-10 shrink-0 text-[11px] text-tt-secondary tabular-nums pt-3 text-right pr-1">
-                    {timeLabel(t.dueAt)}
+                    {timeLabel(t.dueAt, timeFormat)}
                   </div>
                   <div
                     className={`mt-3 w-3.5 h-3.5 rounded-full border-2 shrink-0 z-[1] flex items-center justify-center ${
@@ -157,7 +160,7 @@ export function CalendarAgendaView({
                     } ${done ? 'opacity-60' : ''}`}
                   >
                     <div className={`text-[12px] font-medium text-tt-blue mb-0.5`}>
-                      {timeLabel(t.dueAt)}
+                      {timeLabel(t.dueAt, timeFormat)}
                       {hasDueTime(t.dueAt || '') ? '' : ''}
                     </div>
                     <div

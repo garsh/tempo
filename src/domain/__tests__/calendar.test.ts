@@ -46,3 +46,16 @@ describe('Calendar helpers', () => {
     expect(agenda.some((d) => d.dateStr === '2026-10-07')).toBe(true);
   });
 });
+
+describe('week start', () => {
+  it('rotates month grid + labels for Monday / Saturday starts', async () => {
+    const { buildMonthGrid, weekdayLabels, startOfWeek } = await import('../calendar');
+    // Oct 1 2026 is a Thursday
+    expect(buildMonthGrid(2026, 9, new Date(2026, 9, 6), 0)[0].dateStr).toBe('2026-09-27');
+    expect(buildMonthGrid(2026, 9, new Date(2026, 9, 6), 1)[0].dateStr).toBe('2026-09-28');
+    expect(buildMonthGrid(2026, 9, new Date(2026, 9, 6), 6)[0].dateStr).toBe('2026-09-26');
+    expect(weekdayLabels(1)[0]).toBe('Mon');
+    expect(weekdayLabels(6)).toEqual(['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(startOfWeek(new Date(2026, 9, 4), 1).getDate()).toBe(28);
+  });
+});

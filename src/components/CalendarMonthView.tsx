@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
 import type { Task } from '../types/task';
-import { buildMonthGrid, monthLabel, shiftMonth, tasksDueOnDate } from '../domain/calendar';
+import { buildMonthGrid, monthLabel, shiftMonth, tasksDueOnDate, weekdayLabels } from '../domain/calendar';
+import { usePrefs } from '../prefs/prefs';
 import { formatDate } from '../domain/recurrence';
 import { pillColorForId } from '../theme/listColors';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 interface CalendarMonthViewProps {
   tasks: Task[];
@@ -26,7 +25,12 @@ export function CalendarMonthView({
   onSelectDate,
   onSelectTask,
 }: CalendarMonthViewProps) {
-  const grid = useMemo(() => buildMonthGrid(year, monthIndex), [year, monthIndex]);
+  const [{ weekStart }] = usePrefs();
+  const grid = useMemo(
+    () => buildMonthGrid(year, monthIndex, new Date(), weekStart),
+    [year, monthIndex, weekStart]
+  );
+  const dow = useMemo(() => weekdayLabels(weekStart), [weekStart]);
   const todayStr = formatDate(new Date());
 
   const go = (delta: number) => {
@@ -68,7 +72,7 @@ export function CalendarMonthView({
       </div>
 
       <div className="grid grid-cols-7 text-[11px] font-medium text-tt-muted">
-        {DOW.map((d) => (
+        {dow.map((d) => (
           <div key={d} className="text-center py-1.5">
             {d}
           </div>

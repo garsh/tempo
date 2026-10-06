@@ -40,3 +40,18 @@ describe('Notifications helpers', () => {
     expect(ms).toBe(30 * 60 * 1000);
   });
 });
+
+describe('default reminder time', () => {
+  it('fires date-only tasks at the default reminder time on the due day', async () => {
+    const { getReminderTime } = await import('../notifications');
+    const r = getReminderTime('2026-10-05', '09:00');
+    expect([r.getHours(), r.getMinutes(), r.getDate()]).toEqual([9, 0, 5]);
+    // timed tasks keep their own time
+    expect(getReminderTime('2026-10-05T18:15', '09:00').getHours()).toBe(18);
+    const at = (h: number) => new Date(2026, 9, 5, h, 0, 0);
+    const tasks = [task({ id: 'd', title: 'Date only', dueAt: '2026-10-05' })];
+    expect(getTasksNeedingNotification(tasks, at(8), {}, '09:00')).toHaveLength(0);
+    expect(getTasksNeedingNotification(tasks, at(10), {}, '09:00')).toHaveLength(1);
+    expect(msUntilNextDue(tasks, at(8), '09:00')).toBe(60 * 60 * 1000);
+  });
+});

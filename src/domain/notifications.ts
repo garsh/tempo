@@ -1,5 +1,5 @@
 import type { Task } from '../types/task';
-import { getDueDeadline, isCompleted } from './recurrence';
+import { getDueDeadline, hasDueTime, isCompleted, parseDate } from './recurrence';
 
 const STORAGE_ENABLED = 'tempo_notifications_enabled';
 const STORAGE_FIRED = 'tempo_notifications_fired';
@@ -58,6 +58,20 @@ export function notificationKey(task: Task): string {
 }
 
 /**
+ * When a task's reminder fires: at its due time, or — for date-only tasks — at
+ * Settings › Date & Time › Default reminder time (HH:MM) on the due day. Without a
+ * default time, date-only tasks fall back to the end of the due day.
+ */
+export function getReminderTime(dueAt: string, defaultReminderTime?: string): Date {
+  if (hasDueTime(dueAt) || !defaultReminderTime) return getDueDeadline(dueAt);
+  const [h, m] = defaultReminderTime.split(':').map((n) => parseInt(n, 10));
+  if (Number.isNaN(h) || Number.isNaN(m)) return getDueDeadline(dueAt);
+  const d = parseDate(dueAt);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+/**
  * Tasks that should fire a due reminder right now:
  * - open (not completed one-off, not deleted)
  * - has dueAt
@@ -67,11 +81,12 @@ export function notificationKey(task: Task): string {
 export function getTasksNeedingNotification(
   tasks: Task[],
   now: Date = new Date(),
-  fired: Record<string, number> = readFiredMap()
+  fired: Record<string, number> = readFiredMap(),
+  defaultReminderTime?: string
 ): Task[] {
   return tasks.filter((t) => {
     if (t.deletedAt || isCompleted(t) || !t.dueAt) return false;
-    const deadline = getDueDeadline(t.dueAt);
+    const deadline = getReminderTime(t.dueAt, defaultReminderTime);
     if (deadline.getTime() > now.getTime()) return false;
     const key = notificationKey(t);
     return !fired[key];
@@ -116,12 +131,12 @@ async function showViaServiceWorker(title: string, options: NotificationOptions)
  * Show browser notifications for due tasks. Prefers the service worker
  * (more reliable for installed PWAs), falls back to `new Notification`.
  */
-export function notifyDueTasks(tasks: Task[]): number {
+export function notifyDueTasks(tasks: Task[], defaultReminderTime?: string): number {
   if (!notificationsSupported()) return 0;
   if (Notification.permission !== 'granted') return 0;
   if (!isNotificationsEnabled()) return 0;
 
-  const due = getTasksNeedingNotification(tasks);
+  const due = getTasksNeedingNotification(tasks, new Date(), readFiredMap(), defaultReminderTime);
   if (due.length === 0) return 0;
 
   // Fire async SW path without blocking; mark notified immediately to avoid duplicates
@@ -159,11 +174,15 @@ export function notifyDueTasks(tasks: Task[]): number {
 /**
  * Milliseconds until the next future due deadline among open tasks, or null.
  */
-export function msUntilNextDue(tasks: Task[], now: Date = new Date()): number | null {
+export function msUntilNextDue(
+  tasks: Task[],
+  now: Date = new Date(),
+  defaultReminderTime?: string
+): number | null {
   let soonest: number | null = null;
   for (const t of tasks) {
     if (t.deletedAt || isCompleted(t) || !t.dueAt) continue;
-    const deadline = getDueDeadline(t.dueAt).getTime();
+    const deadline = getReminderTime(t.dueAt, defaultReminderTime).getTime();
     const delta = deadline - now.getTime();
     if (delta <= 0) continue;
     if (soonest === null || delta < soonest) soonest = delta;

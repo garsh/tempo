@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Task } from '../types/task';
 import {
+  formatClockTime,
   formatDueLabel,
   getTaskUrgency,
   hasDueTime,
@@ -17,6 +18,7 @@ import {
   ListTree,
   Pin,
 } from 'lucide-react';
+import { usePrefs, type TimeFormat } from '../prefs/prefs';
 
 interface TaskCardProps {
   task: Task;
@@ -38,17 +40,18 @@ function dueTextClass(urgency: string): string {
   return 'text-tt-secondary';
 }
 
-function formatRowDue(dueAt: string | null | undefined): string | null {
+function formatRowDue(dueAt: string | null | undefined, timeFormat: TimeFormat): string | null {
   if (!dueAt) return null;
   const urgency = getTaskUrgency(dueAt);
   if (urgency === 'due_today' && hasDueTime(dueAt)) {
-    return splitDueAt(dueAt).time || 'Today';
+    const t = splitDueAt(dueAt).time;
+    return t ? formatClockTime(t, timeFormat) : 'Today';
   }
   if (urgency === 'due_today') return 'Today';
   if (urgency === 'overdue') {
-    return formatDueLabel(dueAt) || 'Overdue';
+    return formatDueLabel(dueAt, timeFormat) || 'Overdue';
   }
-  return formatDueLabel(dueAt);
+  return formatDueLabel(dueAt, timeFormat);
 }
 
 export const TaskCard: React.FC<TaskCardProps> = ({
@@ -61,12 +64,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onSelect,
   onEdit,
 }) => {
+  const [{ timeFormat }] = usePrefs();
   const [justCompleted, setJustCompleted] = useState(false);
   const completed = isCompleted(task);
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = priorityCheckboxColor(task.priority);
-  const dueLabel = formatRowDue(task.dueAt);
+  const dueLabel = formatRowDue(task.dueAt, timeFormat);
   const sub = task.subtasks?.length ? subtaskProgress(task.subtasks) : null;
 
   const handleCheck = (e: React.MouseEvent) => {

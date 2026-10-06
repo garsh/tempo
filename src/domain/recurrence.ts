@@ -340,17 +340,22 @@ export function getTaskUrgency(
   return 'later';
 }
 
-export function formatDueLabel(dueAt: string | null | undefined): string {
+/** Format an "HH:MM" clock time as 12h ("5:30 PM") or 24h ("17:30"). */
+export function formatClockTime(time: string, timeFormat: '12h' | '24h' = '12h'): string {
+  const [hStr, mStr = '00'] = time.split(':');
+  const h24 = parseInt(hStr, 10);
+  if (Number.isNaN(h24)) return time;
+  if (timeFormat === '24h') return `${String(h24).padStart(2, '0')}:${mStr}`;
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${mStr} ${ampm}`;
+}
+
+export function formatDueLabel(dueAt: string | null | undefined, timeFormat: '12h' | '24h' = '12h'): string {
   if (!dueAt) return '';
   const { date, time } = splitDueAt(dueAt);
   if (!time) return date;
-  const [hStr, mStr] = time.split(':');
-  let h = parseInt(hStr, 10);
-  const m = mStr;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${date} ${h}:${m} ${ampm}`;
+  return `${date} ${formatClockTime(time, timeFormat)}`;
 }
 
 export function formatRecurrenceLabel(
