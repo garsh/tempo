@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 /** Service-worker cache generation. v2 = system light/dark theme (drop pre-theme assets). */
-const TEMPO_SW_CACHE_VERSION = 'v3';
+const TEMPO_SW_CACHE_VERSION = 'v4';
 
 // https://vite.dev/config/
 export default defineConfig({
