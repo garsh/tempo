@@ -43,8 +43,9 @@ import { TaskModal } from './components/TaskModal';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import { TaskDetailPane } from './components/TaskDetailPane';
 import { CalendarMonthView } from './components/CalendarMonthView';
+import { QuickAddSheet } from './components/QuickAddSheet';
+import { dueAtForSelectedDay } from './domain/calendarUi';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
-import { QuickCaptureModal } from './components/QuickCaptureModal';
 import { KanbanBoard } from './components/KanbanBoard';
 import { SavedFilterModal } from './components/SavedFilterModal';
 import { InstallPrompt } from './components/InstallPrompt';
@@ -178,6 +179,7 @@ export function App() {
     const combined = parts.join(' — ').trim();
     if (combined) {
       setQuickCaptureText(combined);
+      setQuickCaptureDueAt(null);
       setIsQuickCaptureOpen(true);
     }
     // Clean share params without reload
@@ -308,10 +310,15 @@ export function App() {
     setDetailOpenMobile(true);
   }, []);
 
-  const openCapture = useCallback(() => {
+  const [quickCaptureDueAt, setQuickCaptureDueAt] = useState<string | null>(null);
+  const openCapture = useCallback((dueAt?: string | null) => {
     setQuickCaptureText('');
+    setQuickCaptureDueAt(dueAt === undefined ? null : dueAt);
     setIsQuickCaptureOpen(true);
   }, []);
+  const openCalendarCapture = useCallback(() => {
+    openCapture(dueAtForSelectedDay(calSelectedDate));
+  }, [openCapture, calSelectedDate]);
 
   const handleComplete = async (id: string) => {
     await completeTask(id);
@@ -753,7 +760,7 @@ export function App() {
         data-tempo-empty-today-view={emptyToday ? '1' : '0'}
       >
         {/* Mobile top bar — TickTick: hamburger | title | (Today: lightbulb) | ⋮ */}
-        {selectMode ? (
+        {activeView === 'calendar-month' && !selectMode ? null : selectMode ? (
           <div className="xl:hidden shrink-0 bg-tt-bg">
             <SelectionHeader
               count={selectedIds.size}
@@ -845,7 +852,7 @@ export function App() {
                 />
               </div>
             )}
-            <div className={`hidden ${selectMode ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
+            <div className={`hidden ${selectMode || activeView === 'calendar-month' ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
               <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
               <div className="flex items-center gap-1">
                 {activeView === 'today' && (
@@ -904,7 +911,11 @@ export function App() {
             </div>
 
             <div
-              className={`flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyState ? 'flex flex-col xl:block' : 'pb-20'}`}
+              className={`flex-1 min-h-0 xl:pb-4 ${
+                emptyState || activeView === 'calendar-month'
+                  ? 'flex flex-col xl:block overflow-hidden'
+                  : 'overflow-y-auto pb-20'
+              }`}
             >
               {emptyToday ? (
                 <>
@@ -960,31 +971,24 @@ export function App() {
                   />
                 </div>
               ) : isCalendar ? (
-                <div className="px-3 sm:px-5 space-y-3">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => goView('calendar-month')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                        activeView === 'calendar-month'
-                          ? 'bg-tt-blue text-white'
-                          : 'bg-tt-sidebar text-tt-secondary'
-                      }`}
-                    >
-                      Month
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => goView('calendar-agenda')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                        activeView === 'calendar-agenda'
-                          ? 'bg-tt-blue text-white'
-                          : 'bg-tt-sidebar text-tt-secondary'
-                      }`}
-                    >
-                      Agenda
-                    </button>
-                  </div>
+                <div className={`h-full min-h-0 flex flex-col ${activeView === 'calendar-month' ? '' : 'px-3 sm:px-5 space-y-3'}`}>
+                  {activeView === 'calendar-agenda' && (
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => goView('calendar-month')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-tt-sidebar text-tt-secondary"
+                      >
+                        Month
+                      </button>
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-tt-blue text-white"
+                      >
+                        Agenda
+                      </button>
+                    </div>
+                  )}
                   {activeView === 'calendar-month' ? (
                     <CalendarMonthView
                       year={calYear}
@@ -997,6 +1001,14 @@ export function App() {
                         setCalMonth(m);
                       }}
                       onSelectTask={selectTask}
+                      onCompleteTask={handleComplete}
+                      onFilter={() => {
+                        setEditingFilter(null);
+                        setIsFilterModalOpen(true);
+                      }}
+                      onToggleView={() => goView('calendar-agenda')}
+                      onMore={openOverflow}
+                      mobileChrome
                     />
                   ) : (
                     <CalendarAgendaView
@@ -1006,14 +1018,6 @@ export function App() {
                       selectedDateStr={calSelectedDate}
                       onSelectDate={setCalSelectedDate}
                     />
-                  )}
-                  {activeView === 'calendar-month' && calSelectedDate && (
-                    <div className="border-t border-tt-border pt-2">
-                      {renderTaskRows(displayedTasks, true)}
-                      {displayedTasks.length === 0 && (
-                        <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
-                      )}
-                    </div>
                   )}
                 </div>
               ) : activeView === 'completed' ? (
@@ -1085,7 +1089,7 @@ export function App() {
         {!selectMode && (
         <button
           type="button"
-          onClick={openCapture}
+          onClick={isCalendar ? openCalendarCapture : () => openCapture(activeView === 'today' ? dueAtForSelectedDay(formatDate(new Date())) : null)}
           className="xl:hidden fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)]"
           style={{ bottom: 'calc(67px + env(safe-area-inset-bottom))' }}
           title="Add task"
@@ -1130,13 +1134,19 @@ export function App() {
       )}
 
 
-      <QuickCaptureModal
+      <QuickAddSheet
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
         onSave={handleSave}
         lists={activeLists}
         defaultListId={defaultListForNew}
-        initialText={quickCaptureText}
+        defaultDueAt={quickCaptureDueAt}
+        initialTitle={quickCaptureText}
+        availableTags={allTags}
+        onOpenSettings={() => {
+          setIsQuickCaptureOpen(false);
+          openSettings('root');
+        }}
       />
 
       <SavedFilterModal
@@ -1169,7 +1179,7 @@ export function App() {
         listNameById={listNameById}
         onClose={closePlanDay}
         onMoveToToday={moveTaskToToday}
-        onAddTask={openCapture}
+        onAddTask={() => openCapture()}
       />
 
       <SettingsPage
