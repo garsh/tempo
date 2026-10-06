@@ -5,6 +5,7 @@ import { formatDueLabel } from '../domain/recurrence';
 import { planDaySuggestions } from '../domain/planDay';
 import { priorityCheckboxColor } from '../theme/ticktick';
 import { LightbulbIcon } from './shell/LightbulbIcon';
+import { usePrefs } from '../prefs/prefs';
 
 interface PlanDaySheetProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ export function PlanDaySheet({
   onMoveToToday,
   onAddTask,
 }: PlanDaySheetProps) {
+  const [{ timeFormat }] = usePrefs();
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -101,7 +103,7 @@ export function PlanDaySheet({
                   {section.label} <span className="text-tt-muted font-medium">{section.tasks.length}</span>
                 </div>
                 {section.tasks.map((task) => {
-                  const due = formatDueLabel(task.dueAt);
+                  const due = formatDueLabel(task.dueAt, timeFormat);
                   const list = listNameById.get(task.listId);
                   return (
                     <div key={task.id} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-tt-hover">

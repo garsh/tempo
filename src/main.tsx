@@ -2,6 +2,12 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { getPrefs, subscribePrefs } from './prefs/prefs'
+import { applyTheme } from './prefs/theme'
+
+// Settings › Appearance: System follows prefers-color-scheme; Light/Dark pin it.
+applyTheme(getPrefs().theme)
+subscribePrefs(() => applyTheme(getPrefs().theme))
 
 // `npm run dev` does not register the PWA service worker. If a production build was
 // ever served on this origin (e.g. bird.lan:5180), its old SW would keep serving the

@@ -9,11 +9,16 @@ export type CalendarDayCell = {
 };
 
 /**
- * Build a 6×7 month grid starting on Sunday (locale-independent).
+ * Build a 6×7 month grid starting on `weekStart` (0=Sun, 1=Mon, 6=Sat; locale-independent).
  */
-export function buildMonthGrid(year: number, monthIndex: number, today: Date = new Date()): CalendarDayCell[] {
+export function buildMonthGrid(
+  year: number,
+  monthIndex: number,
+  today: Date = new Date(),
+  weekStart: number = 0
+): CalendarDayCell[] {
   const first = new Date(year, monthIndex, 1);
-  const startOffset = first.getDay(); // 0=Sun
+  const startOffset = (first.getDay() - weekStart + 7) % 7;
   const gridStart = new Date(year, monthIndex, 1 - startOffset);
   const todayStr = formatDate(startOfDay(today));
 
@@ -30,6 +35,20 @@ export function buildMonthGrid(year: number, monthIndex: number, today: Date = n
     });
   }
   return cells;
+}
+
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Weekday header labels rotated to start on `weekStart`. */
+export function weekdayLabels(weekStart: number = 0): string[] {
+  return Array.from({ length: 7 }, (_, i) => DOW_SHORT[(weekStart + i) % 7]);
+}
+
+/** First day (local midnight) of the week containing `date`, for a given week start. */
+export function startOfWeek(date: Date, weekStart: number = 0): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() - ((d.getDay() - weekStart + 7) % 7));
+  return d;
 }
 
 /** Open tasks due on a given YYYY-MM-DD (date part of dueAt). */

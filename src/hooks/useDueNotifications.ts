@@ -6,6 +6,7 @@ import {
   notifyDueTasks,
   registerNotificationClickHandler,
 } from '../domain/notifications';
+import { getPrefs } from '../prefs/prefs';
 
 const POLL_MS = 60_000;
 
@@ -35,14 +36,14 @@ export function useDueNotifications(tasks: Task[]): void {
 
     const run = () => {
       if (!isNotificationsEnabled()) return;
-      notifyDueTasks(tasksRef.current);
+      notifyDueTasks(tasksRef.current, getPrefs().defaultReminderTime);
     };
 
     const scheduleNext = () => {
       clearTimer();
       if (!isNotificationsEnabled()) return;
 
-      const until = msUntilNextDue(tasksRef.current);
+      const until = msUntilNextDue(tasksRef.current, new Date(), getPrefs().defaultReminderTime);
       const delay =
         until !== null ? Math.min(Math.max(until + 250, 1000), POLL_MS) : POLL_MS;
       timer = setTimeout(() => {

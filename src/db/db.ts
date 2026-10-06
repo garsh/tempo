@@ -12,6 +12,7 @@ import type {
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import { calculateNextDueDate, isRecurring } from '../domain/recurrence';
+import { planBatch, type BatchOp } from '../domain/batch';
 import { clearFiredForTask } from '../domain/notifications';
 import { buildSampleData, isSampleId } from './sampleData';
 
@@ -450,4 +451,19 @@ export async function softDeleteSavedFilter(id: string): Promise<void> {
     deletedAt: now,
     updatedAt: now,
   });
+}
+
+/** Select-mode batch write (move / set date / delete) in one transaction. Returns count changed. */
+export async function applyBatchOp(ids: string[], op: BatchOp): Promise<number> {
+  return db.transaction('rw', db.tasks, async () => {
+    const tasks = (await db.tasks.bulkGet(ids)).filter((t): t is Task => !!t);
+    const updated = planBatch(tasks, ids, op);
+    if (updated.length) await db.tasks.bulkPut(updated);
+    return updated.length;
+  });
+}
+
+/** Select-mode batch complete; recurring tasks advance to their next occurrence. */
+export async function completeTasks(ids: string[]): Promise<void> {
+  for (const id of ids) await completeTask(id);
 }

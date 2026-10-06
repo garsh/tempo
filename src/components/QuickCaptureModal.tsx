@@ -4,6 +4,7 @@ import { INBOX_LIST_ID } from '../types/task';
 import { parseQuickCapture } from '../domain/quickCapture';
 import { formatDueLabel } from '../domain/recurrence';
 import { X, Send, Calendar, Flag, Tag, List as ListIcon } from 'lucide-react';
+import { usePrefs } from '../prefs/prefs';
 
 interface QuickCaptureModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export function QuickCaptureModal({
   defaultListId = INBOX_LIST_ID,
   initialText = '',
 }: QuickCaptureModalProps) {
+  const [{ timeFormat }] = usePrefs();
   const [text, setText] = useState(initialText);
   const [listId, setListId] = useState(defaultListId);
   const [priorityOverride, setPriorityOverride] = useState<TaskPriority | null>(null);
@@ -91,7 +93,7 @@ export function QuickCaptureModal({
           <div className="flex flex-wrap gap-1.5">
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-tt-sidebar text-xs text-tt-secondary">
               <Calendar className="w-3 h-3 text-tt-blue" />
-              {parsed.dueAt ? formatDueLabel(parsed.dueAt) : 'No date'}
+              {parsed.dueAt ? formatDueLabel(parsed.dueAt, timeFormat) : 'No date'}
             </span>
             {PRI_CHIP.map((p) => (
               <button

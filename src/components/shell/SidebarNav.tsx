@@ -1,6 +1,7 @@
 import type { AppView, Folder, SavedFilter, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 import { listDotColor } from '../../theme/listColors';
+import type { SmartListId } from '../../prefs/prefs';
 import {
   Sun,
   Sunrise,
@@ -14,6 +15,7 @@ import {
   Tag,
   Filter,
   Columns3,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 function rowClass(active: boolean) {
@@ -57,6 +59,9 @@ interface SidebarNavProps {
   setNewListFolderId: (v: string) => void;
   onOpenFilterModal: () => void;
   onEditFilter: (f: SavedFilter) => void;
+  /** Smart-list visibility (shared with the mobile drawer's manage sheet). */
+  smartLists: Record<SmartListId, boolean>;
+  onManageSmartLists: () => void;
 }
 
 export function SidebarNav(props: SidebarNavProps) {
@@ -93,9 +98,11 @@ export function SidebarNav(props: SidebarNavProps) {
     setNewListFolderId,
     onOpenFilterModal,
     onEditFilter,
+    smartLists,
+    onManageSmartLists,
   } = props;
 
-  const smart: { id: AppView; label: string; Icon: typeof Sun; count: number | null }[] = [
+  const smart: { id: AppView & SmartListId; label: string; Icon: typeof Sun; count: number | null }[] = [
     { id: 'today', label: 'Today', Icon: Sun, count: todayCount },
     { id: 'tomorrow', label: 'Tomorrow', Icon: Sunrise, count: tomorrowCount },
     { id: 'next7', label: 'Next 7 Days', Icon: CalendarRange, count: next7Count },
@@ -135,7 +142,7 @@ export function SidebarNav(props: SidebarNavProps) {
     <div className="h-full flex flex-col bg-tt-sidebar text-tt-text">
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         <div className="space-y-0.5">
-          {smart.map(({ id, label, Icon, count }) => (
+          {smart.filter(({ id }) => smartLists[id]).map(({ id, label, Icon, count }) => (
             <button
               key={id}
               type="button"
@@ -249,6 +256,7 @@ export function SidebarNav(props: SidebarNavProps) {
           )}
         </div>
 
+        {smartLists.tags && (
         <div>
           <div className="flex items-center justify-between px-3 mb-1">
             <span className="text-[11px] font-semibold text-tt-secondary">Tags</span>
@@ -272,6 +280,7 @@ export function SidebarNav(props: SidebarNavProps) {
             ))}
           </div>
         </div>
+        )}
 
         <div>
           <div className="flex items-center justify-between px-3 mb-1 group/sec">
@@ -326,6 +335,7 @@ export function SidebarNav(props: SidebarNavProps) {
       </div>
 
       <div className="shrink-0 border-t border-tt-border/80 px-2 py-2 space-y-0.5">
+        {smartLists.completed && (
         <button
           type="button"
           className={rowClass(activeView === 'completed')}
@@ -338,6 +348,13 @@ export function SidebarNav(props: SidebarNavProps) {
           {completedCount > 0 && (
             <span className="text-[12px] text-tt-secondary tabular-nums">{completedCount}</span>
           )}
+        </button>
+        )}
+        <button type="button" className={rowClass(false)} onClick={onManageSmartLists}>
+          <span className="inline-flex items-center gap-2.5 text-tt-secondary">
+            <SlidersHorizontal className="w-4 h-4 opacity-80" />
+            Manage smart lists
+          </span>
         </button>
       </div>
     </div>

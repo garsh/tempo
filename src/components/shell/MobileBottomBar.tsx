@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
 import type { AppView } from '../../types/task';
+import type { TabId } from '../../prefs/prefs';
+import { TAB_LABELS } from '../../prefs/prefs';
 
 interface MobileBottomBarProps {
   activeView: AppView;
-  onTasks: () => void;
-  onCalendar: () => void;
-  onSettings: () => void;
+  /** Settings › Tab Bar: which tabs show, in order (Tasks always present). */
+  tabs: TabId[];
+  onTab: (tab: TabId) => void;
 }
 
 /** Filled rounded check square (TickTick "Tasks" tab). */
@@ -53,6 +55,29 @@ function CalendarGlyph({ active, day }: { active: boolean; day: number }) {
   );
 }
 
+/** Filled rounded square with three knocked-out columns (Board tab). */
+function BoardGlyph({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden>
+      <rect width="22" height="22" rx="5" fill={active ? 'var(--tt-blue)' : 'var(--tt-tab-icon)'} />
+      <rect x="4.5" y="5" width="3.4" height="12" rx="1.2" fill="var(--tt-bg)" />
+      <rect x="9.3" y="5" width="3.4" height="8" rx="1.2" fill="var(--tt-bg)" />
+      <rect x="14.1" y="5" width="3.4" height="10" rx="1.2" fill="var(--tt-bg)" />
+    </svg>
+  );
+}
+
+/** Bold magnifier (Search tab). */
+function SearchGlyph({ active }: { active: boolean }) {
+  const c = active ? 'var(--tt-blue)' : 'var(--tt-tab-icon)';
+  return (
+    <svg width="23" height="23" viewBox="0 0 23 23" aria-hidden>
+      <circle cx="10" cy="10" r="7.4" fill="none" stroke={c} strokeWidth="3.2" />
+      <path d="M15.6 15.6 L20.6 20.6" stroke={c} strokeWidth="3.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Filled hexagon with a round hole (TickTick "Settings" tab). */
 function SettingsGlyph() {
   return (
@@ -67,45 +92,57 @@ function SettingsGlyph() {
 }
 
 /**
- * TickTick Android tab bar: icon-only Tasks | Calendar (today's date) | Settings.
- * No text labels (accessible names via aria-label). Board/Search live in the drawer.
- * Colors follow prefers-color-scheme through theme CSS variables.
+ * TickTick Android tab bar: icon-only, default Tasks | Calendar (today's date) | Settings.
+ * Settings › Tab Bar can add Board / Search and reorder (2–5 tabs, Tasks required).
+ * No text labels (accessible names via aria-label). Colors follow the theme variables.
  */
-export function MobileBottomBar({
-  activeView,
-  onTasks,
-  onCalendar,
-  onSettings,
-}: MobileBottomBarProps) {
+export function MobileBottomBar({ activeView, tabs, onTab }: MobileBottomBarProps) {
   const dayNum = new Date().getDate();
-  const calActive =
-    activeView === 'calendar-month' || activeView === 'calendar-agenda';
-  const tasksActive =
-    !calActive && activeView !== 'board-status' && activeView !== 'board-list';
-
-  const item = (label: string, isActive: boolean, onClick: () => void, glyph: ReactNode) => (
-    <button
-      type="button"
-      aria-label={label}
-      aria-current={isActive ? 'page' : undefined}
-      title={label}
-      onClick={onClick}
-      className="flex-1 flex items-center justify-center bg-transparent border-0 cursor-pointer"
-    >
-      {glyph}
-    </button>
-  );
+  const calActive = activeView === 'calendar-month' || activeView === 'calendar-agenda';
+  const boardActive = activeView === 'board-status' || activeView === 'board-list';
+  const searchActive = activeView === 'search';
+  const active: Record<TabId, boolean> = {
+    tasks: !calActive && !boardActive && !searchActive,
+    calendar: calActive,
+    board: boardActive,
+    search: searchActive,
+    settings: false,
+  };
+  const glyph = (tab: TabId): ReactNode => {
+    switch (tab) {
+      case 'tasks':
+        return <TasksGlyph active={active.tasks} />;
+      case 'calendar':
+        return <CalendarGlyph active={active.calendar} day={dayNum} />;
+      case 'board':
+        return <BoardGlyph active={active.board} />;
+      case 'search':
+        return <SearchGlyph active={active.search} />;
+      case 'settings':
+        return <SettingsGlyph />;
+    }
+  };
 
   return (
     <nav
       aria-label="Primary"
-      data-tempo-tab-count="3"
+      data-tempo-tab-count={tabs.length}
       className="xl:hidden shrink-0 flex items-stretch h-14 bg-tt-bg"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)', boxSizing: 'content-box' }}
     >
-      {item('Tasks', tasksActive, onTasks, <TasksGlyph active={tasksActive} />)}
-      {item('Calendar', calActive, onCalendar, <CalendarGlyph active={calActive} day={dayNum} />)}
-      {item('Settings', false, onSettings, <SettingsGlyph />)}
+      {tabs.map((tab) => (
+        <button
+          key={tab}
+          type="button"
+          aria-label={TAB_LABELS[tab]}
+          aria-current={active[tab] ? 'page' : undefined}
+          title={TAB_LABELS[tab]}
+          onClick={() => onTab(tab)}
+          className="flex-1 flex items-center justify-center bg-transparent border-0 cursor-pointer"
+        >
+          {glyph(tab)}
+        </button>
+      ))}
     </nav>
   );
 }
