@@ -7,7 +7,7 @@ import {
   saveList,
   saveSavedFilter,
   saveTask,
-  seedInitialTasksIfEmpty,
+  initDatabase,
   softDeleteFolder,
   softDeleteList,
   softDeleteSavedFilter,
@@ -126,7 +126,7 @@ export function App() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    seedInitialTasksIfEmpty();
+    void initDatabase();
   }, []);
 
   // PWA Web Share Target / URL capture (?text=&title=&url= or ?share=1)

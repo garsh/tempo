@@ -11,8 +11,11 @@ import type {
   TaskListInput,
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
-import { calculateNextDueDate, formatDate, isRecurring } from '../domain/recurrence';
+import { calculateNextDueDate, isRecurring } from '../domain/recurrence';
 import { clearFiredForTask } from '../domain/notifications';
+import { buildSampleData, isSampleId } from './sampleData';
+
+export { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from './sampleData';
 
 export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
@@ -73,185 +76,40 @@ export async function ensureInboxList(): Promise<TaskList> {
   return inbox;
 }
 
-export async function seedInitialTasksIfEmpty(): Promise<void> {
+/** Make sure the built-in Inbox list exists. Never seeds tasks. */
+export async function initDatabase(): Promise<void> {
   await ensureInboxList();
+}
 
-  const count = await db.tasks.count();
-  if (count > 0) return;
+/** Settings → "Load sample tasks": (re)insert the demo data with fresh dates. */
+export async function loadSampleTasks(nowDate: Date = new Date()): Promise<number> {
+  await ensureInboxList();
+  const { folders, lists, tasks } = buildSampleData(nowDate);
+  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
+    await db.folders.bulkPut(folders);
+    await db.lists.bulkPut(lists);
+    await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: null })));
+  });
+  return tasks.length;
+}
 
+/**
+ * Settings → "Clear sample tasks": soft-delete (tombstone) every demo task, list and
+ * folder so the removal also propagates through Drive sync.
+ */
+export async function clearSampleTasks(): Promise<number> {
   const now = Date.now();
-  const today = formatDate(new Date());
-  const tomorrow = formatDate(new Date(Date.now() + 86400000));
-  const inThree = formatDate(new Date(Date.now() + 86400000 * 3));
-
-  const personalFolder: Folder = {
-    id: 'demo-folder-personal',
-    name: 'Personal',
-    sortOrder: 1,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.folders.put(personalFolder);
-
-  const homeList: TaskList = {
-    id: 'demo-list-home',
-    name: 'Home',
-    folderId: personalFolder.id,
-    sortOrder: 1,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  const workList: TaskList = {
-    id: 'demo-list-work',
-    name: 'Work',
-    folderId: null,
-    sortOrder: 2,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.lists.bulkPut([homeList, workList]);
-
-  const sampleTasks: Task[] = [
-    {
-      id: 'demo-1',
-      title: 'Water indoor plants',
-      notes: 'Check soil moisture for the ferns and monstera',
-      listId: homeList.id,
-      dueAt: `${today}T09:00`,
-      priority: 'medium',
-      pinned: true,
-      recurrence: {
-        type: 'after_completion',
-        intervalValue: 3,
-        intervalUnit: 'days',
-      },
-      createdAt: now - 86400000 * 3,
-      updatedAt: now,
-      completionHistory: [now - 86400000 * 3],
-      tags: ['Plants'],
-      subtasks: [
-        { id: 'st-1a', title: 'Check fern', completed: false },
-        { id: 'st-1b', title: 'Check monstera', completed: true },
-      ],
-    },
-    {
-      id: 'demo-2',
-      title: 'Back up laptop to external drive',
-      notes: 'Run Time Machine / backup script',
-      listId: INBOX_LIST_ID,
-      dueAt: today,
-      priority: 'high',
-      recurrence: {
-        type: 'fixed_interval',
-        intervalValue: 1,
-        intervalUnit: 'weeks',
-      },
-      createdAt: now - 86400000 * 7,
-      updatedAt: now,
-      completionHistory: [now - 86400000 * 7],
-      tags: ['Tech'],
-    },
-    {
-      id: 'demo-3',
-      title: 'Buy groceries for the week',
-      notes: 'Milk, eggs, greens',
-      listId: INBOX_LIST_ID,
-      dueAt: `${today}T17:30`,
-      priority: 'high',
-      recurrence: null,
-      createdAt: now,
-      updatedAt: now,
-      completionHistory: [],
-      tags: ['Errands'],
-      subtasks: [
-        { id: 'st-3a', title: 'Milk', completed: false },
-        { id: 'st-3b', title: 'Eggs', completed: false },
-        { id: 'st-3c', title: 'Greens', completed: false },
-      ],
-    },
-    {
-      id: 'demo-4',
-      title: 'Deep clean coffee machine',
-      notes: 'Run vinegar or descaler cycle',
-      listId: homeList.id,
-      dueAt: formatDate(new Date(Date.now() - 86400000 * 1)),
-      priority: 'low',
-      recurrence: {
-        type: 'after_completion',
-        intervalValue: 2,
-        intervalUnit: 'weeks',
-      },
-      createdAt: now - 86400000 * 15,
-      updatedAt: now,
-      completionHistory: [now - 86400000 * 15],
-      tags: ['Home'],
-    },
-    {
-      id: 'demo-5',
-      title: 'Call dentist to schedule checkup',
-      listId: INBOX_LIST_ID,
-      dueAt: null,
-      priority: 'medium',
-      recurrence: null,
-      createdAt: now,
-      updatedAt: now,
-      completionHistory: [],
-      tags: ['Health'],
-    },
-    {
-      id: 'demo-6',
-      title: 'Team standup notes',
-      notes: 'Prep talking points',
-      listId: workList.id,
-      dueAt: `${tomorrow}T10:00`,
-      priority: 'none',
-      recurrence: null,
-      createdAt: now,
-      updatedAt: now,
-      completionHistory: [],
-      tags: ['Work'],
-    },
-    {
-      id: 'demo-7',
-      title: 'Pay rent',
-      listId: INBOX_LIST_ID,
-      dueAt: inThree,
-      priority: 'high',
-      pinned: true,
-      recurrence: {
-        type: 'fixed_interval',
-        intervalValue: 1,
-        intervalUnit: 'months',
-        monthDay: 1,
-      },
-      createdAt: now,
-      updatedAt: now,
-      completionHistory: [],
-      tags: ['Finance'],
-    },
-    {
-      id: 'demo-8',
-      title: 'Morning stretch',
-      listId: homeList.id,
-      dueAt: today,
-      priority: 'low',
-      recurrence: {
-        type: 'fixed_interval',
-        intervalValue: 1,
-        intervalUnit: 'weeks',
-        weekdays: [1, 2, 3, 4, 5],
-      },
-      createdAt: now,
-      updatedAt: now,
-      completionHistory: [],
-      tags: ['Health'],
-    },
-  ];
-
-  await db.tasks.bulkPut(sampleTasks);
+  let removed = 0;
+  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
+    const tasks = (await db.tasks.toArray()).filter((t) => isSampleId(t.id) && !t.deletedAt);
+    removed = tasks.length;
+    await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: now, updatedAt: now })));
+    const lists = (await db.lists.toArray()).filter((l) => isSampleId(l.id) && !l.deletedAt);
+    await db.lists.bulkPut(lists.map((l) => ({ ...l, deletedAt: now, updatedAt: now })));
+    const folders = (await db.folders.toArray()).filter((f) => isSampleId(f.id) && !f.deletedAt);
+    await db.folders.bulkPut(folders.map((f) => ({ ...f, deletedAt: now, updatedAt: now })));
+  });
+  return removed;
 }
 
 export async function saveTask(task: TaskInput): Promise<Task> {
