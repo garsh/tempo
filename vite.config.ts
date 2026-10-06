@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+/** Service-worker cache generation. v2 = system light/dark theme (drop pre-theme assets). */
+const TEMPO_SW_CACHE_VERSION = 'v2';
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -23,8 +26,8 @@ export default defineConfig({
         short_name: 'Tempo',
         description:
           'Local-first tasks with smart lists, calendar, board, and Google Drive sync.',
-        theme_color: '#4772FA',
-        background_color: '#FFFFFF',
+        theme_color: '#F2F4F9',
+        background_color: '#F2F4F9',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',
@@ -66,6 +69,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Bump TEMPO_SW_CACHE_VERSION whenever stale precaches must be evicted on devices.
+        // A new cacheId renames the precache; cleanupOutdatedCaches then deletes the old one.
+        cacheId: `tempo-${TEMPO_SW_CACHE_VERSION}`,
         importScripts: ['sw-notify.js'],
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,

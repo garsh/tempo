@@ -65,7 +65,7 @@ export function QuickCaptureModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-start justify-center sm:pt-[12vh] bg-black/40">
       <button type="button" className="absolute inset-0" aria-label="Dismiss" onClick={onClose} />
-      <div className="relative w-full sm:max-w-lg bg-white border border-tt-border rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 pb-6">
+      <div className="relative w-full sm:max-w-lg bg-tt-elevated border border-tt-border rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 pb-6">
         <div className="sm:hidden w-10 h-1 rounded-full bg-tt-border mx-auto mb-3" />
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-bold text-tt-text">Add task</h2>
@@ -85,7 +85,7 @@ export function QuickCaptureModal({
             onChange={(e) => setText(e.target.value)}
             rows={3}
             placeholder="What needs doing? Try: Buy milk tomorrow 5pm #Errands !high"
-            className="w-full px-3 py-2.5 rounded-xl bg-tt-sidebar border border-transparent focus:border-tt-blue focus:bg-white text-[15px] outline-none resize-none"
+            className="w-full px-3 py-2.5 rounded-xl bg-tt-sidebar border border-transparent focus:border-tt-blue focus:bg-tt-elevated text-[15px] outline-none resize-none"
           />
 
           <div className="flex flex-wrap gap-1.5">
@@ -100,7 +100,7 @@ export function QuickCaptureModal({
                 onClick={() => setPriorityOverride(p.id)}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${
                   priority === p.id
-                    ? 'border-current bg-white font-semibold'
+                    ? 'border-current bg-tt-elevated font-semibold'
                     : 'border-transparent bg-tt-sidebar text-tt-secondary'
                 }`}
                 style={priority === p.id ? { color: p.color } : undefined}

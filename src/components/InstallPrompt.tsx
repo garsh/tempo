@@ -8,7 +8,7 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISS_KEY = 'tempo_install_prompt_dismissed';
 
-/** Hardcoded TickTick light chrome — inline styles so stale CSS/Tailwind cannot leave navy/purple. */
+/** TickTick chrome via theme CSS variables — follows prefers-color-scheme (light default). */
 const S = {
   wrap: {
     position: 'fixed' as const,
@@ -25,28 +25,28 @@ const S = {
     alignItems: 'flex-start',
     padding: 16,
     borderRadius: 16,
-    border: '1px solid #E8E8ED',
-    background: '#FFFFFF',
-    boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
-    color: '#1C1C1E',
+    border: '1px solid var(--tt-border)',
+    background: 'var(--tt-elevated)',
+    boxShadow: '0 12px 40px var(--tt-shadow)',
+    color: 'var(--tt-text)',
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   },
   iconBox: {
     padding: 8,
     borderRadius: 12,
-    background: '#E8EEFE',
-    color: '#4772FA',
+    background: 'var(--tt-blue-soft)',
+    color: 'var(--tt-blue)',
     flexShrink: 0,
   },
-  title: { margin: 0, fontSize: 14, fontWeight: 600, color: '#1C1C1E' },
-  body: { margin: '4px 0 0', fontSize: 12, lineHeight: 1.45, color: '#8E8E93' },
+  title: { margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--tt-text)' },
+  body: { margin: '4px 0 0', fontSize: 12, lineHeight: 1.45, color: 'var(--tt-secondary)' },
   row: { display: 'flex', gap: 8, marginTop: 12 },
   installBtn: {
     padding: '6px 14px',
     borderRadius: 12,
     border: 'none',
-    background: '#4772FA',
+    background: 'var(--tt-blue)',
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 600,
@@ -56,8 +56,8 @@ const S = {
     padding: '6px 14px',
     borderRadius: 12,
     border: 'none',
-    background: '#F5F5F7',
-    color: '#8E8E93',
+    background: 'var(--tt-hover)',
+    color: 'var(--tt-secondary)',
     fontSize: 12,
     fontWeight: 500,
     cursor: 'pointer',
@@ -66,7 +66,7 @@ const S = {
     padding: 4,
     border: 'none',
     background: 'transparent',
-    color: '#AEAEB2',
+    color: 'var(--tt-muted)',
     cursor: 'pointer',
   },
 };
@@ -122,10 +122,10 @@ export function InstallPrompt() {
   };
 
   return (
-    <div style={S.wrap} data-tempo-install-prompt="light">
+    <div style={S.wrap} data-tempo-install-prompt="themed">
       <div style={S.card}>
         <div style={S.iconBox}>
-          <Download className="w-5 h-5" color="#4772FA" />
+          <Download className="w-5 h-5" color="var(--tt-blue)" />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={S.title}>Install Tempo</p>
@@ -143,7 +143,7 @@ export function InstallPrompt() {
           </div>
         </div>
         <button type="button" onClick={dismiss} style={S.close} aria-label="Dismiss">
-          <X className="w-4 h-4" color="#AEAEB2" />
+          <X className="w-4 h-4" color="var(--tt-muted)" />
         </button>
       </div>
     </div>

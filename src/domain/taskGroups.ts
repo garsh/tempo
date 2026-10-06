@@ -38,14 +38,16 @@ export function groupTasksForListView(
       nodate.push(t);
       continue;
     }
-    const urgency = getTaskUrgency(t.dueAt);
-    if (urgency === 'overdue') {
+    const datePart = getDueDatePart(t.dueAt);
+    // Compare against `todayKey` (not the wall clock) so callers/tests can pin "today".
+    if (datePart < todayKey) {
       overdue.push(t);
       continue;
     }
-    const datePart = getDueDatePart(t.dueAt);
     if (datePart === todayKey) {
-      today.push(t);
+      // A timed task earlier today is overdue in live use (no pinned todayKey).
+      if (!opts.todayKey && getTaskUrgency(t.dueAt) === 'overdue') overdue.push(t);
+      else today.push(t);
       continue;
     }
     // tomorrow / later within remaining

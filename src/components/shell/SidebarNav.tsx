@@ -20,7 +20,7 @@ function rowClass(active: boolean) {
   return `w-full flex items-center justify-between gap-2 px-3 py-[7px] rounded-lg text-[13px] transition-colors ${
     active
       ? 'bg-tt-blue-soft text-tt-blue font-semibold'
-      : 'text-tt-text hover:bg-black/[0.04] font-medium'
+      : 'text-tt-text hover:bg-tt-hover font-medium'
   }`;
 }
 
@@ -123,7 +123,7 @@ export function SidebarNav(props: SidebarNavProps) {
           type="button"
           title={`Delete ${list.name}`}
           onClick={() => onDeleteList(list)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md text-tt-overdue hover:bg-red-50"
+          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md text-tt-overdue hover:bg-tt-overdue/10"
         >
           <Trash2 className="w-3 h-3" />
         </button>
@@ -172,12 +172,12 @@ export function SidebarNav(props: SidebarNavProps) {
                 value={newListName}
                 onChange={(e) => setNewListName(e.target.value)}
                 placeholder="List name"
-                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-white"
+                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
               />
               <select
                 value={newListFolderId}
                 onChange={(e) => setNewListFolderId(e.target.value)}
-                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-white"
+                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
               >
                 <option value="">No folder</option>
                 {activeFolders.map((f) => (
@@ -192,7 +192,7 @@ export function SidebarNav(props: SidebarNavProps) {
                 </button>
                 <button
                   type="button"
-                  className="flex-1 text-xs py-1 rounded-lg bg-white border border-tt-border"
+                  className="flex-1 text-xs py-1 rounded-lg bg-tt-elevated border border-tt-border"
                   onClick={() => setShowNewListInput(false)}
                 >
                   Cancel
@@ -240,7 +240,7 @@ export function SidebarNav(props: SidebarNavProps) {
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 placeholder="Folder name"
-                className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-white"
+                className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
               />
               <button type="submit" className="text-xs px-2 rounded-lg bg-tt-blue text-white">
                 Add

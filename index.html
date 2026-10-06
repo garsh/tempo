@@ -7,17 +7,19 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="mask-icon" href="/mask-icon.svg" color="#4772FA" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f2f4f9" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <meta name="application-name" content="Tempo" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Tempo" />
     <meta name="description" content="Local-first TickTick-style tasks: smart lists, calendar, board, reminders, and Google Drive sync." />
     <title>Tempo</title>
     <!-- Google Identity Services client -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
-  <body class="bg-white text-tt-text min-h-screen">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

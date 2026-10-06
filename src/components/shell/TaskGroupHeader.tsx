@@ -19,7 +19,7 @@ export function TaskGroupHeader({
     <button
       type="button"
       onClick={onToggle}
-      className="w-full flex items-center gap-1.5 px-3 sm:px-4 py-2 text-left sticky top-0 bg-tt-surface z-10"
+      className="w-full flex items-center gap-1.5 px-3 sm:px-4 py-2 text-left sticky top-0 bg-tt-bg xl:bg-tt-surface z-10"
     >
       {collapsed ? (
         <ChevronRight className="w-3.5 h-3.5 text-tt-muted" />
