@@ -46,6 +46,11 @@ import { IconRail } from './components/shell/IconRail';
 import { SidebarNav } from './components/shell/SidebarNav';
 import { MobileBottomBar } from './components/shell/MobileBottomBar';
 import { EmptyInboxState } from './components/shell/EmptyInboxState';
+import { EmptyTodayState } from './components/shell/EmptyTodayState';
+import { TodayTipBanner } from './components/shell/TodayTipBanner';
+import { LightbulbIcon } from './components/shell/LightbulbIcon';
+import { PlanDaySheet } from './components/PlanDaySheet';
+import { dueAtMovedToToday } from './domain/planDay';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { QuickAddBar } from './components/shell/QuickAddBar';
 import { groupTasksForListView } from './domain/taskGroups';
@@ -103,6 +108,8 @@ export function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [isPlanDayOpen, setIsPlanDayOpen] = useState(false);
+  const closePlanDay = useCallback(() => setIsPlanDayOpen(false), []);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [quickCaptureText, setQuickCaptureText] = useState('');
@@ -489,6 +496,12 @@ export function App() {
    * Layout only — colors always come from the system theme (prefers-color-scheme).
    */
   const emptyInbox = activeView === 'inbox' && inboxCount === 0;
+  /** TickTick empty Today: same bare chrome as empty Inbox, plus tip banner + lightbulb. */
+  const emptyToday = activeView === 'today' && todayCount === 0;
+  const emptyState = emptyInbox || emptyToday;
+
+  const moveTaskToToday = (task: Task) =>
+    void handlePatchTask(task.id, { dueAt: dueAtMovedToToday(task.dueAt) });
 
   const sidebar = (
     <SidebarNav
@@ -597,9 +610,10 @@ export function App() {
       <div
         className="flex-1 flex flex-col min-w-0 min-h-0 bg-tt-bg xl:bg-tt-surface"
         data-tempo-empty-inbox-view={emptyInbox ? '1' : '0'}
+        data-tempo-empty-today-view={emptyToday ? '1' : '0'}
       >
-        {/* Mobile top bar — TickTick: hamburger | title | ⋮ */}
-        <header className="xl:hidden shrink-0 flex items-center gap-1 pl-1 pr-1 h-16 bg-tt-bg text-tt-text">
+        {/* Mobile top bar — TickTick: hamburger | title | (Today: lightbulb) | ⋮ */}
+        <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
           <button
             type="button"
             className="w-11 h-11 flex items-center justify-center text-tt-text"
@@ -609,9 +623,20 @@ export function App() {
           >
             <Menu className="w-6 h-6" strokeWidth={1.75} />
           </button>
-          <h1 className="flex-1 min-w-0 text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
+          <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
             {viewTitleText}
           </h1>
+          {activeView === 'today' && (
+            <button
+              type="button"
+              className="w-11 h-11 flex items-center justify-center text-tt-text"
+              onClick={() => setIsPlanDayOpen(true)}
+              title="Plan your day"
+              aria-label="Plan your day"
+            >
+              <LightbulbIcon />
+            </button>
+          )}
           <button
             type="button"
             className="w-11 h-11 flex items-center justify-center text-tt-text"
@@ -630,6 +655,17 @@ export function App() {
             <div className="hidden xl:flex shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2">
               <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
               <div className="flex items-center gap-1">
+                {activeView === 'today' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsPlanDayOpen(true)}
+                    className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
+                    title="Plan your day"
+                    aria-label="Plan your day"
+                  >
+                    <LightbulbIcon className="w-[18px] h-[18px]" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowShortcutsHelp(true)}
@@ -648,9 +684,11 @@ export function App() {
               </div>
             </div>
 
+            {activeView === 'today' && <TodayTipBanner />}
+
             {/* Search (desktop + when focused on mobile via tab) */}
             <div
-              className={`shrink-0 px-3 sm:px-5 pb-2 ${emptyInbox ? 'hidden xl:block' : ''}`}
+              className={`shrink-0 px-3 sm:px-5 pb-2 ${emptyState ? 'hidden xl:block' : ''}`}
             >
               <div className="relative hidden xl:block mb-2">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
@@ -668,7 +706,7 @@ export function App() {
                 </div>
               )}
               {/* Mobile search field when on search from bottom bar — always available collapsed */}
-              {!emptyInbox && (
+              {!emptyState && (
                 <div className="xl:hidden mb-1">
                   <input
                     value={searchQuery}
@@ -682,9 +720,18 @@ export function App() {
             </div>
 
             <div
-              className={`flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyInbox ? 'flex flex-col xl:block' : 'pb-20'}`}
+              className={`flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyState ? 'flex flex-col xl:block' : 'pb-20'}`}
             >
-              {emptyInbox ? (
+              {emptyToday ? (
+                <>
+                  <div className="xl:hidden flex-1 flex flex-col">
+                    <EmptyTodayState />
+                  </div>
+                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
+                    No tasks today — enjoy a wonderful day
+                  </p>
+                </>
+              ) : emptyInbox ? (
                 <>
                   <div className="xl:hidden flex-1 flex flex-col">
                     <EmptyInboxState />
@@ -903,6 +950,15 @@ export function App() {
         initialTask={editingTask}
         lists={activeLists}
         defaultListId={defaultListForNew}
+      />
+
+      <PlanDaySheet
+        isOpen={isPlanDayOpen}
+        tasks={activeTasks}
+        listNameById={listNameById}
+        onClose={closePlanDay}
+        onMoveToToday={moveTaskToToday}
+        onAddTask={openCapture}
       />
 
       <SettingsModal
