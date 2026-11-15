@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -80,9 +80,30 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'react',
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            {
+              name: 'vendor',
+              test: /node_modules/,
+            },
+          ],
+        },
+      },
+    },
+  },
   server: {
     host: true,
     port: 5180,
     allowedHosts: ['bird.lan', '.lan'],
+  },
+  test: {
+    isolate: false,
   },
 });
