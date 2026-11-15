@@ -1,6 +1,7 @@
 import type { Task } from '../types/task';
 import {
   formatDate,
+  getDayBoundsMs,
   getDueDatePart,
   getNextUncompletedOccurrenceDate,
   isCompleted,
@@ -66,6 +67,7 @@ export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
   return tasks
     .filter((t) => {
       if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (!t.recurrence && t.completedAt) return false;
       if (!taskOccursOnDate(t, dateStr)) return false;
       return !isCompletedOnDate(t, dateStr);
     })
@@ -74,9 +76,17 @@ export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
 
 /** Tasks completed on a given YYYY-MM-DD (including recurring occurrences completed on that day). */
 export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
+  const [dayStartMs, dayEndMs] = getDayBoundsMs(dateStr);
   return tasks
     .filter((t) => {
       if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (!t.recurrence) {
+        if (!t.completedAt) return false;
+        const dueMatches = !!t.dueAt && getDueDatePart(t.dueAt) === dateStr;
+        const compMatches = t.completedAt >= dayStartMs && t.completedAt < dayEndMs;
+        if (!dueMatches && !compMatches) return false;
+        return taskOccursOnDate(t, dateStr) && isCompletedOnDate(t, dateStr);
+      }
       if (!taskOccursOnDate(t, dateStr)) return false;
       return isCompletedOnDate(t, dateStr);
     })

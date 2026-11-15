@@ -42,6 +42,7 @@ import { toggleSelected } from './domain/batch';
 import { usePrefs, type TabId } from './prefs/prefs';
 import { getStoredClientId } from './sync/googleAuth';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
+import { initDiagnostics } from './domain/diagnostics';
 import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
@@ -226,6 +227,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    initDiagnostics();
     void initDatabase();
   }, []);
 
@@ -271,14 +273,14 @@ export function App() {
     .filter((f) => !f.deletedAt)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const activeTasks = allTasks.filter((t) => !t.deletedAt);
-  const open = openTasks(activeTasks);
-  const completedOneOffs = activeTasks.filter((t) => isCompleted(t));
+  const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
+  const open = useMemo(() => openTasks(activeTasks), [activeTasks]);
+  const completedOneOffs = useMemo(() => activeTasks.filter((t) => isCompleted(t)), [activeTasks]);
 
-  const todayCount = filterToday(activeTasks).length;
-  const tomorrowCount = filterTomorrow(activeTasks).length;
-  const next7Count = filterNext7Days(activeTasks).length;
-  const inboxCount = filterInbox(activeTasks).length;
+  const todayCount = useMemo(() => filterToday(activeTasks).length, [activeTasks]);
+  const tomorrowCount = useMemo(() => filterTomorrow(activeTasks).length, [activeTasks]);
+  const next7Count = useMemo(() => filterNext7Days(activeTasks).length, [activeTasks]);
+  const inboxCount = useMemo(() => filterInbox(activeTasks).length, [activeTasks]);
   /**
    * TickTick new-install empty Inbox (mobile): title row + illustration + FAB + tabs only.
    * Layout only — colors always come from the theme variables.
@@ -292,23 +294,27 @@ export function App() {
   const isBoard = activeView === 'board-status' || activeView === 'board-list';
 
   const baseForView = useMemo((): Task[] => {
+    const withTodayCompleted = (openList: Task[], listId?: string): Task[] => {
+      if (prefs.hideCompleted) return openList;
+      const todayStr = formatDate(new Date());
+      const doneToday = completedTasksOnDate(activeTasks, todayStr).filter(
+        (t) => !listId || t.listId === listId,
+      );
+      const seen = new Set(openList.map((t) => `${t.id}:${t.dueAt ?? ''}`));
+      return [...openList, ...doneToday.filter((t) => !seen.has(`${t.id}:${t.dueAt ?? ''}`))];
+    };
+
     switch (activeView) {
-      case 'today': {
-        const todayList = filterToday(activeTasks);
-        if (prefs.hideCompleted) return todayList;
-        const todayStr = formatDate(new Date());
-        const doneToday = completedTasksOnDate(activeTasks, todayStr);
-        const seen = new Set(todayList.map((t) => `${t.id}:${t.dueAt ?? ''}`));
-        return [...todayList, ...doneToday.filter((t) => !seen.has(`${t.id}:${t.dueAt ?? ''}`))];
-      }
+      case 'today':
+        return withTodayCompleted(filterToday(activeTasks));
       case 'tomorrow':
         return filterTomorrow(activeTasks);
       case 'next7':
         return filterNext7Days(activeTasks);
       case 'inbox':
-        return filterInbox(activeTasks);
+        return withTodayCompleted(filterInbox(activeTasks), INBOX_LIST_ID);
       case 'all':
-        return open;
+        return withTodayCompleted(open);
       case 'completed':
         return [...completedOneOffs].sort(
           (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)
@@ -322,7 +328,8 @@ export function App() {
         return activeTasks;
       default:
         if (activeView.startsWith('list:')) {
-          return filterByListId(activeTasks, activeView.slice(5));
+          const listId = activeView.slice(5);
+          return withTodayCompleted(filterByListId(activeTasks, listId), listId);
         }
         if (activeView.startsWith('filter:')) {
           const fid = activeView.slice(7);
@@ -768,6 +775,7 @@ export function App() {
     if (isCalendar || isBoard || activeView === 'completed') return [];
     const completedCapable =
       activeView === 'today' ||
+      activeView === 'inbox' ||
       activeView === 'all' ||
       activeView === 'search' ||
       activeView.startsWith('list:');
@@ -1312,14 +1320,15 @@ export function App() {
                         <>
                           {displayedTasks.length > 0 && (
                             <div>
-                              <TaskGroupHeader
-                                label={formatCalendarDayHeading(calSelectedDate)}
-                                count={displayedTasks.length}
-                                collapsed={!!collapsedGroups['cal-open']}
-                                onToggle={() => toggleGroup('cal-open')}
-                                sticky={false}
-                              />
-                              {!collapsedGroups['cal-open'] && renderTaskRows(displayedTasks, false, true)}
+                              <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
+                                <span className="text-[20px] font-bold text-tt-text">
+                                  {formatCalendarDayHeading(calSelectedDate)}
+                                </span>
+                                <span className="text-[13px] text-tt-muted tabular-nums">
+                                  {displayedTasks.length}
+                                </span>
+                              </div>
+                              {renderTaskRows(displayedTasks, false, true)}
                             </div>
                           )}
                           {calCompletedTasks.length > 0 && (
@@ -1368,7 +1377,8 @@ export function App() {
                 </p>
               ) : (
                 taskGroups.map((g) => {
-                  const collapsed = !!collapsedGroups[g.id];
+                  const groupKey = `${activeView}:${g.id}`;
+                  const collapsed = !!collapsedGroups[groupKey];
                   return (
                     <div key={g.id}>
                       {g.label && (
@@ -1376,7 +1386,7 @@ export function App() {
                           label={g.label}
                           count={g.tasks.length}
                           collapsed={collapsed}
-                          onToggle={() => toggleGroup(g.id)}
+                          onToggle={() => toggleGroup(groupKey)}
                           tone={g.id === 'overdue' ? 'overdue' : 'default'}
                         />
                       )}
@@ -1511,6 +1521,14 @@ export function App() {
         syncStatus={syncStatus}
         onSyncStatusChange={() => refreshSyncStatus()}
         onShowShortcuts={() => setShowShortcutsHelp(true)}
+        diagnosticsContext={{
+          activeView,
+          calSelectedDate,
+          collapsedGroups,
+          groupBy: prefs.groupBy,
+          sortBy: prefs.sortBy,
+          hideCompleted: prefs.hideCompleted,
+        }}
       />
 
       <OverflowMenu

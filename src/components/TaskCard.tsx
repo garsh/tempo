@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import {
   formatClockTime,
@@ -99,26 +99,70 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onRowContextMenu,
 }) => {
   const [{ timeFormat }] = usePrefs();
-  const [justCompleted, setJustCompleted] = useState(false);
+  const [pendingSnapshot, setPendingSnapshot] = useState<{
+    id: string;
+    dueAt?: string | null;
+    completedAt?: number | null;
+    updatedAt: number;
+  } | null>(null);
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const completed = isCompleted(task);
+  const taskChangedSinceClick =
+    pendingSnapshot !== null &&
+    (task.id !== pendingSnapshot.id ||
+      task.dueAt !== pendingSnapshot.dueAt ||
+      task.completedAt !== pendingSnapshot.completedAt ||
+      task.updatedAt !== pendingSnapshot.updatedAt);
+  const justCompleted = pendingSnapshot !== null && !taskChangedSinceClick;
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = priorityCheckboxColor(task.priority);
   const dueLabel = formatRowDue(task.dueAt, timeFormat);
   const sub = task.subtasks?.length ? subtaskProgress(task.subtasks) : null;
 
+  useEffect(() => {
+    if (taskChangedSinceClick) {
+      if (fallbackTimerRef.current) {
+        clearTimeout(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
+      }
+      setPendingSnapshot(null);
+    }
+  }, [taskChangedSinceClick]);
+
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    };
+  }, []);
+
   const handleCheck = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (pendingSnapshot !== null && !taskChangedSinceClick) return;
     const dateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
     if (completed) {
       onUncomplete?.(task.id, dateStr);
       return;
     }
-    setJustCompleted(true);
-    setTimeout(() => {
+    setPendingSnapshot({
+      id: task.id,
+      dueAt: task.dueAt,
+      completedAt: task.completedAt,
+      updatedAt: task.updatedAt,
+    });
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    completeTimerRef.current = setTimeout(() => {
+      completeTimerRef.current = null;
       onComplete(task.id, dateStr);
-      setJustCompleted(false);
-    }, 220);
+    }, 120);
+    fallbackTimerRef.current = setTimeout(() => {
+      fallbackTimerRef.current = null;
+      setPendingSnapshot(null);
+    }, 2500);
   };
 
   const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
@@ -184,9 +228,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       <button
         type="button"
         onClick={handleCheck}
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
         disabled={completed && !onUncomplete}
         title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-        className="flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors"
+        className="relative flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
         style={{
           borderColor: completed || justCompleted ? '#34C759' : borderColor,
           backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { Task } from '../types/task';
 import { buildMonthGrid, weekdayLabels } from '../domain/calendar';
 import { usePrefs } from '../prefs/prefs';
-import { formatDate, isRecurring, taskOccursOnDate } from '../domain/recurrence';
+import { formatDate, getDueDatePart, isCompleted, isRecurring, taskOccursOnDate } from '../domain/recurrence';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -49,10 +49,20 @@ export function CalendarMonthView({
 
   const dueDateSet = useMemo(() => {
     const set = new Set<string>();
-    const active = tasks.filter((t) => !t.deletedAt && (t.dueAt || isRecurring(t)));
-    for (const cell of monthGrid) {
-      if (active.some((t) => taskOccursOnDate(t, cell.dateStr))) {
-        set.add(cell.dateStr);
+    const recurringTasks: Task[] = [];
+    for (const t of tasks) {
+      if (t.deletedAt) continue;
+      if (isRecurring(t)) {
+        recurringTasks.push(t);
+      } else if (!isCompleted(t) && t.dueAt) {
+        set.add(getDueDatePart(t.dueAt));
+      }
+    }
+    if (recurringTasks.length > 0) {
+      for (const cell of monthGrid) {
+        if (!set.has(cell.dateStr) && recurringTasks.some((t) => taskOccursOnDate(t, cell.dateStr))) {
+          set.add(cell.dateStr);
+        }
       }
     }
     return set;

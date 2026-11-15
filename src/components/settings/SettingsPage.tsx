@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Copy,
   ExternalLink,
   Key,
   Keyboard,
@@ -13,7 +14,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Task, TaskList } from '../../types/task';
-import { clearAllData, clearSampleTasks, isSampleId, loadSampleTasks } from '../../db/db';
+import {
+  clearAllData,
+  clearSampleTasks,
+  isSampleId,
+  loadSampleTasks,
+  repairAndDeduplicateDatabase,
+} from '../../db/db';
 import {
   clearStoredToken,
   getStoredClientId,
@@ -32,6 +39,7 @@ import {
 import { setGoogleAccount } from '../../sync/googleAccount';
 import { computeTempoStats } from '../../domain/stats';
 import { formatClockTime } from '../../domain/recurrence';
+import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
 import {
   getNotificationPermission,
   isNotificationsEnabled,
@@ -100,6 +108,7 @@ interface SettingsPageProps {
   syncStatus: SyncStatusSnapshot;
   onSyncStatusChange: () => void;
   onShowShortcuts: () => void;
+  diagnosticsContext?: Record<string, unknown>;
 }
 
 type Status = { type: 'success' | 'error'; message: string } | null;
@@ -676,20 +685,27 @@ function FileRow({
   icon,
   label,
   accept,
+  disabled,
   onFile,
 }: {
   icon: ReactNode;
   label: string;
   accept: string;
+  disabled?: boolean;
   onFile: (file: File) => void;
 }) {
   return (
-    <label className="w-full min-h-[50px] flex items-center pl-4 pr-[18px] gap-3 cursor-pointer hover:bg-tt-hover">
+    <label
+      className={`w-full min-h-[50px] flex items-center pl-4 pr-[18px] gap-3 ${
+        disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer hover:bg-tt-hover'
+      }`}
+    >
       <span className="w-5 h-5 shrink-0 flex items-center justify-center">{icon}</span>
       <span className="flex-1 text-[17px] text-tt-text">{label}</span>
       <input
         type="file"
         accept={accept}
+        disabled={disabled}
         className="sr-only"
         aria-label={label}
         onChange={(e) => {
@@ -703,19 +719,64 @@ function FileRow({
 }
 
 function IntegrationsPage({
+  tasks,
+  lists,
   syncStatus,
+  diagnosticsContext,
   setStatus,
   go,
 }: SettingsPageProps & { setStatus: (s: Status) => void; go: (p: SettingsPageId) => void }) {
   const [confirmClear, setConfirmClear] = useState(false);
-  const run = (fn: () => Promise<string>, failPrefix: string) =>
-    void fn()
-      .then((message) => setStatus({ type: 'success', message }))
-      .catch((err: unknown) =>
-        setStatus({ type: 'error', message: `${failPrefix}: ${err instanceof Error ? err.message : String(err)}` })
-      );
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const diag = buildDiagnosticsSummary(tasks, lists, diagnosticsContext);
+
+  const run = async (label: string, fn: () => Promise<string>, failPrefix: string) => {
+    if (busyLabel) return;
+    setStatus(null);
+    setBusyLabel(label);
+    try {
+      await new Promise((r) => setTimeout(r, 16));
+      const message = await fn();
+      setStatus({ type: 'success', message });
+    } catch (err: unknown) {
+      setStatus({
+        type: 'error',
+        message: `${failPrefix}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setBusyLabel(null);
+    }
+  };
+
+  const handleCopyDiagnostics = async () => {
+    const report = buildDiagnosticsSummary(tasks, lists, diagnosticsContext);
+    const json = JSON.stringify(report, null, 2);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(json);
+        setStatus({ type: 'success', message: 'Copied diagnostics JSON to clipboard.' });
+        return;
+      }
+    } catch {
+      /* fallback below when clipboard permission is unavailable */
+    }
+    setStatus({
+      type: 'error',
+      message: `Clipboard unavailable. Build ${report.buildId}: ${report.counts.openTasks} open, ${report.counts.recurringTasks} recurring, ${report.counts.completedTasks} completed, ${report.counts.tombstonedTasks} tombstones, ${report.counts.duplicateOpenExtraCount} duplicate open.`,
+    });
+  };
+
   return (
     <>
+      {busyLabel && (
+        <div
+          role="status"
+          className="mx-4 mb-4 p-3 rounded-xl flex items-center gap-2.5 text-[13px] bg-tt-blue/10 text-tt-blue"
+        >
+          <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+          <span className="flex-1">{busyLabel}</span>
+        </div>
+      )}
       <SectionLabel>Sync</SectionLabel>
       <Card>
         <NavRow
@@ -731,19 +792,25 @@ function IntegrationsPage({
           icon={<CsvIcon />}
           label="Import TickTick / CSV"
           accept=".csv,text/csv"
-          onFile={(f) => run(() => readFileText(f).then(importCsv), 'CSV import failed')}
+          disabled={!!busyLabel}
+          onFile={(f) =>
+            void run('Importing TickTick / CSV…', () => readFileText(f).then(importCsv), 'CSV import failed')
+          }
         />
         <FileRow
           icon={<ImportIcon />}
           label="Restore JSON backup"
           accept=".json,application/json"
-          onFile={(f) => run(() => readFileText(f).then(importJsonBackup), 'Import failed')}
+          disabled={!!busyLabel}
+          onFile={(f) =>
+            void run('Restoring JSON backup…', () => readFileText(f).then(importJsonBackup), 'Import failed')
+          }
         />
         <NavRow
           icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
           label={<span className="text-tt-overdue">Clear all current data</span>}
           chevron={false}
-          onClick={() => setConfirmClear(true)}
+          onClick={() => !busyLabel && setConfirmClear(true)}
         />
       </Card>
       <Note>
@@ -752,7 +819,48 @@ function IntegrationsPage({
       </Note>
       <SectionLabel>Export</SectionLabel>
       <Card>
-        <NavRow icon={<ExportIcon />} label="Export JSON backup" chevron={false} onClick={() => run(exportJsonBackup, 'Export failed')} />
+        <NavRow
+          icon={<ExportIcon />}
+          label="Export JSON backup"
+          chevron={false}
+          onClick={() => void run('Exporting JSON backup…', exportJsonBackup, 'Export failed')}
+        />
+      </Card>
+      <SectionLabel>Diagnostics &amp; Repair</SectionLabel>
+      <Card>
+        <div className="px-4 py-3 text-[13px] text-tt-secondary space-y-1">
+          <div className="font-medium text-tt-text">Build {BUILD_ID}</div>
+          <div>
+            {diag.counts.openTasks} open ({diag.counts.recurringTasks} recurring) · {diag.counts.completedTasks}{' '}
+            completed · {diag.counts.tombstonedTasks} tombstones · {diag.counts.duplicateOpenExtraCount} duplicate open
+          </div>
+        </div>
+        <NavRow
+          icon={
+            <RefreshCw
+              className={`w-[18px] h-[18px] text-tt-blue ${busyLabel ? 'animate-spin' : ''}`}
+              strokeWidth={1.8}
+            />
+          }
+          label="Repair & Deduplicate Tasks"
+          chevron={false}
+          onClick={() =>
+            void run(
+              'Repairing & deduplicating tasks…',
+              async () => {
+                const r = await repairAndDeduplicateDatabase();
+                return `Repaired database: deduplicated ${r.deduplicatedTasks} task(s), merged ${r.mergedLists} list(s), purged ${r.purgedTombstones} tombstone(s).`;
+              },
+              'Repair failed',
+            )
+          }
+        />
+        <NavRow
+          icon={<Copy className="w-[18px] h-[18px] text-tt-secondary" strokeWidth={1.8} />}
+          label="Copy Diagnostics Report"
+          chevron={false}
+          onClick={() => !busyLabel && void handleCopyDiagnostics()}
+        />
       </Card>
       <ConfirmDialog
         open={confirmClear}
@@ -762,12 +870,13 @@ function IntegrationsPage({
         onCancel={() => setConfirmClear(false)}
         onConfirm={() => {
           setConfirmClear(false);
-          run(
+          void run(
+            'Clearing current data…',
             () =>
               clearAllData().then((n) =>
                 n > 0 ? `Cleared ${n} task${n === 1 ? '' : 's'} and all custom lists.` : 'Cleared all current data.'
               ),
-            'Clear failed'
+            'Clear failed',
           );
         }}
       />

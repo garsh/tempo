@@ -167,4 +167,49 @@ describe('parseImportRepeat & recurring CSV import', () => {
     });
     expect(t.completionHistory).toEqual([Date.parse('2026-10-05T09:00:00+00:00')]);
   });
+
+  it('merges completed empty-repeat occurrence rows sharing (List, Title, Created Time) with active recurring row', () => {
+    const csv = [
+      'Folder Name,List Name,Title,Tags,Content,Start Date,Due Date,Repeat,Priority,Status,Created Time,Completed Time',
+      ',Inbox,Stretch,,,2026-10-04,,,,2,2026-10-01T08:00:00+0000,2026-10-04T09:00:00+0000',
+      ',Inbox,Stretch,,,2026-10-06,,RRULE:FREQ=DAILY;INTERVAL=1,0,0,2026-10-01T08:00:00+0000,',
+    ].join('\n');
+
+    const result = importTasksFromCsv(csv, 1_700_000_000_000);
+    expect(result.tasks).toHaveLength(1);
+    const t = result.tasks[0];
+    expect(t.completedAt).toBeNull();
+    expect(t.completionHistory).toEqual([Date.parse('2026-10-04T09:00:00+00:00')]);
+  });
+
+  it('treats non-recurring Status=0 rows with non-empty Completed Time as completed', () => {
+    const csv = [
+      'Folder Name,List Name,Title,Tags,Content,Start Date,Due Date,Repeat,Priority,Status,Created Time,Completed Time',
+      ',Inbox,Leg Exercises,,,2026-10-03,, ,0,0,2026-10-01T08:00:00+0000,2026-10-03T12:00:00+0000',
+    ].join('\n');
+
+    const result = importTasksFromCsv(csv, 1_700_000_000_000);
+    expect(result.tasks).toHaveLength(1);
+    const t = result.tasks[0];
+    expect(t.completedAt).toBe(Date.parse('2026-10-03T12:00:00+00:00'));
+    expect(t.completionHistory).toEqual([Date.parse('2026-10-03T12:00:00+00:00')]);
+  });
+
+  it('drops orphan undated open rows sharing (List, Title, Created Time) with a recurring/dated task', () => {
+    const csv = [
+      'Folder Name,List Name,Title,Tags,Content,Start Date,Due Date,Repeat,Priority,Status,Created Time,Completed Time',
+      ',Inbox,Clean Upstairs,,,,,,,0,2025-03-26T10:23:56+0000,',
+      ',Inbox,Clean Upstairs,,,,,,,0,2025-03-26T10:23:56+0000,',
+      ',Inbox,Clean Upstairs,,,2026-10-06,,RRULE:FREQ=WEEKLY;INTERVAL=1,0,0,2025-03-26T10:23:56+0000,',
+    ].join('\n');
+
+    const result = importTasksFromCsv(csv, 1_700_000_000_000);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].dueAt).toBe('2026-10-06');
+    expect(result.tasks[0].recurrence).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'weeks',
+    });
+  });
 });

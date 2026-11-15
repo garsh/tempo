@@ -428,6 +428,23 @@ export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boo
   return !!task.completedAt;
 }
 
+const dayBoundsCache = new Map<string, readonly [number, number]>();
+
+/** Local midnight bounds `[startMs, nextMidnightMs)` for a YYYY-MM-DD calendar date. */
+export function getDayBoundsMs(dateStr: string): readonly [number, number] {
+  const cached = dayBoundsCache.get(dateStr);
+  if (cached) return cached;
+  const start = parseDate(dateStr);
+  const startMs = start.getTime();
+  const next = new Date(start);
+  next.setDate(next.getDate() + 1);
+  const endMs = next.getTime();
+  const bounds = [startMs, endMs] as const;
+  if (dayBoundsCache.size > 512) dayBoundsCache.clear();
+  dayBoundsCache.set(dateStr, bounds);
+  return bounds;
+}
+
 /** Set of YYYY-MM-DD local calendar dates present in `task.completionHistory`. */
 export function getCompletedDateSet(task: Pick<Task, 'completionHistory'>): Set<string> {
   const set = new Set<string>();
@@ -444,17 +461,18 @@ export function getCompletionTimestampOnDate(
   task: Pick<Task, 'completionHistory' | 'completedAt' | 'recurrence' | 'dueAt'>,
   dateStr: string
 ): number | null {
+  const [dayStartMs, dayEndMs] = getDayBoundsMs(dateStr);
   const history = task.completionHistory || [];
   for (let i = history.length - 1; i >= 0; i--) {
     const ts = history[i];
-    if (formatDate(new Date(ts)) === dateStr) {
+    if (ts >= dayStartMs && ts < dayEndMs) {
       return ts;
     }
   }
   if (!task.recurrence && task.completedAt) {
     if (
       (task.dueAt && getDueDatePart(task.dueAt) === dateStr) ||
-      formatDate(new Date(task.completedAt)) === dateStr
+      (task.completedAt >= dayStartMs && task.completedAt < dayEndMs)
     ) {
       return task.completedAt;
     }
@@ -661,6 +679,10 @@ export function getNextUncompletedOccurrenceDate(
     ? getDueDatePart(task.dueAt)
     : formatDate(new Date(task.createdAt));
   const completedDates = getCompletedDateSet(task);
+  let latestCompletedStr: string | null = null;
+  for (const c of completedDates) {
+    if (!latestCompletedStr || c > latestCompletedStr) latestCompletedStr = c;
+  }
 
   if (!isCompletedOnDate(task, todayStr) && anchorStr < todayStr) {
     const anchorDate = parseDate(anchorStr);
@@ -668,7 +690,7 @@ export function getNextUncompletedOccurrenceDate(
     const earliest = anchorDate > minLookback ? anchorDate : minLookback;
     for (let cursor = addDays(today, -1); cursor >= earliest; cursor = addDays(cursor, -1)) {
       const dStr = formatDate(cursor);
-      if (completedDates.has(dStr)) break;
+      if (completedDates.has(dStr) || (latestCompletedStr && dStr <= latestCompletedStr)) break;
       if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
         return dStr;
       }

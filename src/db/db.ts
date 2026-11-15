@@ -15,12 +15,15 @@ import {
   completionTimestampForDate,
   formatDate,
   getDueDatePart,
+  isCompleted,
   isCompletedOnDate,
   isRecurring,
 } from '../domain/recurrence';
 import { planBatch, type BatchOp } from '../domain/batch';
 import { newId } from '../domain/id';
 import { clearFiredForTask } from '../domain/notifications';
+import { recordDiagEvent } from '../domain/diagnostics';
+import { getStoredClientId } from '../sync/googleAuth';
 import { buildSampleData, isSampleId } from './sampleData';
 
 export { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from './sampleData';
@@ -236,7 +239,10 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
  */
 export async function completeTask(id: string, dateStr?: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
-  if (!task) return null;
+  if (!task) {
+    recordDiagEvent('complete_missing', `id=${id} date=${dateStr ?? ''}`);
+    return null;
+  }
 
   const now = Date.now();
   let updated: Task;
@@ -259,14 +265,28 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       // Reset check items for the next cycle
       subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
     };
+    recordDiagEvent(
+      'complete_recurring',
+      `id=${id} title=${task.title.slice(0, 30)} target=${targetDateStr} already=${alreadyDone} hist=${history.length}`
+    );
   } else {
-    const history = [...(task.completionHistory || []), now];
+    const compTs = dateStr ? completionTimestampForDate(dateStr, now) : now;
+    const prevHistory = task.completionHistory || [];
+    const history = prevHistory.includes(now)
+      ? prevHistory
+      : dateStr && compTs !== now && !prevHistory.includes(compTs)
+        ? [...prevHistory, compTs, now]
+        : [...prevHistory, now];
     updated = {
       ...task,
       completedAt: now,
       completionHistory: history,
       updatedAt: now,
     };
+    recordDiagEvent(
+      'complete_oneoff',
+      `id=${id} title=${task.title.slice(0, 30)} due=${task.dueAt ?? ''}`
+    );
   }
 
   clearFiredForTask(id);
@@ -295,6 +315,10 @@ export async function uncompleteTask(id: string, dateStr?: string): Promise<Task
     completionHistory: history,
     updatedAt: now,
   };
+  recordDiagEvent(
+    'uncomplete',
+    `id=${id} title=${task.title.slice(0, 30)} date=${dateStr ?? ''}`
+  );
   await db.tasks.put(updated);
   return updated;
 }
@@ -538,4 +562,219 @@ export async function applyBatchOp(ids: string[], op: BatchOp): Promise<number> 
 /** Select-mode batch complete; recurring tasks advance to their next occurrence. */
 export async function completeTasks(ids: string[]): Promise<void> {
   for (const id of ids) await completeTask(id);
+}
+
+function hasGoogleSyncConfigured(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    return Boolean(getStoredClientId());
+  } catch {
+    return false;
+  }
+}
+
+function hasActiveRecurrence(task: Task): boolean {
+  return Boolean(task.recurrence);
+}
+
+function comparePrimaryTask(a: Task, b: Task): number {
+  const rank = (t: Task): number => {
+    const open = !isCompleted(t);
+    const rec = hasActiveRecurrence(t);
+    if (open && rec) return 5;
+    if (open) return 4;
+    if (rec) return 3;
+    if (t.dueAt) return 2;
+    return 1;
+  };
+  const rDiff = rank(b) - rank(a);
+  if (rDiff !== 0) return rDiff;
+  const hDiff = (b.completionHistory?.length ?? 0) - (a.completionHistory?.length ?? 0);
+  if (hDiff !== 0) return hDiff;
+  return b.updatedAt - a.updatedAt;
+}
+
+function mergeTaskGroup(group: Task[], now: number): { keeper: Task; dropped: Task[] } {
+  const sorted = [...group].sort(comparePrimaryTask);
+  const [primary, ...rest] = sorted;
+  const historySet = new Set<number>(primary.completionHistory ?? []);
+  if (typeof primary.completedAt === 'number') historySet.add(primary.completedAt);
+
+  for (const dup of rest) {
+    if (typeof dup.completedAt === 'number') historySet.add(dup.completedAt);
+    for (const ts of dup.completionHistory ?? []) historySet.add(ts);
+  }
+
+  const mergedHistory = Array.from(historySet)
+    .sort((a, b) => a - b)
+    .slice(-365);
+  const keeper: Task = {
+    ...primary,
+    completionHistory: mergedHistory,
+    updatedAt: now,
+  };
+  return { keeper, dropped: rest };
+}
+
+/**
+ * Merges duplicate lists/tasks left behind by earlier TickTick imports and purges
+ * soft-delete tombstones when Google Drive sync is not configured.
+ */
+export async function repairAndDeduplicateDatabase(): Promise<{
+  mergedLists: number;
+  deduplicatedTasks: number;
+  purgedTombstones: number;
+}> {
+  const syncConfigured = hasGoogleSyncConfigured();
+  const now = Date.now();
+
+  const result = await db.transaction(
+    'rw',
+    [db.tasks, db.lists, db.folders, db.savedFilters],
+    async () => {
+      const [allLists, allTasks, allFolders, allFilters] = await Promise.all([
+        db.lists.toArray(),
+        db.tasks.toArray(),
+        db.folders.toArray(),
+        db.savedFilters.toArray(),
+      ]);
+
+      // 1. Merge duplicate active lists sharing the same case-insensitive name.
+      const listById = new Map(allLists.map((l) => [l.id, { ...l }]));
+      const listIdRemap = new Map<string, string>();
+      const listsByName = new Map<string, typeof allLists>();
+      for (const l of allLists) {
+        if (l.deletedAt) continue;
+        const key = l.name.trim().toLowerCase();
+        const bucket = listsByName.get(key) ?? [];
+        bucket.push(l);
+        listsByName.set(key, bucket);
+      }
+
+      let mergedLists = 0;
+      const dirtyListIds = new Set<string>();
+      for (const bucket of listsByName.values()) {
+        if (bucket.length <= 1) continue;
+        bucket.sort((a, b) => {
+          if (a.id === 'inbox') return -1;
+          if (b.id === 'inbox') return 1;
+          return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+        });
+        const keep = bucket[0];
+        for (let i = 1; i < bucket.length; i++) {
+          const dup = bucket[i];
+          listIdRemap.set(dup.id, keep.id);
+          const target = listById.get(dup.id);
+          if (target) {
+            target.deletedAt = now;
+            target.updatedAt = now;
+            dirtyListIds.add(dup.id);
+            mergedLists++;
+          }
+        }
+      }
+
+      const taskMap = new Map(allTasks.map((t) => [t.id, { ...t }]));
+      const dirtyTaskIds = new Set<string>();
+      for (const task of taskMap.values()) {
+        const mappedListId = listIdRemap.get(task.listId);
+        if (mappedListId && mappedListId !== task.listId) {
+          task.listId = mappedListId;
+          task.updatedAt = now;
+          dirtyTaskIds.add(task.id);
+        }
+      }
+
+      // 2a. Deduplicate active tasks sharing (listId, titleLower, createdAt).
+      const byExactKey = new Map<string, Task[]>();
+      for (const task of taskMap.values()) {
+        if (task.deletedAt) continue;
+        const key = `${task.listId}\0${task.title.trim().toLowerCase()}\0${task.createdAt}`;
+        const bucket = byExactKey.get(key) ?? [];
+        bucket.push(task);
+        byExactKey.set(key, bucket);
+      }
+
+      let deduplicatedTasks = 0;
+      for (const bucket of byExactKey.values()) {
+        if (bucket.length <= 1) continue;
+        const { keeper, dropped } = mergeTaskGroup(bucket, now);
+        taskMap.set(keeper.id, keeper);
+        dirtyTaskIds.add(keeper.id);
+        for (const dup of dropped) {
+          taskMap.set(dup.id, { ...dup, deletedAt: now, updatedAt: now });
+          dirtyTaskIds.add(dup.id);
+          deduplicatedTasks++;
+        }
+      }
+
+      // 2b. Collapse duplicate open tasks sharing (listId, titleLower) when any is recurring.
+      const openByTitleKey = new Map<string, Task[]>();
+      for (const task of taskMap.values()) {
+        if (task.deletedAt || isCompleted(task)) continue;
+        const key = `${task.listId}\0${task.title.trim().toLowerCase()}`;
+        const bucket = openByTitleKey.get(key) ?? [];
+        bucket.push(task);
+        openByTitleKey.set(key, bucket);
+      }
+
+      for (const bucket of openByTitleKey.values()) {
+        if (bucket.length <= 1 || !bucket.some(hasActiveRecurrence)) continue;
+        const { keeper, dropped } = mergeTaskGroup(bucket, now);
+        taskMap.set(keeper.id, keeper);
+        dirtyTaskIds.add(keeper.id);
+        for (const dup of dropped) {
+          taskMap.set(dup.id, { ...dup, deletedAt: now, updatedAt: now });
+          dirtyTaskIds.add(dup.id);
+          deduplicatedTasks++;
+        }
+      }
+
+      let purgedTombstones = 0;
+      if (!syncConfigured) {
+        const deletedTaskIds = Array.from(taskMap.values())
+          .filter((t) => !!t.deletedAt)
+          .map((t) => t.id);
+        const deletedListIds = Array.from(listById.values())
+          .filter((l) => !!l.deletedAt)
+          .map((l) => l.id);
+        const deletedFolderIds = allFolders.filter((f) => !!f.deletedAt).map((f) => f.id);
+        const deletedFilterIds = allFilters.filter((f) => !!f.deletedAt).map((f) => f.id);
+
+        const deletedTaskIdSet = new Set(deletedTaskIds);
+        const tasksToPut = Array.from(dirtyTaskIds)
+          .filter((id) => !deletedTaskIdSet.has(id))
+          .map((id) => taskMap.get(id)!)
+          .filter(Boolean);
+        if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
+        if (deletedTaskIds.length) await db.tasks.bulkDelete(deletedTaskIds);
+        if (deletedListIds.length) await db.lists.bulkDelete(deletedListIds);
+        if (deletedFolderIds.length) await db.folders.bulkDelete(deletedFolderIds);
+        if (deletedFilterIds.length) await db.savedFilters.bulkDelete(deletedFilterIds);
+
+        purgedTombstones =
+          deletedTaskIds.length +
+          deletedListIds.length +
+          deletedFolderIds.length +
+          deletedFilterIds.length;
+      } else {
+        const tasksToPut = Array.from(dirtyTaskIds)
+          .map((id) => taskMap.get(id)!)
+          .filter(Boolean);
+        const listsToPut = Array.from(dirtyListIds)
+          .map((id) => listById.get(id)!)
+          .filter(Boolean);
+        if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
+        if (listsToPut.length) await db.lists.bulkPut(listsToPut);
+      }
+
+      return { mergedLists, deduplicatedTasks, purgedTombstones };
+    },
+  );
+
+  recordDiagEvent(
+    'db_repair',
+    `mergedLists=${result.mergedLists} deduplicatedTasks=${result.deduplicatedTasks} purgedTombstones=${result.purgedTombstones} sync=${syncConfigured}`,
+  );
+  return result;
 }

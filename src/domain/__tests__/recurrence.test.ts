@@ -281,6 +281,18 @@ describe('Per-day recurrence occurrences & completion', () => {
     expect(getNextUncompletedOccurrenceDate(daily, new Date(2026, 9, 6, 10, 0))).toBe('2026-10-07');
   });
 
+  it('does not resurface uncompleted dates older than latest completion in completionHistory', () => {
+    const daily = recurringTask({
+      id: 'd-skip',
+      title: 'Vitamins',
+      dueAt: '2026-10-01T08:30',
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+      completionHistory: [completionTimestampForDate('2026-10-06')],
+    });
+
+    expect(getNextUncompletedOccurrenceDate(daily, new Date(2026, 9, 6, 10, 0))).toBe('2026-10-07');
+  });
+
   it('respects endOnDate and endAfterCount', () => {
     const limited = recurringTask({
       id: 'lim',

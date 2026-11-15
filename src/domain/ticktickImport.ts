@@ -40,11 +40,10 @@ export interface ParseImportDueOptions {
   timezone?: string;
 }
 
-function formatInstantInTimezone(
-  ms: number,
-  timezone: string,
-  isAllDay: boolean
-): string | null {
+const tzFormatterCache = new Map<string, Intl.DateTimeFormat | null>();
+
+function getTimezoneFormatter(timezone: string): Intl.DateTimeFormat | null {
+  if (tzFormatterCache.has(timezone)) return tzFormatterCache.get(timezone) ?? null;
   try {
     const fmt = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
@@ -55,6 +54,22 @@ function formatInstantInTimezone(
       minute: '2-digit',
       hourCycle: 'h23',
     });
+    tzFormatterCache.set(timezone, fmt);
+    return fmt;
+  } catch {
+    tzFormatterCache.set(timezone, null);
+    return null;
+  }
+}
+
+function formatInstantInTimezone(
+  ms: number,
+  timezone: string,
+  isAllDay: boolean
+): string | null {
+  const fmt = getTimezoneFormatter(timezone);
+  if (!fmt) return null;
+  try {
     const parts = fmt.formatToParts(new Date(ms));
     const get = (type: Intl.DateTimeFormatPartTypes) =>
       parts.find((p) => p.type === type)?.value ?? '';
@@ -331,7 +346,15 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
   const tasks: Task[] = [];
   let skipped = 0;
   const activeRecurringByKey = new Map<string, Task>();
-  const completedRecurringCandidates: { index: number; key: string; compTs: number }[] = [];
+  const activeRecurringByIdentity = new Map<string, Task>();
+  const identitiesWithDatedOrRecurringOrDone = new Set<string>();
+  const completedRecurringCandidates: {
+    index: number;
+    repeatKey: string | null;
+    identityKey: string | null;
+    compTs: number;
+  }[] = [];
+  const orphanOpenCandidates: { index: number; identityKey: string }[] = [];
 
   const ensureList = (name: string): string => {
     const trimmed = name.trim() || 'Imported';
@@ -394,8 +417,9 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
     const notes = getField(row, 'Content', 'content', 'Notes', 'notes', 'Description', 'description');
     const status = getField(row, 'Status', 'status').trim().toLowerCase();
     const completedRaw = getField(row, 'Completed Time', 'completed time', 'Completed', 'completed');
+    const explicitOpen = status === '0' || status === 'normal' || status === 'open';
     const isDone =
-      status === '0' || status === 'normal' || status === 'open'
+      explicitOpen && (parsedRecurrence || !completedRaw)
         ? false
         : status === 'completed' ||
           status === 'done' ||
@@ -405,12 +429,15 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
           Boolean(completedRaw);
 
     const createdRaw = getField(row, 'Created Time', 'created time', 'Created', 'created');
+    const hasExplicitCreated = createdRaw.trim().length > 0;
     const createdAt = parseTimestampMs(createdRaw, now);
     const completedAt = isDone ? parseTimestampMs(completedRaw, now) : null;
 
+    const titleLower = title.trim().toLowerCase();
     const repeatKey = parsedRecurrence
-      ? `${listId}::${title.trim().toLowerCase()}::${repeatRaw.trim()}`
+      ? `${listId}::${titleLower}::${repeatRaw.trim()}`
       : null;
+    const identityKey = hasExplicitCreated ? `${listId}::${titleLower}::${createdAt}` : null;
 
     const task: Task = {
       id: newId(),
@@ -430,23 +457,42 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       deletedAt: null,
     };
 
-    if (!isDone && parsedRecurrence && repeatKey && !activeRecurringByKey.has(repeatKey)) {
-      activeRecurringByKey.set(repeatKey, task);
-    } else if (isDone && parsedRecurrence && repeatKey) {
+    if (identityKey && (parsedRecurrence || dueAt || isDone)) {
+      identitiesWithDatedOrRecurringOrDone.add(identityKey);
+    }
+
+    if (!isDone && parsedRecurrence) {
+      if (repeatKey && !activeRecurringByKey.has(repeatKey)) {
+        activeRecurringByKey.set(repeatKey, task);
+      }
+      if (identityKey && !activeRecurringByIdentity.has(identityKey)) {
+        activeRecurringByIdentity.set(identityKey, task);
+      }
+    } else if (!isDone && !parsedRecurrence && !dueAt && identityKey) {
+      orphanOpenCandidates.push({ index: tasks.length, identityKey });
+    } else if (isDone && (repeatKey || identityKey)) {
       let compTs = completedAt ?? now;
       if (!completedRaw && dueAt) {
         const [y, m, d] = dueAt.slice(0, 10).split('-').map(Number);
         compTs = new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
       }
-      completedRecurringCandidates.push({ index: tasks.length, key: repeatKey, compTs });
+      completedRecurringCandidates.push({
+        index: tasks.length,
+        repeatKey,
+        identityKey,
+        compTs,
+      });
     }
     tasks.push(task);
   }
 
+  const dropIndices = new Set<number>();
+
   if (completedRecurringCandidates.length > 0) {
-    const dropIndices = new Set<number>();
     for (const c of completedRecurringCandidates) {
-      const active = activeRecurringByKey.get(c.key);
+      const active =
+        (c.repeatKey ? activeRecurringByKey.get(c.repeatKey) : undefined) ??
+        (c.identityKey ? activeRecurringByIdentity.get(c.identityKey) : undefined);
       if (active) {
         dropIndices.add(c.index);
         if (!active.completionHistory.includes(c.compTs)) {
@@ -454,17 +500,39 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
         }
       }
     }
-    for (const active of activeRecurringByKey.values()) {
+    const touched = new Set<Task>([
+      ...activeRecurringByKey.values(),
+      ...activeRecurringByIdentity.values(),
+    ]);
+    for (const active of touched) {
       active.completionHistory.sort((a, b) => a - b);
+      if (active.completionHistory.length > 365) {
+        active.completionHistory = active.completionHistory.slice(-365);
+      }
     }
-    if (dropIndices.size > 0) {
-      return {
-        tasks: tasks.filter((_, idx) => !dropIndices.has(idx)),
-        lists: [...listMap.values()],
-        skipped,
-        format,
-      };
+  }
+
+  if (orphanOpenCandidates.length > 0) {
+    const keptOrphanIdentity = new Set<string>();
+    for (const o of orphanOpenCandidates) {
+      if (
+        identitiesWithDatedOrRecurringOrDone.has(o.identityKey) ||
+        keptOrphanIdentity.has(o.identityKey)
+      ) {
+        dropIndices.add(o.index);
+      } else {
+        keptOrphanIdentity.add(o.identityKey);
+      }
     }
+  }
+
+  if (dropIndices.size > 0) {
+    return {
+      tasks: tasks.filter((_, idx) => !dropIndices.has(idx)),
+      lists: [...listMap.values()],
+      skipped,
+      format,
+    };
   }
 
   return {
