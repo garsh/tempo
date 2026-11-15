@@ -76,7 +76,15 @@ export function CalendarAgendaView({
     return [...map.values()].sort((a, b) => {
       const at = a.dueAt && hasDueTime(a.dueAt) ? a.dueAt : `${focus}T99:99`;
       const bt = b.dueAt && hasDueTime(b.dueAt) ? b.dueAt : `${focus}T99:99`;
-      return at.localeCompare(bt);
+      const cmp = at.localeCompare(bt);
+      if (cmp !== 0) return cmp;
+      const hasOrderA = a.sortOrder != null;
+      const hasOrderB = b.sortOrder != null;
+      if (hasOrderA && hasOrderB && a.sortOrder !== b.sortOrder) {
+        return a.sortOrder! - b.sortOrder!;
+      }
+      if (hasOrderA !== hasOrderB) return hasOrderA ? -1 : 1;
+      return (a.createdAt ?? 0) - (b.createdAt ?? 0);
     });
   }, [tasks, focus]);
 

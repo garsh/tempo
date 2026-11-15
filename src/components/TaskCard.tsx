@@ -38,6 +38,17 @@ interface TaskCardProps {
   selectMode?: boolean;
   checked?: boolean;
   onToggleCheck?: (id: string) => void;
+  /** Long-press drag-to-reorder support. */
+  reorderEnabled?: boolean;
+  isDragging?: boolean;
+  isSettling?: boolean;
+  isDragActive?: boolean;
+  dragOffsetY?: number;
+  shiftY?: number;
+  rowRef?: (el: HTMLDivElement | null) => void;
+  onRowPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onRowClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onRowContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 function dueTextClass(urgency: string): string {
@@ -73,6 +84,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   selectMode = false,
   checked = false,
   onToggleCheck,
+  reorderEnabled = false,
+  isDragging = false,
+  isSettling = false,
+  isDragActive = false,
+  dragOffsetY = 0,
+  shiftY = 0,
+  rowRef,
+  onRowPointerDown,
+  onRowClickCapture,
+  onRowContextMenu,
 }) => {
   const [{ timeFormat }] = usePrefs();
   const [justCompleted, setJustCompleted] = useState(false);
@@ -93,16 +114,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     }, 220);
   };
 
-  const rowPad = dense ? 'py-2.5 min-h-[40px]' : 'py-3 min-h-[48px]';
+  const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
   const notesPreview = showDetails ? task.notes?.trim().split('\n').find((l) => l.trim()) : undefined;
   const subPreview = showDetails ? (task.subtasks ?? []).slice(0, 3) : [];
   const activate = () => (selectMode ? onToggleCheck?.(task.id) : onSelect?.(task));
 
   return (
     <div
+      ref={rowRef}
       role="button"
       tabIndex={0}
       aria-pressed={selectMode ? checked : undefined}
+      data-dragging={isDragging ? 'true' : undefined}
+      onPointerDown={onRowPointerDown}
+      onClickCapture={onRowClickCapture}
+      onContextMenu={onRowContextMenu}
       onClick={activate}
       onDoubleClick={() => !selectMode && onEdit?.(task)}
       onKeyDown={(e) => {
@@ -111,9 +137,31 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           activate();
         }
       }}
-      className={`group relative flex items-center gap-3 px-3 sm:px-4 border-b border-tt-border/80 cursor-pointer transition-colors ${rowPad} ${
-        selected || (selectMode && checked) ? 'bg-tt-blue-soft/70' : 'bg-transparent hover:bg-tt-hover'
-      } ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
+      style={
+        isDragging
+          ? {
+              transform: `translateY(${dragOffsetY}px)`,
+              transition: isSettling
+                ? 'transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease'
+                : 'none',
+              touchAction: 'none',
+            }
+          : isDragActive
+            ? {
+                transform: `translateY(${shiftY}px)`,
+                transition: 'transform 180ms cubic-bezier(0.2, 0, 0, 1)',
+              }
+            : undefined
+      }
+      className={`group relative flex items-center gap-3 px-3 sm:px-4 border-b border-tt-border/80 cursor-pointer ${
+        isDragging
+          ? 'z-20 bg-tt-elevated/45 backdrop-blur-[1px] shadow-md ring-2 ring-tt-blue/60 rounded-xl opacity-60 select-none'
+          : `transition-colors ${reorderEnabled ? 'select-none' : ''} ${
+              selected || (selectMode && checked)
+                ? 'bg-tt-blue-soft/70'
+                : 'bg-transparent hover:bg-tt-hover'
+            }`
+      } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
     >
       {selectMode ? (
         <span
@@ -131,7 +179,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         onClick={handleCheck}
         disabled={completed}
         title={completed ? 'Completed' : recurring ? 'Complete this occurrence' : 'Complete'}
-        className="flex-shrink-0 w-[18px] h-[18px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors"
+        className="flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors"
         style={{
           borderColor: completed || justCompleted ? '#34C759' : borderColor,
           backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
@@ -148,7 +196,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             <Pin className="w-3 h-3 text-tt-pri-med flex-shrink-0 fill-tt-pri-med/40" />
           )}
           <span
-            className={`text-[15px] leading-snug truncate ${
+            className={`text-[19px] leading-snug truncate ${
               completed ? 'text-tt-secondary line-through' : 'text-tt-text'
             }`}
           >
@@ -179,7 +227,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[12px]">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px]">
         {task.tags?.slice(0, 2).map((tag) => (
           <span
             key={tag}

@@ -13,7 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Task, TaskList } from '../../types/task';
-import { clearSampleTasks, isSampleId, loadSampleTasks } from '../../db/db';
+import { clearAllData, clearSampleTasks, isSampleId, loadSampleTasks } from '../../db/db';
 import {
   clearStoredToken,
   getStoredClientId,
@@ -49,7 +49,7 @@ import {
   usePrefs,
   type TabId,
 } from '../../prefs/prefs';
-import { Switch } from '../ui/Sheet';
+import { ConfirmDialog, Switch } from '../ui/Sheet';
 import { Avatar } from '../drawer/drawerBits';
 import { summarizeAccount } from '../../sync/accountSummary';
 import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
@@ -707,6 +707,7 @@ function IntegrationsPage({
   setStatus,
   go,
 }: SettingsPageProps & { setStatus: (s: Status) => void; go: (p: SettingsPageId) => void }) {
+  const [confirmClear, setConfirmClear] = useState(false);
   const run = (fn: () => Promise<string>, failPrefix: string) =>
     void fn()
       .then((message) => setStatus({ type: 'success', message }))
@@ -738,6 +739,12 @@ function IntegrationsPage({
           accept=".json,application/json"
           onFile={(f) => run(() => readFileText(f).then(importJsonBackup), 'Import failed')}
         />
+        <NavRow
+          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
+          label={<span className="text-tt-overdue">Clear all current data</span>}
+          chevron={false}
+          onClick={() => setConfirmClear(true)}
+        />
       </Card>
       <Note>
         One-shot import from a TickTick CSV export, or a simple CSV with title, list, due, priority, tags, notes, status.
@@ -747,6 +754,23 @@ function IntegrationsPage({
       <Card>
         <NavRow icon={<ExportIcon />} label="Export JSON backup" chevron={false} onClick={() => run(exportJsonBackup, 'Export failed')} />
       </Card>
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear all current data?"
+        message="This will remove all tasks, lists, folders, and saved filters from Tempo (keeping Inbox). If Google Drive sync is enabled, this removal will also sync to Drive."
+        confirmLabel="Clear all data"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          setConfirmClear(false);
+          run(
+            () =>
+              clearAllData().then((n) =>
+                n > 0 ? `Cleared ${n} task${n === 1 ? '' : 's'} and all custom lists.` : 'Cleared all current data.'
+              ),
+            'Clear failed'
+          );
+        }}
+      />
     </>
   );
 }

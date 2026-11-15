@@ -58,6 +58,7 @@ export interface Task {
   recurrence?: RecurrenceRule | null;
   completedAt?: number | null;
   completionHistory: number[];
+  sortOrder?: number;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number | null;

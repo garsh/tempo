@@ -11,6 +11,7 @@ import type {
 } from '../types/task';
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
 import { combineDueAt, formatDate, splitDueAt } from '../domain/recurrence';
+import { newId } from '../domain/id';
 import {
   X,
   Sparkles,
@@ -140,7 +141,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     if (!t) return;
     setSubtasks((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), title: t, completed: false },
+      { id: newId(), title: t, completed: false },
     ]);
     setNewSubtaskTitle('');
   };

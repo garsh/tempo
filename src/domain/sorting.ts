@@ -18,9 +18,11 @@ function priorityRank(p?: TaskPriority | null): number {
  * Sort for daily-driver views:
  * 1. Pinned first
  * 2. Urgency (overdue → today → upcoming → later → none)
- * 3. Priority (high → medium → low → none)
- * 4. Earlier due deadline first
- * 5. Title A–Z
+ * 3. Manual sortOrder (when reordered within a day; ordered items precede newly added ones)
+ * 4. Priority (high → medium → low → none)
+ * 5. Earlier due deadline first
+ * 6. Creation order (oldest / first-added first)
+ * 7. Title A–Z
  */
 export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Task[] {
   return [...tasks].sort((a, b) => {
@@ -32,6 +34,14 @@ export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Ta
     const urgB = URGENCY_ORDER[getTaskUrgency(b.dueAt, now)] ?? 4;
     if (urgA !== urgB) return urgA - urgB;
 
+    const hasOrderA = a.sortOrder != null;
+    const hasOrderB = b.sortOrder != null;
+    if (hasOrderA && hasOrderB) {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder! - b.sortOrder!;
+    } else if (hasOrderA !== hasOrderB) {
+      return hasOrderA ? -1 : 1;
+    }
+
     const priA = priorityRank(a.priority);
     const priB = priorityRank(b.priority);
     if (priA !== priB) return priA - priB;
@@ -39,6 +49,10 @@ export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Ta
     const dueA = a.dueAt ? getDueDeadline(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
     const dueB = b.dueAt ? getDueDeadline(b.dueAt).getTime() : Number.POSITIVE_INFINITY;
     if (dueA !== dueB) return dueA - dueB;
+
+    const createdA = a.createdAt ?? 0;
+    const createdB = b.createdAt ?? 0;
+    if (createdA !== createdB) return createdA - createdB;
 
     return a.title.localeCompare(b.title);
   });

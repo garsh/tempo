@@ -10,6 +10,7 @@ import {
   saveSavedFilter,
   saveTask,
   initDatabase,
+  reorderTasks,
   softDeleteFolder,
   softDeleteList,
   softDeleteSavedFilter,
@@ -19,7 +20,7 @@ import {
 } from './db/db';
 import type { AppView, Folder, SavedFilter, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
-import { formatDate, isCompleted } from './domain/recurrence';
+import { addDays, formatDate, getDueDatePart, isCompleted } from './domain/recurrence';
 import {
   filterByListId,
   filterInbox,
@@ -39,13 +40,13 @@ import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
+import { ReorderableTaskList } from './components/ReorderableTaskList';
 import { TaskModal } from './components/TaskModal';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import { TaskDetailPane } from './components/TaskDetailPane';
-import { CalendarMonthView } from './components/CalendarMonthView';
-import { QuickAddSheet } from './components/QuickAddSheet';
-import { dueAtForSelectedDay } from './domain/calendarUi';
+import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
+import { QuickCaptureModal } from './components/QuickCaptureModal';
 import { KanbanBoard } from './components/KanbanBoard';
 import { SavedFilterModal } from './components/SavedFilterModal';
 import { InstallPrompt } from './components/InstallPrompt';
@@ -75,6 +76,8 @@ import {
   X,
   MoreVertical,
   ArrowLeft,
+  CalendarRange,
+  LayoutList,
 } from 'lucide-react';
 
 function resolveViewTitle(
@@ -114,8 +117,35 @@ const EMPTY_TASKS: Task[] = [];
 const EMPTY_LISTS: TaskList[] = [];
 const EMPTY_FOLDERS: Folder[] = [];
 
+const ACTIVE_VIEW_STORAGE_KEY = 'tempo_active_view';
+
+function readInitialView(): AppView {
+  try {
+    const raw = localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
+    if (!raw || raw === 'search') return 'today';
+    const fixed = new Set([
+      'today',
+      'tomorrow',
+      'next7',
+      'inbox',
+      'all',
+      'completed',
+      'calendar-month',
+      'calendar-agenda',
+      'board-status',
+      'board-list',
+    ]);
+    if (fixed.has(raw) || raw.startsWith('list:') || raw.startsWith('filter:')) {
+      return raw as AppView;
+    }
+  } catch {
+    /* ignore storage access errors */
+  }
+  return 'today';
+}
+
 export function App() {
-  const [activeView, setActiveView] = useState<AppView>('today');
+  const [activeView, setActiveView] = useState<AppView>(readInitialView);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -144,6 +174,26 @@ export function App() {
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
+  const [calExpanded, setCalExpanded] = useState(false);
+
+  useEffect(() => {
+    if (activeView === 'search') return;
+    try {
+      localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView);
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [activeView]);
+  const [calDragProgress, setCalDragProgress] = useState<number | null>(null);
+  const calAreaRef = useRef<HTMLDivElement>(null);
+  const calScrollRef = useRef<HTMLDivElement>(null);
+  const calGestureRef = useRef<{
+    startY: number;
+    startX: number;
+    startProgress: number;
+    latestProgress: number;
+    mode: 'pending' | 'drag' | 'scroll';
+  } | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const [prefs, updatePrefs] = usePrefs();
@@ -179,7 +229,6 @@ export function App() {
     const combined = parts.join(' — ').trim();
     if (combined) {
       setQuickCaptureText(combined);
-      setQuickCaptureDueAt(null);
       setIsQuickCaptureOpen(true);
     }
     // Clean share params without reload
@@ -300,6 +349,105 @@ export function App() {
     prefs.sortBy,
   ]);
 
+  const calCompletedTasks = useMemo(() => {
+    if (!isCalendar || activeView !== 'calendar-month' || !calSelectedDate) return [];
+    const list = activeTasks.filter(
+      (t) =>
+        !t.deletedAt &&
+        isCompleted(t) &&
+        t.dueAt &&
+        getDueDatePart(t.dueAt) === calSelectedDate &&
+        matchesSearch(t, searchQuery) &&
+        matchesTag(t, selectedTag)
+    );
+    return sortTasksForDailyView(list);
+  }, [isCalendar, activeView, calSelectedDate, activeTasks, searchQuery, selectedTag]);
+
+  const formatCalendarDayHeading = (dateStr: string): string => {
+    const todayStr = formatDate(new Date());
+    if (dateStr === todayStr) return 'Today';
+    if (dateStr === formatDate(addDays(new Date(), 1))) return 'Tomorrow';
+    if (dateStr === formatDate(addDays(new Date(), -1))) return 'Yesterday';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  useEffect(() => {
+    const area = calAreaRef.current;
+    if (!area || activeView !== 'calendar-month') return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      const startProgress = calExpanded ? 1 : 0;
+      calGestureRef.current = {
+        startY: t.clientY,
+        startX: t.clientX,
+        startProgress,
+        latestProgress: startProgress,
+        mode: 'pending',
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const g = calGestureRef.current;
+      const t = e.touches[0];
+      if (!g || !t) return;
+
+      const dy = t.clientY - g.startY;
+      const dx = t.clientX - g.startX;
+
+      if (g.mode === 'pending') {
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+          g.mode = 'scroll';
+          return;
+        }
+        if (Math.abs(dy) < 6) return;
+        const scroller = calScrollRef.current;
+        const atTop = !scroller || scroller.scrollTop <= 1;
+        const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
+        if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
+          g.mode = 'drag';
+        } else {
+          g.mode = 'scroll';
+          return;
+        }
+      }
+
+      if (g.mode === 'drag') {
+        e.preventDefault();
+        const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
+        g.latestProgress = next;
+        setCalDragProgress(next);
+      }
+    };
+
+    const finishDrag = () => {
+      const g = calGestureRef.current;
+      calGestureRef.current = null;
+      if (!g || g.mode !== 'drag') return;
+      const shouldExpand =
+        g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
+      setCalExpanded(shouldExpand);
+      setCalDragProgress(null);
+    };
+
+    area.addEventListener('touchstart', onTouchStart, { passive: true });
+    area.addEventListener('touchmove', onTouchMove, { passive: false });
+    area.addEventListener('touchend', finishDrag, { passive: true });
+    area.addEventListener('touchcancel', finishDrag, { passive: true });
+    return () => {
+      area.removeEventListener('touchstart', onTouchStart);
+      area.removeEventListener('touchmove', onTouchMove);
+      area.removeEventListener('touchend', finishDrag);
+      area.removeEventListener('touchcancel', finishDrag);
+    };
+  }, [activeView, calExpanded]);
+
   const selectedTask =
     selectedTaskId != null
       ? activeTasks.find((t) => t.id === selectedTaskId) || null
@@ -310,15 +458,10 @@ export function App() {
     setDetailOpenMobile(true);
   }, []);
 
-  const [quickCaptureDueAt, setQuickCaptureDueAt] = useState<string | null>(null);
-  const openCapture = useCallback((dueAt?: string | null) => {
+  const openCapture = useCallback(() => {
     setQuickCaptureText('');
-    setQuickCaptureDueAt(dueAt === undefined ? null : dueAt);
     setIsQuickCaptureOpen(true);
   }, []);
-  const openCalendarCapture = useCallback(() => {
-    openCapture(dueAtForSelectedDay(calSelectedDate));
-  }, [openCapture, calSelectedDate]);
 
   const handleComplete = async (id: string) => {
     await completeTask(id);
@@ -615,7 +758,13 @@ export function App() {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const viewTitleText = resolveViewTitle(activeView, activeLists, activeSavedFilters);
+  const calHeaderTitle = new Date(calYear, calMonth, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    ...(calYear !== now.getFullYear() ? { year: 'numeric' } : {}),
+  });
+  const viewTitleText = isCalendar
+    ? calHeaderTitle
+    : resolveViewTitle(activeView, activeLists, activeSavedFilters);
 
 
   /** TickTick empty Today: same bare chrome as empty Inbox, plus tip banner + lightbulb. */
@@ -676,27 +825,41 @@ export function App() {
   const openOverflow = (e: React.MouseEvent<HTMLElement>) =>
     setOverflowAnchor(e.currentTarget.getBoundingClientRect());
 
-  const renderTaskRows = (tasks: Task[], dense: boolean) =>
-    tasks.map((task) => (
-      <TaskCard
-        key={task.id}
-        task={task}
-        listName={showListNameOnCards ? listNameById.get(task.listId) : undefined}
-        showListName={showListNameOnCards}
-        selected={selectedTaskId === task.id}
-        dense={dense}
-        showDetails={prefs.showDetails}
-        selectMode={selectMode}
-        checked={selectedIds.has(task.id)}
-        onToggleCheck={(id) => setSelectedIds((prev) => toggleSelected(prev, id))}
-        onComplete={handleComplete}
-        onSelect={selectTask}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
-        onTogglePin={handleTogglePin}
-        onToggleSubtask={handleToggleSubtask}
+  const renderTaskRows = (tasks: Task[], dense: boolean, reorderEnabled = false) => {
+    const canReorder = reorderEnabled && !selectMode;
+    return (
+      <ReorderableTaskList
+        tasks={tasks}
+        enabled={canReorder}
+        onReorder={(ids) => void reorderTasks(ids)}
+        onDragActiveChange={(active) => {
+          if (active) calGestureRef.current = null;
+        }}
+        renderRow={(task, dragProps) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            listName={showListNameOnCards ? listNameById.get(task.listId) : undefined}
+            showListName={showListNameOnCards}
+            selected={selectedTaskId === task.id}
+            dense={dense}
+            showDetails={prefs.showDetails}
+            selectMode={selectMode}
+            checked={selectedIds.has(task.id)}
+            onToggleCheck={(id) => setSelectedIds((prev) => toggleSelected(prev, id))}
+            onComplete={handleComplete}
+            onSelect={selectTask}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onTogglePin={handleTogglePin}
+            onToggleSubtask={handleToggleSubtask}
+            reorderEnabled={canReorder}
+            {...dragProps}
+          />
+        )}
       />
-    ));
+    );
+  };
 
   return (
     <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex overflow-hidden">
@@ -760,7 +923,7 @@ export function App() {
         data-tempo-empty-today-view={emptyToday ? '1' : '0'}
       >
         {/* Mobile top bar — TickTick: hamburger | title | (Today: lightbulb) | ⋮ */}
-        {activeView === 'calendar-month' && !selectMode ? null : selectMode ? (
+        {selectMode ? (
           <div className="xl:hidden shrink-0 bg-tt-bg">
             <SelectionHeader
               count={selectedIds.size}
@@ -797,18 +960,49 @@ export function App() {
           </header>
         ) : (
           <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
-            <button
-              type="button"
-              className="w-11 h-11 flex items-center justify-center text-tt-text"
-              onClick={() => setSidebarOpen(true)}
-              title="Menu"
-              aria-label="Menu"
-            >
-              <Menu className="w-6 h-6" strokeWidth={1.75} />
-            </button>
-            <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
-              {viewTitleText}
-            </h1>
+            {!isCalendar && (
+              <button
+                type="button"
+                className="w-11 h-11 flex items-center justify-center text-tt-text"
+                onClick={() => setSidebarOpen(true)}
+                title="Menu"
+                aria-label="Menu"
+              >
+                <Menu className="w-6 h-6" strokeWidth={1.75} />
+              </button>
+            )}
+            {isCalendar ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeView === 'calendar-month') setCalExpanded((prev) => !prev);
+                }}
+                className="flex-1 min-w-0 pl-3 text-left text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text"
+              >
+                {viewTitleText}
+              </button>
+            ) : (
+              <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
+                {viewTitleText}
+              </h1>
+            )}
+            {isCalendar && (
+              <button
+                type="button"
+                className="w-11 h-11 flex items-center justify-center text-tt-text"
+                onClick={() =>
+                  goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
+                }
+                title={activeView === 'calendar-month' ? 'Agenda view' : 'List view'}
+                aria-label={activeView === 'calendar-month' ? 'Switch to agenda view' : 'Switch to list view'}
+              >
+                {activeView === 'calendar-month' ? (
+                  <CalendarRange className="w-5 h-5" strokeWidth={1.9} />
+                ) : (
+                  <LayoutList className="w-5 h-5" strokeWidth={1.9} />
+                )}
+              </button>
+            )}
             {activeView === 'today' && (
               <button
                 type="button"
@@ -852,9 +1046,26 @@ export function App() {
                 />
               </div>
             )}
-            <div className={`hidden ${selectMode || activeView === 'calendar-month' ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
-              <h1 className="text-[22px] font-bold tracking-tight">{viewTitleText}</h1>
+            <div className={`hidden ${selectMode ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
+              <h1 className={`${isCalendar ? 'text-[24px]' : 'text-[22px]'} font-bold tracking-tight`}>{viewTitleText}</h1>
               <div className="flex items-center gap-1">
+                {isCalendar && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
+                    }
+                    className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
+                    title={activeView === 'calendar-month' ? 'Agenda view' : 'List view'}
+                    aria-label={activeView === 'calendar-month' ? 'Switch to agenda view' : 'Switch to list view'}
+                  >
+                    {activeView === 'calendar-month' ? (
+                      <CalendarRange className="w-4 h-4" />
+                    ) : (
+                      <LayoutList className="w-4 h-4" />
+                    )}
+                  </button>
+                )}
                 {activeView === 'today' && (
                   <button
                     type="button"
@@ -887,7 +1098,7 @@ export function App() {
               </div>
             </div>
 
-            {activeView === 'today' && !selectMode && <TodayTipBanner />}
+            {emptyToday && !selectMode && <TodayTipBanner />}
 
             {/* Search (desktop + when focused on mobile via tab) */}
             <div
@@ -911,11 +1122,66 @@ export function App() {
             </div>
 
             <div
-              className={`flex-1 min-h-0 xl:pb-4 ${
-                emptyState || activeView === 'calendar-month'
-                  ? 'flex flex-col xl:block overflow-hidden'
-                  : 'overflow-y-auto pb-20'
-              }`}
+              ref={calAreaRef}
+              onPointerDown={(e) => {
+                if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
+                const startProgress = calExpanded ? 1 : 0;
+                calGestureRef.current = {
+                  startY: e.clientY,
+                  startX: e.clientX,
+                  startProgress,
+                  latestProgress: startProgress,
+                  mode: 'pending',
+                };
+              }}
+              onPointerMove={(e) => {
+                if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
+                const g = calGestureRef.current;
+                if (!g) return;
+                if ((e.buttons & 1) === 0) {
+                  calGestureRef.current = null;
+                  setCalDragProgress(null);
+                  return;
+                }
+                const dy = e.clientY - g.startY;
+                const dx = e.clientX - g.startX;
+                if (g.mode === 'pending') {
+                  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
+                    g.mode = 'scroll';
+                    return;
+                  }
+                  if (Math.abs(dy) < 6) return;
+                  const scroller = calScrollRef.current;
+                  const atTop = !scroller || scroller.scrollTop <= 1;
+                  const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
+                  if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
+                    g.mode = 'drag';
+                  } else {
+                    g.mode = 'scroll';
+                    return;
+                  }
+                }
+                if (g.mode === 'drag') {
+                  const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
+                  g.latestProgress = next;
+                  setCalDragProgress(next);
+                }
+              }}
+              onPointerUp={(e) => {
+                if (e.pointerType === 'touch') return;
+                const g = calGestureRef.current;
+                calGestureRef.current = null;
+                if (!g || g.mode !== 'drag') return;
+                const shouldExpand =
+                  g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
+                setCalExpanded(shouldExpand);
+                setCalDragProgress(null);
+              }}
+              className={
+                activeView === 'calendar-month'
+                  ? 'flex-1 flex flex-col min-h-0 overflow-hidden'
+                  : `flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyState ? 'flex flex-col xl:block' : 'pb-20'}`
+              }
             >
               {emptyToday ? (
                 <>
@@ -971,53 +1237,77 @@ export function App() {
                   />
                 </div>
               ) : isCalendar ? (
-                <div className={`h-full min-h-0 flex flex-col ${activeView === 'calendar-month' ? '' : 'px-3 sm:px-5 space-y-3'}`}>
-                  {activeView === 'calendar-agenda' && (
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => goView('calendar-month')}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-tt-sidebar text-tt-secondary"
-                      >
-                        Month
-                      </button>
-                      <button
-                        type="button"
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-tt-blue text-white"
-                      >
-                        Agenda
-                      </button>
+                <div
+                  className={
+                    activeView === 'calendar-month'
+                      ? 'flex-1 flex flex-col min-h-0 overflow-hidden'
+                      : 'px-3 sm:px-5 space-y-3'
+                  }
+                >
+                  <div className={activeView === 'calendar-month' ? 'shrink-0 px-3 sm:px-5' : 'space-y-3'}>
+                    {activeView === 'calendar-month' ? (
+                      <CalendarMonthView
+                        year={calYear}
+                        monthIndex={calMonth}
+                        selectedDateStr={calSelectedDate}
+                        tasks={activeTasks}
+                        expanded={calExpanded}
+                        dragProgress={calDragProgress}
+                        onToggleExpanded={(next) =>
+                          setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
+                        }
+                        onSelectDate={setCalSelectedDate}
+                        onMonthChange={(y, m) => {
+                          setCalYear(y);
+                          setCalMonth(m);
+                        }}
+                      />
+                    ) : (
+                      <CalendarAgendaView
+                        tasks={activeTasks}
+                        onSelectTask={selectTask}
+                        selectedTaskId={selectedTaskId}
+                        selectedDateStr={calSelectedDate}
+                        onSelectDate={setCalSelectedDate}
+                      />
+                    )}
+                  </div>
+                  {activeView === 'calendar-month' && calSelectedDate && (
+                    <div
+                      ref={calScrollRef}
+                      className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
+                    >
+                      {displayedTasks.length === 0 && calCompletedTasks.length === 0 ? (
+                        <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
+                      ) : (
+                        <>
+                          {displayedTasks.length > 0 && (
+                            <div>
+                              <TaskGroupHeader
+                                label={formatCalendarDayHeading(calSelectedDate)}
+                                count={displayedTasks.length}
+                                collapsed={!!collapsedGroups['cal-open']}
+                                onToggle={() => toggleGroup('cal-open')}
+                                sticky={false}
+                              />
+                              {!collapsedGroups['cal-open'] && renderTaskRows(displayedTasks, false, true)}
+                            </div>
+                          )}
+                          {calCompletedTasks.length > 0 && (
+                            <div>
+                              <TaskGroupHeader
+                                label="Completed"
+                                count={calCompletedTasks.length}
+                                collapsed={!!collapsedGroups['cal-completed']}
+                                onToggle={() => toggleGroup('cal-completed')}
+                                sticky={false}
+                              />
+                              {!collapsedGroups['cal-completed'] && renderTaskRows(calCompletedTasks, false)}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
-                  )}
-                  {activeView === 'calendar-month' ? (
-                    <CalendarMonthView
-                      year={calYear}
-                      monthIndex={calMonth}
-                      selectedDateStr={calSelectedDate}
-                      tasks={activeTasks}
-                      onSelectDate={setCalSelectedDate}
-                      onMonthChange={(y, m) => {
-                        setCalYear(y);
-                        setCalMonth(m);
-                      }}
-                      onSelectTask={selectTask}
-                      onCompleteTask={handleComplete}
-                      onFilter={() => {
-                        setEditingFilter(null);
-                        setIsFilterModalOpen(true);
-                      }}
-                      onToggleView={() => goView('calendar-agenda')}
-                      onMore={openOverflow}
-                      mobileChrome
-                    />
-                  ) : (
-                    <CalendarAgendaView
-                      tasks={activeTasks}
-                      onSelectTask={selectTask}
-                      selectedTaskId={selectedTaskId}
-                      selectedDateStr={calSelectedDate}
-                      onSelectDate={setCalSelectedDate}
-                    />
                   )}
                 </div>
               ) : activeView === 'completed' ? (
@@ -1061,7 +1351,8 @@ export function App() {
                           tone={g.id === 'overdue' ? 'overdue' : 'default'}
                         />
                       )}
-                      {(!collapsed || !g.label) && renderTaskRows(g.tasks, true)}
+                      {(!collapsed || !g.label) &&
+                        renderTaskRows(g.tasks, true, g.id !== 'completed' && prefs.sortBy === 'due')}
                     </div>
                   );
                 })
@@ -1089,7 +1380,7 @@ export function App() {
         {!selectMode && (
         <button
           type="button"
-          onClick={isCalendar ? openCalendarCapture : () => openCapture(activeView === 'today' ? dueAtForSelectedDay(formatDate(new Date())) : null)}
+          onClick={openCapture}
           className="xl:hidden fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)]"
           style={{ bottom: 'calc(67px + env(safe-area-inset-bottom))' }}
           title="Add task"
@@ -1134,19 +1425,13 @@ export function App() {
       )}
 
 
-      <QuickAddSheet
+      <QuickCaptureModal
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
         onSave={handleSave}
         lists={activeLists}
         defaultListId={defaultListForNew}
-        defaultDueAt={quickCaptureDueAt}
         initialTitle={quickCaptureText}
-        availableTags={allTags}
-        onOpenSettings={() => {
-          setIsQuickCaptureOpen(false);
-          openSettings('root');
-        }}
       />
 
       <SavedFilterModal
@@ -1179,7 +1464,7 @@ export function App() {
         listNameById={listNameById}
         onClose={closePlanDay}
         onMoveToToday={moveTaskToToday}
-        onAddTask={() => openCapture()}
+        onAddTask={openCapture}
       />
 
       <SettingsPage

@@ -14,9 +14,15 @@ It syncs data to the user's private Google Drive hidden application folder (`dri
 ## Commands & Workflows
 - **Development Server**: `npm run dev`
   - Runs on port `5180` (binds to `0.0.0.0` / host: true).
-  - Configured to accept `bird.lan:5180`.
+  - Configured to accept `bird.lan:5180` (and `localhost:5180`).
+  - **Updating**: Vite serves source files with Hot Module Replacement (HMR), so `src/` edits appear automatically. Restart `npm run dev` only if `vite.config.ts` or `package.json` dependencies change.
 - **Run Unit Tests**: `npx vitest run`
-- **Production Build**: `npm run build`
+- **Production Build & Server (`https://tempo.bot.nu`)**: `npm run build`
+  - Served by the `caddy-proxy` Docker container (configured in `/home/bgarcia/work/ourmaps/Caddyfile`), which bind-mounts `/home/bgarcia/work/tempo/dist` read-only at `/srv/tempo`.
+  - **Updating**:
+    1. Run `npm run build` (`tsc -b && vite build`) to regenerate `dist/`.
+    2. If `dist/` was ever deleted and recreated rather than updated in-place, run `docker restart caddy-proxy` so the bind mount reattaches to the new directory.
+    3. **Browser / PWA cache**: Because Tempo uses `vite-plugin-pwa` (Workbox `autoUpdate`), the first refresh after a build may still serve the previously cached Service Worker bundle while the new `sw.js` installs. Refresh a second time (or hard-reload / click **Update** in Chrome DevTools → **Application → Service Workers**) to load the new version.
 
 ## Architecture & Code Conventions
 - **Client-Side Only**: No backend server. Data is stored in browser IndexedDB via Dexie.js and synced via Google Drive REST API (`tempo_backup.json`).

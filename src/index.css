@@ -189,6 +189,7 @@
   html,
   body {
     background-color: var(--tt-bg);
+    overscroll-behavior-y: contain;
   }
   body {
     @apply text-tt-text antialiased min-h-screen selection:bg-tt-blue/20 selection:text-tt-text;

@@ -11,8 +11,9 @@ import type {
   TaskListInput,
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
-import { calculateNextDueDate, isRecurring } from '../domain/recurrence';
+import { calculateNextDueDate, getDueDatePart, isRecurring } from '../domain/recurrence';
 import { planBatch, type BatchOp } from '../domain/batch';
+import { newId } from '../domain/id';
 import { clearFiredForTask } from '../domain/notifications';
 import { buildSampleData, isSampleId } from './sampleData';
 
@@ -113,17 +114,56 @@ export async function clearSampleTasks(): Promise<number> {
   return removed;
 }
 
+/**
+ * Settings › Integrations & Import → "Clear all current data":
+ * soft-delete (tombstone) all tasks, custom lists, folders, and saved filters
+ * so the removal also propagates through Drive sync, keeping the built-in Inbox list.
+ */
+export async function clearAllData(): Promise<number> {
+  const now = Date.now();
+  const markDeleted = <T extends { deletedAt?: number | null; updatedAt: number }>(items: T[]): T[] =>
+    items.filter((x) => !x.deletedAt).map((x) => ({ ...x, deletedAt: now, updatedAt: now }));
+
+  let removedTasks = 0;
+  await db.transaction('rw', db.folders, db.lists, db.tasks, db.savedFilters, async () => {
+    const tasks = markDeleted(await db.tasks.toArray());
+    removedTasks = tasks.length;
+    if (tasks.length) await db.tasks.bulkPut(tasks);
+
+    const lists = markDeleted((await db.lists.toArray()).filter((l) => l.id !== INBOX_LIST_ID));
+    if (lists.length) await db.lists.bulkPut(lists);
+
+    const folders = markDeleted(await db.folders.toArray());
+    if (folders.length) await db.folders.bulkPut(folders);
+
+    const filters = markDeleted(await db.savedFilters.toArray());
+    if (filters.length) await db.savedFilters.bulkPut(filters);
+  });
+  await ensureInboxList();
+  return removedTasks;
+}
+
 export async function saveTask(task: TaskInput): Promise<Task> {
   const now = Date.now();
   let fullTask: Task;
 
   if (task.id) {
     const existing = await db.tasks.get(task.id);
+    const prevDate = existing?.dueAt ? getDueDatePart(existing.dueAt) : null;
+    const nextDue = task.dueAt !== undefined ? task.dueAt : existing?.dueAt ?? null;
+    const nextDate = nextDue ? getDueDatePart(nextDue) : null;
+    const dateChanged = task.dueAt !== undefined && prevDate !== nextDate;
     fullTask = {
       ...(existing || {}),
       ...task,
       id: task.id,
       listId: task.listId || existing?.listId || INBOX_LIST_ID,
+      sortOrder:
+        task.sortOrder !== undefined
+          ? task.sortOrder
+          : dateChanged
+            ? undefined
+            : existing?.sortOrder,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       completionHistory: existing?.completionHistory || [],
@@ -142,7 +182,7 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       tags: task.tags,
       subtasks: task.subtasks,
       recurrence: task.recurrence ?? null,
-      id: crypto.randomUUID(),
+      id: newId(),
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
@@ -153,6 +193,34 @@ export async function saveTask(task: TaskInput): Promise<Task> {
 
   await db.tasks.put(fullTask);
   return fullTask;
+}
+
+/**
+ * Persist a manual task ordering (e.g. after long-press drag-and-drop within a day).
+ * Assigns spaced `sortOrder` values and updates `updatedAt` so Drive sync propagates the order.
+ */
+export async function reorderTasks(orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  const now = Date.now();
+  await db.transaction('rw', db.tasks, async () => {
+    const existing = await db.tasks.bulkGet(orderedIds);
+    const updates: Task[] = [];
+    for (let i = 0; i < orderedIds.length; i++) {
+      const task = existing[i];
+      if (!task) continue;
+      const nextOrder = (i + 1) * 1000;
+      if (task.sortOrder !== nextOrder) {
+        updates.push({
+          ...task,
+          sortOrder: nextOrder,
+          updatedAt: now,
+        });
+      }
+    }
+    if (updates.length > 0) {
+      await db.tasks.bulkPut(updates);
+    }
+  });
 }
 
 /**
@@ -315,7 +383,7 @@ export async function saveList(list: TaskListInput): Promise<TaskList> {
   }
 
   const full: TaskList = {
-    id: crypto.randomUUID(),
+    id: newId(),
     name: list.name,
     folderId: list.folderId ?? null,
     sortOrder: list.sortOrder ?? Date.now(),
@@ -372,7 +440,7 @@ export async function saveFolder(folder: FolderInput): Promise<Folder> {
   }
 
   const full: Folder = {
-    id: crypto.randomUUID(),
+    id: newId(),
     name: folder.name,
     sortOrder: folder.sortOrder ?? Date.now(),
     createdAt: now,
@@ -430,7 +498,7 @@ export async function saveSavedFilter(filter: SavedFilterInput): Promise<SavedFi
   }
 
   const full: SavedFilter = {
-    id: crypto.randomUUID(),
+    id: newId(),
     name: filter.name,
     match: filter.match,
     criteria: filter.criteria,

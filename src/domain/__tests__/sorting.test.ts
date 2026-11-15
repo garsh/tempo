@@ -27,6 +27,24 @@ describe('Sorting & search', () => {
     expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['c', 'b', 'd', 'a']);
   });
 
+  it('keeps untimed same-day tasks in addition order (createdAt ascending)', () => {
+    const tasks = [
+      task({ id: '1', title: 'Zebra', dueAt: '2026-10-05', createdAt: 100 }),
+      task({ id: '2', title: 'Apple', dueAt: '2026-10-05', createdAt: 200 }),
+      task({ id: '3', title: 'Mango', dueAt: '2026-10-05', createdAt: 300 }),
+    ];
+    expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['1', '2', '3']);
+  });
+
+  it('respects manual sortOrder within a day and places newly added items after ordered ones', () => {
+    const tasks = [
+      task({ id: 'a', title: 'First', dueAt: '2026-10-05', priority: 'high', sortOrder: 2000, createdAt: 100 }),
+      task({ id: 'b', title: 'Second', dueAt: '2026-10-05', priority: 'none', sortOrder: 1000, createdAt: 200 }),
+      task({ id: 'c', title: 'Third (new)', dueAt: '2026-10-05', priority: 'high', createdAt: 300 }),
+    ];
+    expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['b', 'a', 'c']);
+  });
+
   it('matches search across title notes tags', () => {
     const t = task({
       id: '1',
