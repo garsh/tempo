@@ -6,6 +6,7 @@ import {
   filterToday,
   filterTomorrow,
 } from '../smartLists';
+import { completionTimestampForDate } from '../recurrence';
 import type { Task } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
@@ -63,5 +64,41 @@ describe('Smart lists', () => {
 
   it('filterByListId works for user lists', () => {
     expect(filterByListId(tasks, 'home').map((t) => t.id)).toEqual(['9']);
+  });
+
+  it('projects daily recurring task across Today, Tomorrow, and Next 7 Days and handles per-day completion', () => {
+    const daily = task({
+      id: 'rec-1',
+      title: 'Meditate',
+      dueAt: '2026-10-05T07:00',
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+    });
+
+    expect(filterToday([daily], now).map((t) => t.dueAt)).toEqual(['2026-10-05T07:00']);
+    expect(filterTomorrow([daily], now).map((t) => t.dueAt)).toEqual(['2026-10-06T07:00']);
+    expect(filterNext7Days([daily], now).map((t) => t.dueAt)).toEqual([
+      '2026-10-05T07:00',
+      '2026-10-06T07:00',
+      '2026-10-07T07:00',
+      '2026-10-08T07:00',
+      '2026-10-09T07:00',
+      '2026-10-10T07:00',
+      '2026-10-11T07:00',
+    ]);
+
+    const completedToday: Task = {
+      ...daily,
+      completionHistory: [completionTimestampForDate('2026-10-05')],
+    };
+    expect(filterToday([completedToday], now)).toEqual([]);
+    expect(filterTomorrow([completedToday], now).map((t) => t.dueAt)).toEqual(['2026-10-06T07:00']);
+    expect(filterNext7Days([completedToday], now).map((t) => t.dueAt)).toEqual([
+      '2026-10-06T07:00',
+      '2026-10-07T07:00',
+      '2026-10-08T07:00',
+      '2026-10-09T07:00',
+      '2026-10-10T07:00',
+      '2026-10-11T07:00',
+    ]);
   });
 });

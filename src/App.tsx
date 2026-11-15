@@ -17,10 +17,17 @@ import {
   softDeleteTask,
   togglePinTask,
   toggleSubtask,
+  uncompleteTask,
 } from './db/db';
 import type { AppView, Folder, SavedFilter, Task, TaskInput, TaskList } from './types/task';
 import { INBOX_LIST_ID } from './types/task';
-import { addDays, formatDate, getDueDatePart, isCompleted } from './domain/recurrence';
+import {
+  addDays,
+  formatDate,
+  getDueDatePart,
+  isCompleted,
+  projectTaskForDate,
+} from './domain/recurrence';
 import {
   filterByListId,
   filterInbox,
@@ -34,7 +41,7 @@ import { groupAndSortTasks, sortTasks } from './domain/groupSort';
 import { toggleSelected } from './domain/batch';
 import { usePrefs, type TabId } from './prefs/prefs';
 import { getStoredClientId } from './sync/googleAuth';
-import { tasksDueOnDate } from './domain/calendar';
+import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
 import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
@@ -149,6 +156,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskDate, setSelectedTaskDate] = useState<string | null>(null);
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -285,8 +293,14 @@ export function App() {
 
   const baseForView = useMemo((): Task[] => {
     switch (activeView) {
-      case 'today':
-        return filterToday(activeTasks);
+      case 'today': {
+        const todayList = filterToday(activeTasks);
+        if (prefs.hideCompleted) return todayList;
+        const todayStr = formatDate(new Date());
+        const doneToday = completedTasksOnDate(activeTasks, todayStr);
+        const seen = new Set(todayList.map((t) => `${t.id}:${t.dueAt ?? ''}`));
+        return [...todayList, ...doneToday.filter((t) => !seen.has(`${t.id}:${t.dueAt ?? ''}`))];
+      }
       case 'tomorrow':
         return filterTomorrow(activeTasks);
       case 'next7':
@@ -318,7 +332,7 @@ export function App() {
         }
         return open;
     }
-  }, [activeView, activeTasks, open, completedOneOffs, allSavedFilters]);
+  }, [activeView, activeTasks, open, completedOneOffs, allSavedFilters, prefs.hideCompleted]);
 
   const displayedTasks = useMemo(() => {
     if (isCalendar && activeView === 'calendar-month' && calSelectedDate) {
@@ -351,14 +365,8 @@ export function App() {
 
   const calCompletedTasks = useMemo(() => {
     if (!isCalendar || activeView !== 'calendar-month' || !calSelectedDate) return [];
-    const list = activeTasks.filter(
-      (t) =>
-        !t.deletedAt &&
-        isCompleted(t) &&
-        t.dueAt &&
-        getDueDatePart(t.dueAt) === calSelectedDate &&
-        matchesSearch(t, searchQuery) &&
-        matchesTag(t, selectedTag)
+    const list = completedTasksOnDate(activeTasks, calSelectedDate).filter(
+      (t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag)
     );
     return sortTasksForDailyView(list);
   }, [isCalendar, activeView, calSelectedDate, activeTasks, searchQuery, selectedTag]);
@@ -448,13 +456,19 @@ export function App() {
     };
   }, [activeView, calExpanded]);
 
-  const selectedTask =
-    selectedTaskId != null
-      ? activeTasks.find((t) => t.id === selectedTaskId) || null
-      : null;
+  const selectedTask = useMemo(() => {
+    if (selectedTaskId == null) return null;
+    const raw = activeTasks.find((t) => t.id === selectedTaskId);
+    if (!raw) return null;
+    if (raw.recurrence && selectedTaskDate) {
+      return projectTaskForDate(raw, selectedTaskDate);
+    }
+    return raw;
+  }, [activeTasks, selectedTaskId, selectedTaskDate]);
 
   const selectTask = useCallback((task: Task) => {
     setSelectedTaskId(task.id);
+    setSelectedTaskDate(task.dueAt ? getDueDatePart(task.dueAt) : null);
     setDetailOpenMobile(true);
   }, []);
 
@@ -463,12 +477,17 @@ export function App() {
     setIsQuickCaptureOpen(true);
   }, []);
 
-  const handleComplete = async (id: string) => {
-    await completeTask(id);
+  const handleComplete = async (id: string, dateStr?: string) => {
+    await completeTask(id, dateStr);
+  };
+
+  const handleUncomplete = async (id: string, dateStr?: string) => {
+    await uncompleteTask(id, dateStr);
   };
 
   const handleEdit = (task: Task) => {
-    setEditingTask(task);
+    const raw = activeTasks.find((t) => t.id === task.id) ?? task;
+    setEditingTask(raw);
     setIsTaskModalOpen(true);
   };
 
@@ -476,6 +495,7 @@ export function App() {
     await softDeleteTask(id);
     if (selectedTaskId === id) {
       setSelectedTaskId(null);
+      setSelectedTaskDate(null);
       setDetailOpenMobile(false);
     }
   };
@@ -488,6 +508,7 @@ export function App() {
     const saved = await saveTask(taskData);
     setEditingTask(null);
     setSelectedTaskId(saved.id);
+    setSelectedTaskDate(saved.dueAt ? getDueDatePart(saved.dueAt) : null);
   };
 
   const handlePatchTask = async (
@@ -700,7 +721,14 @@ export function App() {
       selectTask(prev);
     },
     onCompleteSelected: () => {
-      if (selectedTaskId) void handleComplete(selectedTaskId);
+      if (selectedTaskId) {
+        const dateStr = selectedTask?.dueAt ? getDueDatePart(selectedTask.dueAt) : undefined;
+        if (selectedTask && isCompleted(selectedTask)) {
+          void handleUncomplete(selectedTaskId, dateStr);
+        } else {
+          void handleComplete(selectedTaskId, dateStr);
+        }
+      }
     },
     onEditSelected: () => {
       if (selectedTask) handleEdit(selectedTask);
@@ -837,7 +865,7 @@ export function App() {
         }}
         renderRow={(task, dragProps) => (
           <TaskCard
-            key={task.id}
+            key={task.dueAt ? `${task.id}:${task.dueAt}` : task.id}
             task={task}
             listName={showListNameOnCards ? listNameById.get(task.listId) : undefined}
             showListName={showListNameOnCards}
@@ -848,6 +876,7 @@ export function App() {
             checked={selectedIds.has(task.id)}
             onToggleCheck={(id) => setSelectedIds((prev) => toggleSelected(prev, id))}
             onComplete={handleComplete}
+            onUncomplete={handleUncomplete}
             onSelect={selectTask}
             onEdit={handleEdit}
             onDelete={handleDelete}
@@ -1365,8 +1394,12 @@ export function App() {
             <TaskDetailPane
               task={selectedTask}
               listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
-              onClose={() => setSelectedTaskId(null)}
+              onClose={() => {
+                setSelectedTaskId(null);
+                setSelectedTaskDate(null);
+              }}
               onComplete={handleComplete}
+              onUncomplete={handleUncomplete}
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTogglePin={handleTogglePin}
@@ -1414,6 +1447,7 @@ export function App() {
               listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
               onClose={() => setDetailOpenMobile(false)}
               onComplete={handleComplete}
+              onUncomplete={handleUncomplete}
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTogglePin={handleTogglePin}

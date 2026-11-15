@@ -425,7 +425,266 @@ export function isRecurring(task: Pick<Task, 'recurrence'>): boolean {
 }
 
 export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boolean {
-  return !task.recurrence && !!task.completedAt;
+  return !!task.completedAt;
+}
+
+/** Set of YYYY-MM-DD local calendar dates present in `task.completionHistory`. */
+export function getCompletedDateSet(task: Pick<Task, 'completionHistory'>): Set<string> {
+  const set = new Set<string>();
+  for (const ts of task.completionHistory || []) {
+    set.add(formatDate(new Date(ts)));
+  }
+  return set;
+}
+
+/**
+ * Return the completion timestamp for `task` on `dateStr` (YYYY-MM-DD), or null if not completed on that day.
+ */
+export function getCompletionTimestampOnDate(
+  task: Pick<Task, 'completionHistory' | 'completedAt' | 'recurrence' | 'dueAt'>,
+  dateStr: string
+): number | null {
+  const history = task.completionHistory || [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const ts = history[i];
+    if (formatDate(new Date(ts)) === dateStr) {
+      return ts;
+    }
+  }
+  if (!task.recurrence && task.completedAt) {
+    if (
+      (task.dueAt && getDueDatePart(task.dueAt) === dateStr) ||
+      formatDate(new Date(task.completedAt)) === dateStr
+    ) {
+      return task.completedAt;
+    }
+  }
+  return null;
+}
+
+/** Whether `task` is marked completed for the specific calendar date `dateStr` (YYYY-MM-DD). */
+export function isCompletedOnDate(
+  task: Pick<Task, 'completionHistory' | 'completedAt' | 'recurrence' | 'dueAt'>,
+  dateStr: string
+): boolean {
+  return getCompletionTimestampOnDate(task, dateStr) !== null;
+}
+
+/**
+ * Timestamp to record in `completionHistory` when completing an occurrence on `dateStr`.
+ * Uses `now` when `dateStr` is today, otherwise local noon on `dateStr` so timezone roundtrips stay on the same day.
+ */
+export function completionTimestampForDate(dateStr: string, now: number = Date.now()): number {
+  if (formatDate(new Date(now)) === dateStr) return now;
+  const d = parseDate(dateStr);
+  d.setHours(12, 0, 0, 0);
+  return d.getTime();
+}
+
+function scheduleMatchesDate(
+  rule: RecurrenceRule,
+  baseStr: string,
+  dateStr: string,
+  anchorStr: string
+): boolean {
+  if (dateStr < baseStr) return false;
+  const baseDate = parseDate(baseStr);
+  const targetDate = parseDate(dateStr);
+  const interval = Math.max(1, rule.intervalValue || 1);
+
+  if (rule.weekdays && rule.weekdays.length > 0) {
+    const sorted = [...new Set(rule.weekdays)].sort((a, b) => a - b) as Weekday[];
+    if (!sorted.includes(targetDate.getDay() as Weekday)) return false;
+    const intervalWeeks = rule.intervalUnit === 'weeks' ? interval : 1;
+    if (intervalWeeks <= 1) return true;
+
+    let firstMatch: Date | null = null;
+    for (let i = 0; i < 7; i++) {
+      const candidate = addDays(baseDate, i);
+      if (sorted.includes(candidate.getDay() as Weekday)) {
+        firstMatch = candidate;
+        break;
+      }
+    }
+    if (!firstMatch || targetDate < firstMatch) return false;
+
+    const firstWeek = addDays(firstMatch, -firstMatch.getDay());
+    const targetWeek = addDays(targetDate, -targetDate.getDay());
+    const weeksDiff = Math.round((targetWeek.getTime() - firstWeek.getTime()) / (7 * 86400000));
+    return weeksDiff >= 0 && weeksDiff % intervalWeeks === 0;
+  }
+
+  if (rule.intervalUnit === 'days') {
+    const daysDiff = Math.round((targetDate.getTime() - baseDate.getTime()) / 86400000);
+    return daysDiff >= 0 && daysDiff % interval === 0;
+  }
+
+  if (rule.intervalUnit === 'weeks') {
+    const daysDiff = Math.round((targetDate.getTime() - baseDate.getTime()) / 86400000);
+    return daysDiff >= 0 && daysDiff % (interval * 7) === 0;
+  }
+
+  if (rule.intervalUnit === 'months') {
+    if (dateStr === anchorStr) return true;
+    const desiredDay =
+      rule.monthDay != null ? Math.max(1, Math.min(31, rule.monthDay)) : baseDate.getDate();
+    const expectedInTarget = clampMonthDay(
+      targetDate.getFullYear(),
+      targetDate.getMonth(),
+      desiredDay
+    );
+    if (targetDate.getDate() !== expectedInTarget.getDate()) return false;
+    const candidateInBaseMonth = clampMonthDay(
+      baseDate.getFullYear(),
+      baseDate.getMonth(),
+      desiredDay
+    );
+    const firstCycleDate =
+      candidateInBaseMonth >= baseDate
+        ? candidateInBaseMonth
+        : nextMonthDayAfter(baseDate, desiredDay, 1);
+    if (targetDate < firstCycleDate) return false;
+    const monthsDiff =
+      (targetDate.getFullYear() - firstCycleDate.getFullYear()) * 12 +
+      (targetDate.getMonth() - firstCycleDate.getMonth());
+    return monthsDiff >= 0 && monthsDiff % interval === 0;
+  }
+
+  return false;
+}
+
+/**
+ * Whether `task` occurs on the local calendar date `dateStr` (YYYY-MM-DD).
+ * Returns true for every scheduled repeat day as well as any day already in `completionHistory`.
+ */
+export function taskOccursOnDate(
+  task: Pick<Task, 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'>,
+  dateStr: string
+): boolean {
+  if (task.deletedAt) return false;
+  if (!task.recurrence) {
+    return !!task.dueAt && getDueDatePart(task.dueAt) === dateStr;
+  }
+
+  const rule = task.recurrence;
+  const completedDates = getCompletedDateSet(task);
+  if (completedDates.has(dateStr)) return true;
+
+  if (rule.endOnDate && dateStr > rule.endOnDate) return false;
+  if (rule.endAfterCount != null && rule.endAfterCount > 0 && completedDates.size >= rule.endAfterCount) {
+    return false;
+  }
+
+  const anchorStr = task.dueAt
+    ? getDueDatePart(task.dueAt)
+    : formatDate(new Date(task.createdAt));
+  if (dateStr < anchorStr) return false;
+
+  let baseStr = anchorStr;
+  if (rule.type === 'after_completion') {
+    let latestComp: string | null = null;
+    for (const c of completedDates) {
+      if (c >= anchorStr && c < dateStr && (!latestComp || c > latestComp)) {
+        latestComp = c;
+      }
+    }
+    if (latestComp) {
+      const nextAfterComp = formatDate(
+        computeRawNextDue({ recurrence: rule, dueAt: latestComp }, parseDate(latestComp))
+      );
+      if (dateStr < nextAfterComp) return false;
+      baseStr = nextAfterComp;
+    }
+  }
+
+  if (!scheduleMatchesDate(rule, baseStr, dateStr, anchorStr)) return false;
+
+  if (rule.endAfterCount != null && rule.endAfterCount > 0) {
+    const targetDate = parseDate(dateStr);
+    let uncompletedCount = 0;
+    let cursor = parseDate(baseStr);
+    while (cursor <= targetDate) {
+      const dStr = formatDate(cursor);
+      if (!completedDates.has(dStr) && scheduleMatchesDate(rule, baseStr, dStr, anchorStr)) {
+        uncompletedCount++;
+        if (completedDates.size + uncompletedCount > rule.endAfterCount) {
+          return false;
+        }
+      }
+      cursor = addDays(cursor, 1);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Project a task onto a specific calendar date `dateStr` (YYYY-MM-DD), preserving any due time
+ * and setting `completedAt` based on whether that particular day was completed.
+ */
+export function projectTaskForDate(task: Task, dateStr: string): Task {
+  const time = task.dueAt && hasDueTime(task.dueAt) ? splitDueAt(task.dueAt).time : null;
+  const projectedDueAt = combineDueAt(dateStr, time);
+  if (task.recurrence) {
+    const compTs = getCompletionTimestampOnDate(task, dateStr);
+    return {
+      ...task,
+      dueAt: projectedDueAt,
+      completedAt: compTs,
+    };
+  }
+  return task.dueAt === projectedDueAt ? task : { ...task, dueAt: projectedDueAt };
+}
+
+/**
+ * Find the next (or currently overdue) uncompleted occurrence date (YYYY-MM-DD) for `task`,
+ * relative to `fromDate`. Returns null if the task is completed or its recurrence has ended.
+ */
+export function getNextUncompletedOccurrenceDate(
+  task: Task,
+  fromDate: Date = new Date()
+): string | null {
+  if (task.deletedAt) return null;
+  if (!task.recurrence) {
+    if (isCompleted(task) || !task.dueAt) return null;
+    return getDueDatePart(task.dueAt);
+  }
+
+  const today = startOfDay(fromDate);
+  const todayStr = formatDate(today);
+
+  if (taskOccursOnDate(task, todayStr) && !isCompletedOnDate(task, todayStr)) {
+    return todayStr;
+  }
+
+  const anchorStr = task.dueAt
+    ? getDueDatePart(task.dueAt)
+    : formatDate(new Date(task.createdAt));
+  const completedDates = getCompletedDateSet(task);
+
+  if (!isCompletedOnDate(task, todayStr) && anchorStr < todayStr) {
+    const anchorDate = parseDate(anchorStr);
+    const minLookback = addDays(today, -365);
+    const earliest = anchorDate > minLookback ? anchorDate : minLookback;
+    for (let cursor = addDays(today, -1); cursor >= earliest; cursor = addDays(cursor, -1)) {
+      const dStr = formatDate(cursor);
+      if (completedDates.has(dStr)) break;
+      if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+        return dStr;
+      }
+    }
+  }
+
+  const startForward = anchorStr > todayStr ? parseDate(anchorStr) : addDays(today, 1);
+  for (let i = 0; i <= 1100; i++) {
+    const dStr = formatDate(addDays(startForward, i));
+    if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) break;
+    if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+      return dStr;
+    }
+  }
+
+  return null;
 }
 
 export function startOfDay(date: Date = new Date()): Date {

@@ -3,6 +3,7 @@ import type { Task } from '../types/task';
 import {
   formatClockTime,
   formatDueLabel,
+  getDueDatePart,
   getTaskUrgency,
   hasDueTime,
   isCompleted,
@@ -26,7 +27,8 @@ interface TaskCardProps {
   showListName?: boolean;
   selected?: boolean;
   dense?: boolean;
-  onComplete: (id: string) => void;
+  onComplete: (id: string, dateStr?: string) => void;
+  onUncomplete?: (id: string, dateStr?: string) => void;
   onSelect?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (id: string) => void;
@@ -78,6 +80,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   selected = false,
   dense = false,
   onComplete,
+  onUncomplete,
   onSelect,
   onEdit,
   showDetails = false,
@@ -106,10 +109,14 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
   const handleCheck = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (completed) return;
+    const dateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
+    if (completed) {
+      onUncomplete?.(task.id, dateStr);
+      return;
+    }
     setJustCompleted(true);
     setTimeout(() => {
-      onComplete(task.id);
+      onComplete(task.id, dateStr);
       setJustCompleted(false);
     }, 220);
   };
@@ -177,8 +184,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       <button
         type="button"
         onClick={handleCheck}
-        disabled={completed}
-        title={completed ? 'Completed' : recurring ? 'Complete this occurrence' : 'Complete'}
+        disabled={completed && !onUncomplete}
+        title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
         className="flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors"
         style={{
           borderColor: completed || justCompleted ? '#34C759' : borderColor,

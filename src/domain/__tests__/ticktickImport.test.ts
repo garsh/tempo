@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { importTasksFromCsv, parseImportDue } from '../ticktickImport';
+import { importTasksFromCsv, parseImportDue, parseImportRepeat } from '../ticktickImport';
 import { INBOX_LIST_ID } from '../../types/task';
 
 describe('parseImportDue', () => {
@@ -106,5 +106,65 @@ describe('importTasksFromCsv', () => {
     expect(activeTask.priority).toBe('medium');
     expect(activeTask.tags).toEqual(['health']);
     expect(activeTask.notes).toBe('Do stretches');
+  });
+});
+
+describe('parseImportRepeat & recurring CSV import', () => {
+  it('parses TickTick RRULE/ERULE and human repeat strings', () => {
+    expect(parseImportRepeat('RRULE:FREQ=DAILY;INTERVAL=1')).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'days',
+    });
+    expect(parseImportRepeat('RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR')).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'weeks',
+      weekdays: [1, 3, 5],
+    });
+    expect(parseImportRepeat('RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=15')).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'months',
+      monthDay: 15,
+    });
+    expect(parseImportRepeat('RRULE:FREQ=DAILY;INTERVAL=2;REPEATFROM=2')).toEqual({
+      type: 'after_completion',
+      intervalValue: 2,
+      intervalUnit: 'days',
+    });
+    expect(parseImportRepeat('ERULE:FREQ=WEEKLY;INTERVAL=1')).toEqual({
+      type: 'after_completion',
+      intervalValue: 1,
+      intervalUnit: 'weeks',
+    });
+    expect(parseImportRepeat('weekdays')).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'weeks',
+      weekdays: [1, 2, 3, 4, 5],
+    });
+  });
+
+  it('imports recurring tasks and merges completed occurrence rows into completionHistory', () => {
+    const csv = [
+      'Folder Name,List Name,Title,Tags,Content,Start Date,Due Date,Repeat,Priority,Status,Created Time,Completed Time',
+      ',Inbox,Daily vitamins,,,2026-10-01,,RRULE:FREQ=DAILY;INTERVAL=1,0,2,2026-10-01T08:00:00+0000,2026-10-05T09:00:00+0000',
+      ',Inbox,Daily vitamins,,,2026-10-06,,RRULE:FREQ=DAILY;INTERVAL=1,0,0,2026-10-01T08:00:00+0000,',
+    ].join('\n');
+
+    const result = importTasksFromCsv(csv, 1_700_000_000_000);
+    expect(result.format).toBe('ticktick');
+    expect(result.tasks).toHaveLength(1);
+    const t = result.tasks[0];
+    expect(t.title).toBe('Daily vitamins');
+    expect(t.dueAt).toBe('2026-10-06');
+    expect(t.completedAt).toBeNull();
+    expect(t.recurrence).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'days',
+    });
+    expect(t.completionHistory).toEqual([Date.parse('2026-10-05T09:00:00+00:00')]);
   });
 });

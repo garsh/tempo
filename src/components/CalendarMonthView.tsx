@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { Task } from '../types/task';
 import { buildMonthGrid, weekdayLabels } from '../domain/calendar';
 import { usePrefs } from '../prefs/prefs';
-import { formatDate, getDueDatePart } from '../domain/recurrence';
+import { formatDate, isRecurring, taskOccursOnDate } from '../domain/recurrence';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -40,22 +40,23 @@ export function CalendarMonthView({
   const todayStr = formatDate(new Date());
   const focusStr = selectedDateStr || todayStr;
 
-  const dueDateSet = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of tasks) {
-      if (!t.deletedAt && t.dueAt) {
-        set.add(getDueDatePart(t.dueAt));
-      }
-    }
-    return set;
-  }, [tasks]);
-
   const dow = useMemo(() => weekdayLabels(weekStart), [weekStart]);
 
   const monthGrid = useMemo(
     () => buildMonthGrid(year, monthIndex, new Date(), weekStart),
     [year, monthIndex, weekStart]
   );
+
+  const dueDateSet = useMemo(() => {
+    const set = new Set<string>();
+    const active = tasks.filter((t) => !t.deletedAt && (t.dueAt || isRecurring(t)));
+    for (const cell of monthGrid) {
+      if (active.some((t) => taskOccursOnDate(t, cell.dateStr))) {
+        set.add(cell.dateStr);
+      }
+    }
+    return set;
+  }, [tasks, monthGrid]);
 
   const selectedWeekIndex = useMemo(() => {
     const idx = monthGrid.findIndex((c) => c.dateStr === focusStr);

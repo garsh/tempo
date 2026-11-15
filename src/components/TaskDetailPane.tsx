@@ -5,6 +5,7 @@ import {
   formatDate,
   formatDueLabel,
   formatRecurrenceLabel,
+  getDueDatePart,
   hasDueTime,
   isCompleted,
   splitDueAt,
@@ -39,7 +40,8 @@ interface TaskDetailPaneProps {
   task: Task | null;
   listName?: string;
   onClose: () => void;
-  onComplete: (id: string) => void;
+  onComplete: (id: string, dateStr?: string) => void;
+  onUncomplete?: (id: string, dateStr?: string) => void;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
@@ -60,6 +62,7 @@ export function TaskDetailPane({
   listName,
   onClose,
   onComplete,
+  onUncomplete,
   onEdit,
   onDelete,
   onTogglePin,
@@ -156,8 +159,13 @@ export function TaskDetailPane({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-tt-border flex-wrap">
         <button
           type="button"
-          onClick={() => !completed && onComplete(task.id)}
-          disabled={completed}
+          onClick={() => {
+            const dateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
+            if (completed) onUncomplete?.(task.id, dateStr);
+            else onComplete(task.id, dateStr);
+          }}
+          disabled={completed && !onUncomplete}
+          title={completed ? 'Mark incomplete' : task.recurrence ? 'Complete this occurrence' : 'Complete'}
           className="w-5 h-5 rounded-[5px] border-[1.5px] flex items-center justify-center flex-shrink-0"
           style={{
             borderColor: completed ? '#34C759' : checkColor,

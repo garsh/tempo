@@ -11,7 +11,13 @@ import type {
   TaskListInput,
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
-import { calculateNextDueDate, getDueDatePart, isRecurring } from '../domain/recurrence';
+import {
+  completionTimestampForDate,
+  formatDate,
+  getDueDatePart,
+  isCompletedOnDate,
+  isRecurring,
+} from '../domain/recurrence';
 import { planBatch, type BatchOp } from '../domain/batch';
 import { newId } from '../domain/id';
 import { clearFiredForTask } from '../domain/notifications';
@@ -225,49 +231,36 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
 
 /**
  * Complete a task.
- * - Recurring: rolls dueAt forward (or finalizes if end rule hit); resets subtasks.
+ * - Recurring: marks the given occurrence date (or dueAt date / today) completed in completionHistory without advancing dueAt away from other days; resets subtasks.
  * - One-off: sets completedAt.
  */
-export async function completeTask(id: string): Promise<Task | null> {
+export async function completeTask(id: string, dateStr?: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
 
   const now = Date.now();
-  const history = [...(task.completionHistory || []), now];
-
   let updated: Task;
-  if (isRecurring(task) && task.recurrence) {
-    const nextDue = calculateNextDueDate(
-      {
-        recurrence: task.recurrence,
-        dueAt: task.dueAt,
-        completionHistory: task.completionHistory,
-      },
-      new Date(now)
-    );
 
-    if (nextDue === null) {
-      // Recurrence ended — treat as finished
-      updated = {
-        ...task,
-        recurrence: null,
-        completedAt: now,
-        completionHistory: history,
-        updatedAt: now,
-        subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: true })),
-      };
-    } else {
-      updated = {
-        ...task,
-        dueAt: nextDue,
-        completedAt: null,
-        completionHistory: history,
-        updatedAt: now,
-        // Reset check items for the next cycle
-        subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
-      };
-    }
+  if (isRecurring(task) && task.recurrence) {
+    const targetDateStr =
+      dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
+    const ts = completionTimestampForDate(targetDateStr, now);
+    const alreadyDone = isCompletedOnDate(task, targetDateStr);
+    const history = alreadyDone
+      ? [...(task.completionHistory || [])]
+      : [...(task.completionHistory || []), ts];
+
+    updated = {
+      ...task,
+      dueAt: task.dueAt ?? targetDateStr,
+      completedAt: null,
+      completionHistory: history,
+      updatedAt: now,
+      // Reset check items for the next cycle
+      subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
+    };
   } else {
+    const history = [...(task.completionHistory || []), now];
     updated = {
       ...task,
       completedAt: now,
@@ -276,19 +269,30 @@ export async function completeTask(id: string): Promise<Task | null> {
     };
   }
 
-    clearFiredForTask(id);
+  clearFiredForTask(id);
   await db.tasks.put(updated);
   return updated;
 }
 
-export async function uncompleteTask(id: string): Promise<Task | null> {
+export async function uncompleteTask(id: string, dateStr?: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
 
   const now = Date.now();
+  let history = task.completionHistory || [];
+
+  if (isRecurring(task) && task.recurrence) {
+    const targetDateStr =
+      dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
+    history = history.filter((ts) => formatDate(new Date(ts)) !== targetDateStr);
+  } else if (dateStr) {
+    history = history.filter((ts) => formatDate(new Date(ts)) !== dateStr);
+  }
+
   const updated: Task = {
     ...task,
     completedAt: null,
+    completionHistory: history,
     updatedAt: now,
   };
   await db.tasks.put(updated);

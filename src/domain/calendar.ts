@@ -1,5 +1,15 @@
 import type { Task } from '../types/task';
-import { formatDate, getDueDatePart, isCompleted, startOfDay } from './recurrence';
+import {
+  formatDate,
+  getDueDatePart,
+  getNextUncompletedOccurrenceDate,
+  isCompleted,
+  isCompletedOnDate,
+  isRecurring,
+  projectTaskForDate,
+  startOfDay,
+  taskOccursOnDate,
+} from './recurrence';
 
 export type CalendarDayCell = {
   date: Date;
@@ -51,12 +61,26 @@ export function startOfWeek(date: Date, weekStart: number = 0): Date {
   return d;
 }
 
-/** Open tasks due on a given YYYY-MM-DD (date part of dueAt). */
+/** Open tasks due on a given YYYY-MM-DD (including recurring occurrences not completed on that day). */
 export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
-  return tasks.filter((t) => {
-    if (t.deletedAt || isCompleted(t) || !t.dueAt) return false;
-    return getDueDatePart(t.dueAt) === dateStr;
-  });
+  return tasks
+    .filter((t) => {
+      if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (!taskOccursOnDate(t, dateStr)) return false;
+      return !isCompletedOnDate(t, dateStr);
+    })
+    .map((t) => projectTaskForDate(t, dateStr));
+}
+
+/** Tasks completed on a given YYYY-MM-DD (including recurring occurrences completed on that day). */
+export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
+  return tasks
+    .filter((t) => {
+      if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (!taskOccursOnDate(t, dateStr)) return false;
+      return isCompletedOnDate(t, dateStr);
+    })
+    .map((t) => projectTaskForDate(t, dateStr));
 }
 
 /**
@@ -76,7 +100,6 @@ export function buildAgenda(
   dayCount: number = 14,
   includeEmpty: boolean = false
 ): AgendaDay[] {
-  const open = tasks.filter((t) => !t.deletedAt && !isCompleted(t) && t.dueAt);
   const days: AgendaDay[] = [];
   const start = startOfDay(from);
 
@@ -84,9 +107,9 @@ export function buildAgenda(
     const d = new Date(start);
     d.setDate(start.getDate() + i);
     const dateStr = formatDate(d);
-    const dayTasks = open
-      .filter((t) => getDueDatePart(t.dueAt!) === dateStr)
-      .sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || ''));
+    const dayTasks = tasksDueOnDate(tasks, dateStr).sort((a, b) =>
+      (a.dueAt || '').localeCompare(b.dueAt || '')
+    );
     if (includeEmpty || dayTasks.length > 0 || i === 0) {
       days.push({ dateStr, date: d, tasks: dayTasks });
     }
@@ -94,9 +117,19 @@ export function buildAgenda(
 
   // Also surface overdue before the range as a synthetic "Overdue" bucket
   const rangeStartStr = formatDate(start);
-  const overdue = open
-    .filter((t) => getDueDatePart(t.dueAt!) < rangeStartStr)
-    .sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || ''));
+  const overdue: Task[] = [];
+  for (const t of tasks) {
+    if (t.deletedAt || isCompleted(t)) continue;
+    if (isRecurring(t)) {
+      const nextDate = getNextUncompletedOccurrenceDate(t, start);
+      if (nextDate && nextDate < rangeStartStr) {
+        overdue.push(projectTaskForDate(t, nextDate));
+      }
+    } else if (t.dueAt && getDueDatePart(t.dueAt) < rangeStartStr) {
+      overdue.push(t);
+    }
+  }
+  overdue.sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || ''));
 
   if (overdue.length > 0) {
     days.unshift({

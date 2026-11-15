@@ -1,7 +1,16 @@
-import type { Task, TaskList, TaskPriority } from '../types/task';
+import type {
+  IntervalUnit,
+  RecurrenceRule,
+  RecurrenceType,
+  Task,
+  TaskList,
+  TaskPriority,
+  Weekday,
+} from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import { parseCsv, rowsToObjects } from './csvParse';
 import { newId } from './id';
+import { formatDate } from './recurrence';
 
 export interface TickTickImportResult {
   tasks: Task[];
@@ -158,6 +167,149 @@ function parseTimestampMs(raw: string, fallback: number): number {
   return fallback;
 }
 
+const RRULE_WEEKDAY: Record<string, Weekday> = {
+  SU: 0,
+  MO: 1,
+  TU: 2,
+  WE: 3,
+  TH: 4,
+  FR: 5,
+  SA: 6,
+};
+
+/** Parse a TickTick RRULE/ERULE or human repeat string into a Tempo RecurrenceRule. */
+export function parseImportRepeat(raw: string | undefined): RecurrenceRule | null {
+  if (!raw || !raw.trim()) return null;
+  let s = raw.trim();
+  let type: RecurrenceType = 'fixed_interval';
+
+  if (/^ERULE:/i.test(s)) {
+    type = 'after_completion';
+    s = s.slice(6).trim();
+  } else if (/^RRULE:/i.test(s)) {
+    s = s.slice(6).trim();
+  }
+
+  if (/FREQ=/i.test(s)) {
+    const parts = new Map<string, string>();
+    for (const seg of s.split(';')) {
+      const eq = seg.indexOf('=');
+      if (eq <= 0) continue;
+      parts.set(seg.slice(0, eq).trim().toUpperCase(), seg.slice(eq + 1).trim().toUpperCase());
+    }
+
+    if (parts.get('REPEATFROM') === '2' || parts.get('REPEATFROM') === 'COMPLETION') {
+      type = 'after_completion';
+    }
+
+    const freq = parts.get('FREQ');
+    const rawInterval = parseInt(parts.get('INTERVAL') || '1', 10);
+    const interval = Number.isFinite(rawInterval) && rawInterval >= 1 ? rawInterval : 1;
+
+    const byDayRaw = parts.get('BYDAY');
+    const weekdays: Weekday[] = [];
+    if (byDayRaw) {
+      const seen = new Set<Weekday>();
+      for (const tok of byDayRaw.split(',')) {
+        const code = tok.trim().slice(-2).toUpperCase();
+        const wd = RRULE_WEEKDAY[code];
+        if (wd !== undefined && !seen.has(wd)) {
+          seen.add(wd);
+          weekdays.push(wd);
+        }
+      }
+      weekdays.sort((a, b) => a - b);
+    }
+
+    const byMonthDayRaw = parts.get('BYMONTHDAY');
+    let monthDay: number | undefined;
+    if (byMonthDayRaw) {
+      const firstDom = parseInt(byMonthDayRaw.split(',')[0], 10);
+      if (firstDom === -1) monthDay = 31;
+      else if (Number.isFinite(firstDom) && firstDom >= 1 && firstDom <= 31) monthDay = firstDom;
+    }
+
+    const untilRaw = parts.get('UNTIL');
+    let endOnDate: string | null | undefined;
+    if (untilRaw) {
+      const m = untilRaw.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+      if (m) endOnDate = `${m[1]}-${m[2]}-${m[3]}`;
+    }
+
+    const countRaw = parts.get('COUNT');
+    let endAfterCount: number | null | undefined;
+    if (countRaw) {
+      const n = parseInt(countRaw, 10);
+      if (Number.isFinite(n) && n > 0) endAfterCount = n;
+    }
+
+    let intervalUnit: IntervalUnit;
+    let intervalValue = interval;
+    let ruleWeekdays: Weekday[] | undefined;
+
+    if (freq === 'DAILY') {
+      if (weekdays.length > 0 && weekdays.length < 7) {
+        intervalUnit = 'weeks';
+        intervalValue = 1;
+        ruleWeekdays = weekdays;
+      } else {
+        intervalUnit = 'days';
+      }
+    } else if (freq === 'WEEKLY') {
+      if (weekdays.length === 7 && interval === 1) {
+        intervalUnit = 'days';
+        intervalValue = 1;
+      } else {
+        intervalUnit = 'weeks';
+        ruleWeekdays = weekdays.length > 0 ? weekdays : undefined;
+      }
+    } else if (freq === 'MONTHLY') {
+      intervalUnit = 'months';
+    } else if (freq === 'YEARLY') {
+      intervalUnit = 'months';
+      intervalValue = interval * 12;
+    } else {
+      return null;
+    }
+
+    return {
+      type,
+      intervalValue,
+      intervalUnit,
+      ...(ruleWeekdays ? { weekdays: ruleWeekdays } : {}),
+      ...(monthDay !== undefined && intervalUnit === 'months' ? { monthDay } : {}),
+      ...(endOnDate ? { endOnDate } : {}),
+      ...(endAfterCount ? { endAfterCount } : {}),
+    };
+  }
+
+  const lower = s.toLowerCase();
+  if (lower === 'daily' || lower === 'every day') {
+    return { type, intervalValue: 1, intervalUnit: 'days' };
+  }
+  if (lower === 'weekly' || lower === 'every week') {
+    return { type, intervalValue: 1, intervalUnit: 'weeks' };
+  }
+  if (lower === 'weekdays' || lower === 'every weekday') {
+    return { type, intervalValue: 1, intervalUnit: 'weeks', weekdays: [1, 2, 3, 4, 5] };
+  }
+  if (lower === 'monthly' || lower === 'every month') {
+    return { type, intervalValue: 1, intervalUnit: 'months' };
+  }
+  if (lower === 'yearly' || lower === 'annually' || lower === 'every year') {
+    return { type, intervalValue: 12, intervalUnit: 'months' };
+  }
+  const everyMatch = lower.match(/^every\s+(\d+)\s+(day|week|month|year)s?$/);
+  if (everyMatch) {
+    const n = Math.max(1, parseInt(everyMatch[1], 10) || 1);
+    const unit = everyMatch[2];
+    if (unit === 'year') return { type, intervalValue: n * 12, intervalUnit: 'months' };
+    return { type, intervalValue: n, intervalUnit: `${unit}s` as IntervalUnit };
+  }
+
+  return null;
+}
+
 /**
  * Import tasks from TickTick CSV export or a simple generic CSV
  * (title, notes, due, priority, tags, list, status).
@@ -178,6 +330,8 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
   const listMap = new Map<string, TaskList>();
   const tasks: Task[] = [];
   let skipped = 0;
+  const activeRecurringByKey = new Map<string, Task>();
+  const completedRecurringCandidates: { index: number; key: string; compTs: number }[] = [];
 
   const ensureList = (name: string): string => {
     const trimmed = name.trim() || 'Imported';
@@ -210,11 +364,23 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
     const listName = getField(row, 'List Name', 'list name', 'List', 'list', 'Folder Name');
     const listId = listName ? ensureList(listName) : INBOX_LIST_ID;
 
-    const dueRaw = getField(row, 'Due Date', 'due date', 'Due', 'due', 'dueAt');
+    const dueRaw = getField(
+      row,
+      'Due Date',
+      'due date',
+      'Due',
+      'due',
+      'dueAt',
+      'Start Date',
+      'start date'
+    );
     const isAllDayRaw = getField(row, 'Is All Day', 'is all day', 'isAllDay').trim().toLowerCase();
     const isAllDay = isAllDayRaw === 'true' || isAllDayRaw === '1' || isAllDayRaw === 'yes';
     const timezone = getField(row, 'Timezone', 'timezone', 'Time Zone', 'time zone').trim() || undefined;
     const dueAt = parseImportDue(dueRaw, { isAllDay, timezone });
+
+    const repeatRaw = getField(row, 'Repeat', 'repeat', 'Recurrence', 'recurrence');
+    const parsedRecurrence = parseImportRepeat(repeatRaw);
 
     const priority = mapPriority(getField(row, 'Priority', 'priority'));
     const tagsRaw = getField(row, 'Tags', 'tags', 'tag');
@@ -226,38 +392,79 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       : [];
 
     const notes = getField(row, 'Content', 'content', 'Notes', 'notes', 'Description', 'description');
-    const status = getField(row, 'Status', 'status').toLowerCase();
+    const status = getField(row, 'Status', 'status').trim().toLowerCase();
     const completedRaw = getField(row, 'Completed Time', 'completed time', 'Completed', 'completed');
     const isDone =
-      status === 'completed' ||
-      status === 'done' ||
-      status === '1' ||
-      status === '2' ||
-      status === '-1' ||
-      Boolean(completedRaw);
+      status === '0' || status === 'normal' || status === 'open'
+        ? false
+        : status === 'completed' ||
+          status === 'done' ||
+          status === '1' ||
+          status === '2' ||
+          status === '-1' ||
+          Boolean(completedRaw);
 
     const createdRaw = getField(row, 'Created Time', 'created time', 'Created', 'created');
     const createdAt = parseTimestampMs(createdRaw, now);
     const completedAt = isDone ? parseTimestampMs(completedRaw, now) : null;
+
+    const repeatKey = parsedRecurrence
+      ? `${listId}::${title.trim().toLowerCase()}::${repeatRaw.trim()}`
+      : null;
 
     const task: Task = {
       id: newId(),
       title: title.trim(),
       notes: notes || undefined,
       listId,
-      dueAt,
+      dueAt: !isDone && parsedRecurrence ? dueAt ?? formatDate(new Date(createdAt)) : dueAt,
       priority,
       pinned: false,
       tags: tags.length ? tags : undefined,
       subtasks: [],
-      recurrence: null,
-      completedAt,
+      recurrence: !isDone ? parsedRecurrence : null,
+      completedAt: !isDone ? null : completedAt,
       completionHistory: completedAt !== null ? [completedAt] : [],
       createdAt,
       updatedAt: now,
       deletedAt: null,
     };
+
+    if (!isDone && parsedRecurrence && repeatKey && !activeRecurringByKey.has(repeatKey)) {
+      activeRecurringByKey.set(repeatKey, task);
+    } else if (isDone && parsedRecurrence && repeatKey) {
+      let compTs = completedAt ?? now;
+      if (!completedRaw && dueAt) {
+        const [y, m, d] = dueAt.slice(0, 10).split('-').map(Number);
+        compTs = new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+      }
+      completedRecurringCandidates.push({ index: tasks.length, key: repeatKey, compTs });
+    }
     tasks.push(task);
+  }
+
+  if (completedRecurringCandidates.length > 0) {
+    const dropIndices = new Set<number>();
+    for (const c of completedRecurringCandidates) {
+      const active = activeRecurringByKey.get(c.key);
+      if (active) {
+        dropIndices.add(c.index);
+        if (!active.completionHistory.includes(c.compTs)) {
+          active.completionHistory.push(c.compTs);
+        }
+      }
+    }
+    for (const active of activeRecurringByKey.values()) {
+      active.completionHistory.sort((a, b) => a - b);
+    }
+    if (dropIndices.size > 0) {
+      return {
+        tasks: tasks.filter((_, idx) => !dropIndices.has(idx)),
+        lists: [...listMap.values()],
+        skipped,
+        format,
+      };
+    }
   }
 
   return {

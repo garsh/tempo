@@ -6,6 +6,10 @@ const LONG_PRESS_MS = 350;
 const MOVE_CANCEL_PX = 8;
 const SETTLE_MS = 165;
 
+function rowKey(task: Task): string {
+  return task.dueAt ? `${task.id}:${task.dueAt}` : task.id;
+}
+
 export interface RowDragProps {
   isDragging: boolean;
   isSettling: boolean;
@@ -130,7 +134,7 @@ export function ReorderableTaskList({
     if (!pendingOrderIds) return;
     const sameOrder =
       tasks.length === pendingOrderIds.length &&
-      tasks.every((t, i) => t.id === pendingOrderIds[i]);
+      tasks.every((t, i) => rowKey(t) === pendingOrderIds[i]);
     if (sameOrder) {
       setPendingOrderIds(null);
       return;
@@ -141,16 +145,16 @@ export function ReorderableTaskList({
 
   const displayTasks = useMemo(() => {
     if (!pendingOrderIds) return tasks;
-    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const byKey = new Map(tasks.map((t) => [rowKey(t), t]));
     const ordered: Task[] = [];
-    for (const id of pendingOrderIds) {
-      const t = byId.get(id);
+    for (const key of pendingOrderIds) {
+      const t = byKey.get(key);
       if (t) {
         ordered.push(t);
-        byId.delete(id);
+        byKey.delete(key);
       }
     }
-    for (const t of byId.values()) ordered.push(t);
+    for (const t of byKey.values()) ordered.push(t);
     return ordered;
   }, [tasks, pendingOrderIds]);
 
@@ -262,6 +266,7 @@ export function ReorderableTaskList({
       const list = tasksRef.current;
       const reordered = moveItemToSlot(list, fromIndex, targetIndex);
       const reorderedIds = reordered !== list ? reordered.map((t) => t.id) : null;
+      const reorderedKeys = reordered !== list ? reordered.map(rowKey) : null;
 
       if (reorderedIds) {
         onReorderRef.current(reorderedIds);
@@ -280,8 +285,8 @@ export function ReorderableTaskList({
 
       settleTimerRef.current = window.setTimeout(() => {
         settleTimerRef.current = null;
-        if (reorderedIds) {
-          setPendingOrderIds(reorderedIds);
+        if (reorderedKeys) {
+          setPendingOrderIds(reorderedKeys);
         }
         setDragState(null);
         onDragActiveChangeRef.current?.(false);
@@ -331,15 +336,16 @@ export function ReorderableTaskList({
         pendingRef.current = null;
 
         const list = tasksRef.current;
-        const fromIndex = list.findIndex((t) => t.id === taskId);
+        const fromIndex = list.findIndex((t) => rowKey(t) === taskId);
         if (fromIndex === -1) return;
 
         const containerTop = containerRef.current?.getBoundingClientRect().top ?? 0;
         const snapshots: RowSnapshot[] = list.map((t) => {
-          const rect = rowRefs.current.get(t.id)?.getBoundingClientRect();
+          const key = rowKey(t);
+          const rect = rowRefs.current.get(key)?.getBoundingClientRect();
           const top = rect?.top ?? 0;
           const height = rect?.height ?? 0;
-          return { id: t.id, top, height, midpoint: top + height / 2 };
+          return { id: key, top, height, midpoint: top + height / 2 };
         });
         const draggedHeight = snapshots[fromIndex]?.height ?? 0;
 
@@ -406,7 +412,8 @@ export function ReorderableTaskList({
     <div ref={containerRef} className="relative">
       {dragState?.indicatorTop != null && <DropIndicator top={dragState.indicatorTop} />}
       {displayTasks.map((task, idx) => {
-        const isDragging = dragState?.taskId === task.id;
+        const key = rowKey(task);
+        const isDragging = dragState?.taskId === key;
         let shiftY = 0;
         if (dragState && !isDragging) {
           if (dragState.fromIndex < insertAt && idx > dragState.fromIndex && idx <= insertAt) {
@@ -425,8 +432,8 @@ export function ReorderableTaskList({
           isDragActive,
           dragOffsetY: isDragging ? dragState.offsetY : 0,
           shiftY,
-          rowRef: (el) => registerRow(task.id, el),
-          onRowPointerDown: (e) => handleRowPointerDown(task.id, e),
+          rowRef: (el) => registerRow(key, el),
+          onRowPointerDown: (e) => handleRowPointerDown(key, e),
           onRowClickCapture: handleRowClickCapture,
           onRowContextMenu: handleRowContextMenu,
         });

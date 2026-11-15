@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Task } from '../types/task';
-import { startOfWeek, tasksDueOnDate } from '../domain/calendar';
+import { completedTasksOnDate, startOfWeek, tasksDueOnDate } from '../domain/calendar';
 import { usePrefs, type TimeFormat } from '../prefs/prefs';
 import {
   formatDate,
@@ -67,10 +67,7 @@ export function CalendarAgendaView({
   const dayTasks = useMemo(() => {
     const due = tasksDueOnDate(tasks, focus);
     // Include completed that were due this day for timeline checkmarks
-    const completedToday = tasks.filter((t) => {
-      if (t.deletedAt || !isCompleted(t) || !t.dueAt) return false;
-      return t.dueAt.startsWith(focus);
-    });
+    const completedToday = completedTasksOnDate(tasks, focus);
     const map = new Map<string, Task>();
     for (const t of [...due, ...completedToday]) map.set(t.id, t);
     return [...map.values()].sort((a, b) => {
