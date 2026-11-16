@@ -329,7 +329,7 @@ export const ChangeDateDialog: React.FC<ChangeDateDialogProps> = ({
             onClick={handleConfirm}
             className="px-7 py-3 text-[17px] sm:text-[18px] font-bold bg-tt-blue hover:bg-tt-blue-hover text-white rounded-2xl shadow-lg transition-colors active:scale-95"
           >
-            Save Date
+            Save
           </button>
         </div>
       </div>
