@@ -35,7 +35,7 @@ You have access to the `local-gpu-subagent` MCP server backed by a local RTX 507
   - **Updating**:
     1. Run `npm run build` (`tsc -b && vite build`) to regenerate `dist/`.
     2. If `dist/` was ever deleted and recreated rather than updated in-place, run `docker restart caddy-proxy` so the bind mount reattaches to the new directory.
-    3. **Browser / PWA cache**: Because Tempo uses `vite-plugin-pwa` (Workbox `autoUpdate`), the first refresh after a build may still serve the previously cached Service Worker bundle while the new `sw.js` installs. Refresh a second time (or hard-reload / click **Update** in Chrome DevTools → **Application → Service Workers**) to load the new version.
+    3. **Browser / PWA updates**: Tempo uses `vite-plugin-pwa` in `prompt` mode with `PwaUpdatePrompt`. When a new build is deployed, clients check periodically (every 60s) and when regaining focus/visibility. Once the new service worker installs in the background, an "Update available" toast appears with a **Refresh** button to seamlessly activate and reload the new version.
 
 ## Architecture & Code Conventions
 - **Client-Side Only**: No backend server. Data is stored in browser IndexedDB via Dexie.js and synced via Google Drive REST API (`tempo_backup.json`).

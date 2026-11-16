@@ -66,6 +66,17 @@ function SettingsIcon() {
   );
 }
 
+function UpdateAppIcon() {
+  return (
+    <svg {...ICON}>
+      <path d="M2.5 10a7.5 7.5 0 0 1 12.8-5.3L17.5 7" />
+      <path d="M17.5 2.5V7H13" />
+      <path d="M17.5 10a7.5 7.5 0 0 1-12.8 5.3L2.5 13" />
+      <path d="M2.5 17.5V13H7" />
+    </svg>
+  );
+}
+
 interface OverflowMenuProps {
   open: boolean;
   /** Bounding rect of the ⋮ button the card anchors to. */
@@ -80,12 +91,13 @@ interface OverflowMenuProps {
   onGroupSort: () => void;
   onSelect: () => void;
   onSettings: () => void;
+  onUpdateApp?: () => void;
 }
 
 /**
  * Three-dot "⋮" menu: rounded card anchored to the button.
  * Show/Hide Details · Hide/Show Completed · Show/Hide Overdue ·
- * Group & Sort · Select · Settings.
+ * Group & Sort · Select · Update App · Settings.
  */
 export function OverflowMenu(props: OverflowMenuProps) {
   const { open, anchor, onClose } = props;
@@ -112,8 +124,8 @@ export function OverflowMenu(props: OverflowMenuProps) {
 
   if (!open) return null;
 
-  const act = (fn: () => void) => () => {
-    fn();
+  const act = (fn?: () => void) => () => {
+    fn?.();
     onClose();
   };
   const row =
@@ -151,6 +163,10 @@ export function OverflowMenu(props: OverflowMenuProps) {
           Select
         </button>
         <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
+        <button type="button" role="menuitem" className={row} onClick={act(props.onUpdateApp)}>
+          <UpdateAppIcon />
+          Update App
+        </button>
         <button type="button" role="menuitem" className={row} onClick={act(props.onSettings)}>
           <SettingsIcon />
           Settings

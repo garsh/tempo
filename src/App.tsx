@@ -77,6 +77,7 @@ import { MobileDrawer } from './components/drawer/MobileDrawer';
 import { AddListSheet, ItemActionSheet, ManageSmartListsSheet } from './components/drawer/DrawerSheets';
 import { summarizeAccount } from './sync/accountSummary';
 import { OverflowMenu } from './components/menu/OverflowMenu';
+import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import { GroupSortSheet } from './components/menu/GroupSortSheet';
 import { SelectionBar, SelectionHeader } from './components/menu/SelectionBar';
 import { listDotColor } from './theme/listColors';
@@ -1596,6 +1597,7 @@ export function App() {
           setSelectMode(true);
         }}
         onSettings={() => openSettings('root')}
+        onUpdateApp={triggerAppUpdate}
       />
 
       <GroupSortSheet
