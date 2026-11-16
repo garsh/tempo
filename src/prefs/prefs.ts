@@ -65,7 +65,6 @@ export const SMART_LIST_IDS: SmartListId[] = [
   'inbox',
   'all',
   'completed',
-  'tags',
   'filters',
 ];
 export const SMART_LIST_LABELS: Record<SmartListId, string> = {
@@ -166,8 +165,8 @@ export function sanitizePrefs(raw: unknown): Prefs {
     showDetails: typeof r.showDetails === 'boolean' ? r.showDetails : DEFAULT_PREFS.showDetails,
     hideCompleted: typeof r.hideCompleted === 'boolean' ? r.hideCompleted : DEFAULT_PREFS.hideCompleted,
     showOverdue: typeof r.showOverdue === 'boolean' ? r.showOverdue : DEFAULT_PREFS.showOverdue,
-    groupBy: oneOf(r.groupBy, ['none', 'date', 'list', 'priority', 'tag'] as const, DEFAULT_PREFS.groupBy),
-    sortBy: oneOf(r.sortBy, ['due', 'priority', 'title', 'created'] as const, DEFAULT_PREFS.sortBy),
+    groupBy: oneOf(r.groupBy, ['none', 'date'] as const, DEFAULT_PREFS.groupBy),
+    sortBy: oneOf(r.sortBy, ['due', 'title', 'created'] as const, DEFAULT_PREFS.sortBy),
     viewMode: oneOf(r.viewMode, ['list', 'board'] as const, DEFAULT_PREFS.viewMode),
     tabs: r.tabs === undefined ? [...DEFAULT_PREFS.tabs] : normalizeTabs(r.tabs),
     smartLists,

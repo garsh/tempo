@@ -1,9 +1,7 @@
-import { useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronRight, Filter, Folder as FolderIcon, List, Search, Tag } from 'lucide-react';
+import { CalendarDays, Filter, Search } from 'lucide-react';
 import type { AppView, Folder, SavedFilter, TaskList } from '../../types/task';
 import type { SmartListId } from '../../prefs/prefs';
 import { SMART_LIST_LABELS } from '../../prefs/prefs';
-import { listDotColor } from '../../theme/listColors';
 import type { GoogleAccount } from '../../sync/googleAccount';
 import type { AccountSummary } from '../../sync/accountSummary';
 import { AddSquareIcon, Avatar, HexGearIcon, ManageListsIcon, WarnDot } from './drawerBits';
@@ -43,11 +41,9 @@ interface MobileDrawerProps {
  * color dots, and a bottom bar with "+ Add" and the manage-smart-lists button.
  */
 export function MobileDrawer(props: MobileDrawerProps) {
-  const { open, activeView, account, summary, smartLists, counts, folders, userLists, filters, tags } = props;
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { open, activeView, account, summary, smartLists, counts, filters } = props;
   if (!open) return null;
 
-  const colorIndex = new Map(userLists.map((l, i) => [l.id, i]));
   const rowBase =
     'w-full h-[52px] flex items-center gap-[15px] pl-4 pr-4 rounded-[15px] text-left text-[17px] font-bold tracking-[0.005em] text-tt-drawer-text';
   const rowCls = (active: boolean) => `${rowBase} ${active ? 'bg-tt-drawer-pill' : 'active:bg-tt-drawer-pill/60'}`;
@@ -60,28 +56,6 @@ export function MobileDrawer(props: MobileDrawerProps) {
     },
   });
 
-  const listRow = (list: TaskList, indent = false) => (
-    <button
-      key={list.id}
-      type="button"
-      className={`${rowCls(activeView === `list:${list.id}`)} ${indent ? 'pl-9' : ''}`}
-      onClick={() => props.onGo(`list:${list.id}`)}
-      {...longPress(() => props.onListMenu(list))}
-    >
-      <List className="w-[19px] h-[19px] shrink-0 text-tt-drawer-muted" strokeWidth={2} />
-      <span className="truncate min-w-0">{list.name}</span>
-      <span className="ml-auto flex items-center gap-3">
-        <span
-          className="w-2 h-2 rounded-full"
-          style={{ backgroundColor: listDotColor(colorIndex.get(list.id) ?? 0) }}
-          aria-hidden
-        />
-      </span>
-    </button>
-  );
-
-  const unfiled = userLists.filter((l) => !l.folderId || !folders.some((f) => f.id === l.folderId));
-  const showTags = smartLists.tags && tags.length > 0;
   const showFilters = smartLists.filters && filters.length > 0;
 
   return (
@@ -151,37 +125,6 @@ export function MobileDrawer(props: MobileDrawerProps) {
             ))}
           </div>
 
-          {(folders.length > 0 || userLists.length > 0) && (
-            <>
-              <div className="mx-4 my-2 h-px bg-tt-drawer-divider" />
-              <div className="space-y-[1px]">
-                {folders.map((folder) => {
-                  const inFolder = userLists.filter((l) => l.folderId === folder.id);
-                  const isCollapsed = !!collapsed[folder.id];
-                  return (
-                    <div key={folder.id}>
-                      <button
-                        type="button"
-                        className={rowCls(false)}
-                        onClick={() => setCollapsed((c) => ({ ...c, [folder.id]: !c[folder.id] }))}
-                        aria-expanded={!isCollapsed}
-                        {...longPress(() => props.onFolderMenu(folder))}
-                      >
-                        <FolderIcon className="w-[19px] h-[19px] shrink-0 text-tt-drawer-muted" strokeWidth={2} />
-                        <span className="truncate min-w-0">{folder.name}</span>
-                        <span className="ml-auto text-tt-drawer-muted">
-                          {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        </span>
-                      </button>
-                      {!isCollapsed && inFolder.map((l) => listRow(l, true))}
-                    </div>
-                  );
-                })}
-                {unfiled.map((l) => listRow(l))}
-              </div>
-            </>
-          )}
-
           {showFilters && (
             <>
               <div className="mx-4 my-2 h-px bg-tt-drawer-divider" />
@@ -196,24 +139,6 @@ export function MobileDrawer(props: MobileDrawerProps) {
                 >
                   <Filter className="w-[19px] h-[19px] shrink-0 text-tt-drawer-muted" strokeWidth={2} />
                   <span className="truncate">{f.name}</span>
-                </button>
-              ))}
-            </>
-          )}
-
-          {showTags && (
-            <>
-              <div className="mx-4 my-2 h-px bg-tt-drawer-divider" />
-              <div className="px-4 pt-1 pb-1 text-[13px] font-semibold text-tt-drawer-muted">Tags</div>
-              {tags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  className={rowCls(props.selectedTag === tag)}
-                  onClick={() => props.onSelectTag(props.selectedTag === tag ? null : tag)}
-                >
-                  <Tag className="w-[19px] h-[19px] shrink-0 text-tt-drawer-muted" strokeWidth={2} />
-                  <span className="truncate">{tag}</span>
                 </button>
               ))}
             </>

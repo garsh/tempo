@@ -1,6 +1,4 @@
 import type { AppView, Folder, SavedFilter, TaskList } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
-import { listDotColor } from '../../theme/listColors';
 import type { SmartListId } from '../../prefs/prefs';
 import {
   CalendarDays,
@@ -12,8 +10,6 @@ import {
   CheckCircle2,
   Plus,
   Trash2,
-  Folder as FolderIcon,
-  Tag,
   Filter,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -34,29 +30,29 @@ interface SidebarNavProps {
   inboxCount: number;
   openCount: number;
   completedCount: number;
-  activeFolders: Folder[];
-  unfiledLists: TaskList[];
-  userLists: TaskList[];
+  activeFolders?: Folder[];
+  unfiledLists?: TaskList[];
+  userLists?: TaskList[];
   activeSavedFilters: SavedFilter[];
-  allTags: string[];
-  selectedTag: string | null;
-  showNewListInput: boolean;
-  showNewFolderInput: boolean;
-  newListName: string;
-  newFolderName: string;
-  newListFolderId: string;
+  allTags?: string[];
+  selectedTag?: string | null;
+  showNewListInput?: boolean;
+  showNewFolderInput?: boolean;
+  newListName?: string;
+  newFolderName?: string;
+  newListFolderId?: string;
   onGo: (view: AppView) => void;
-  onSelectTag: (tag: string | null) => void;
-  onNewList: (e: React.FormEvent) => void;
-  onNewFolder: (e: React.FormEvent) => void;
-  onDeleteList: (list: TaskList) => void;
-  onDeleteFolder: (folder: Folder) => void;
+  onSelectTag?: (tag: string | null) => void;
+  onNewList?: (e: React.FormEvent) => void;
+  onNewFolder?: (e: React.FormEvent) => void;
+  onDeleteList?: (list: TaskList) => void;
+  onDeleteFolder?: (folder: Folder) => void;
   onDeleteFilter: (filter: SavedFilter) => void;
-  setShowNewListInput: (v: boolean) => void;
-  setShowNewFolderInput: (v: boolean) => void;
-  setNewListName: (v: string) => void;
-  setNewFolderName: (v: string) => void;
-  setNewListFolderId: (v: string) => void;
+  setShowNewListInput?: (v: boolean) => void;
+  setShowNewFolderInput?: (v: boolean) => void;
+  setNewListName?: (v: string) => void;
+  setNewFolderName?: (v: string) => void;
+  setNewListFolderId?: (v: string) => void;
   onOpenFilterModal: () => void;
   onEditFilter: (f: SavedFilter) => void;
   /** Smart-list visibility (shared with the mobile drawer's manage sheet). */
@@ -73,29 +69,9 @@ export function SidebarNav(props: SidebarNavProps) {
     inboxCount,
     openCount,
     completedCount,
-    activeFolders,
-    unfiledLists,
-    userLists,
     activeSavedFilters,
-    allTags,
-    selectedTag,
-    showNewListInput,
-    showNewFolderInput,
-    newListName,
-    newFolderName,
-    newListFolderId,
     onGo,
-    onSelectTag,
-    onNewList,
-    onNewFolder,
-    onDeleteList,
-    onDeleteFolder,
     onDeleteFilter,
-    setShowNewListInput,
-    setShowNewFolderInput,
-    setNewListName,
-    setNewFolderName,
-    setNewListFolderId,
     onOpenFilterModal,
     onEditFilter,
     smartLists,
@@ -109,34 +85,6 @@ export function SidebarNav(props: SidebarNavProps) {
     { id: 'inbox', label: 'Inbox', Icon: Inbox, count: inboxCount },
     { id: 'all', label: 'All Open', Icon: Layers, count: openCount },
   ];
-
-  const renderListRow = (list: TaskList, idx: number, indent = false) => (
-    <div key={list.id} className={`relative group/list ${indent ? 'pl-2' : ''}`}>
-      <button
-        type="button"
-        className={rowClass(activeView === `list:${list.id}`)}
-        onClick={() => onGo(`list:${list.id}`)}
-      >
-        <span className="inline-flex items-center gap-2 truncate min-w-0">
-          <span
-            className="w-2.5 h-2.5 rounded-full shrink-0"
-            style={{ backgroundColor: listDotColor(idx) }}
-          />
-          <span className="truncate">{list.name}</span>
-        </span>
-      </button>
-      {list.id !== INBOX_LIST_ID && (
-        <button
-          type="button"
-          title={`Delete ${list.name}`}
-          onClick={() => onDeleteList(list)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover/list:flex w-5 h-5 items-center justify-center rounded-md text-tt-overdue hover:bg-tt-overdue/10"
-        >
-          <Trash2 className="w-3 h-3" />
-        </button>
-      )}
-    </div>
-  );
 
   return (
     <div className="h-full flex flex-col bg-tt-sidebar text-tt-text">
@@ -169,128 +117,6 @@ export function SidebarNav(props: SidebarNavProps) {
             </button>
           ))}
         </div>
-
-        <div>
-          <div className="flex items-center justify-between px-3 mb-1 group/sec">
-            <span className="text-[11px] font-semibold text-tt-secondary">Lists</span>
-            <button
-              type="button"
-              className="p-0.5 rounded text-tt-muted opacity-0 group-hover/sec:opacity-100 hover:text-tt-blue"
-              onClick={() => setShowNewListInput(true)}
-              title="New list"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          {showNewListInput && (
-            <form onSubmit={onNewList} className="px-2 mb-1 space-y-1">
-              <input
-                autoFocus
-                value={newListName}
-                onChange={(e) => setNewListName(e.target.value)}
-                placeholder="List name"
-                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
-              />
-              <select
-                value={newListFolderId}
-                onChange={(e) => setNewListFolderId(e.target.value)}
-                className="w-full px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
-              >
-                <option value="">No folder</option>
-                {activeFolders.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-              <div className="flex gap-1">
-                <button type="submit" className="flex-1 text-xs py-1 rounded-lg bg-tt-blue text-white">
-                  Add
-                </button>
-                <button
-                  type="button"
-                  className="flex-1 text-xs py-1 rounded-lg bg-tt-elevated border border-tt-border"
-                  onClick={() => setShowNewListInput(false)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-          <div className="space-y-0.5">
-            {activeFolders.map((folder, fi) => {
-              const listsInFolder = userLists.filter((l) => l.folderId === folder.id);
-              return (
-                <div key={folder.id} className="group/folder">
-                  <div className="flex items-center gap-1 px-3 py-1 text-[12px] text-tt-secondary font-semibold">
-                    <FolderIcon className="w-3.5 h-3.5" />
-                    <span className="flex-1 truncate">{folder.name}</span>
-                    <button
-                      type="button"
-                      title={`Delete folder ${folder.name}`}
-                      onClick={() => onDeleteFolder(folder)}
-                      className="hidden group-hover/folder:flex w-5 h-5 items-center justify-center rounded-md text-tt-overdue"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                  {listsInFolder.map((list, li) => renderListRow(list, fi * 10 + li, true))}
-                </div>
-              );
-            })}
-            {unfiledLists.map((list, i) => renderListRow(list, i + 20))}
-            {userLists.length === 0 && !showNewListInput && (
-              <p className="px-3 text-[11px] text-tt-muted">No custom lists yet</p>
-            )}
-          </div>
-          <button
-            type="button"
-            className="mt-1 mx-2 text-[11px] text-tt-muted hover:text-tt-blue inline-flex items-center gap-1"
-            onClick={() => setShowNewFolderInput(true)}
-          >
-            <Plus className="w-3 h-3" /> Folder
-          </button>
-          {showNewFolderInput && (
-            <form onSubmit={onNewFolder} className="px-2 mt-1 flex gap-1">
-              <input
-                autoFocus
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="Folder name"
-                className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-tt-border bg-tt-elevated"
-              />
-              <button type="submit" className="text-xs px-2 rounded-lg bg-tt-blue text-white">
-                Add
-              </button>
-            </form>
-          )}
-        </div>
-
-        {smartLists.tags && (
-        <div>
-          <div className="flex items-center justify-between px-3 mb-1">
-            <span className="text-[11px] font-semibold text-tt-secondary">Tags</span>
-          </div>
-          <div className="space-y-0.5">
-            {allTags.length === 0 && (
-              <p className="px-3 text-[11px] text-tt-muted">No tags yet</p>
-            )}
-            {allTags.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                className={rowClass(selectedTag === tag)}
-                onClick={() => onSelectTag(selectedTag === tag ? null : tag)}
-              >
-                <span className="inline-flex items-center gap-2 truncate">
-                  <Tag className="w-3.5 h-3.5 text-tt-blue shrink-0" />
-                  {tag}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-        )}
 
         <div>
           <div className="flex items-center justify-between px-3 mb-1 group/sec">

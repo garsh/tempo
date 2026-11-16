@@ -11,7 +11,6 @@ import {
   subtaskProgress,
   splitDueAt,
 } from '../domain/recurrence';
-import { priorityCheckboxColor } from '../theme/ticktick';
 import {
   Check,
   RefreshCw,
@@ -85,8 +84,6 @@ function formatRowDue(dueAt: string | null | undefined, timeFormat: TimeFormat):
 
 export const TaskCard: React.FC<TaskCardProps> = ({
   task,
-  listName,
-  showListName = true,
   selected = false,
   dense = false,
   onComplete,
@@ -134,7 +131,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const justCompleted = pendingSnapshot !== null && !taskChangedSinceClick;
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
-  const borderColor = priorityCheckboxColor(task.priority);
+  const borderColor = 'var(--tt-pri-none, #c7c7cc)';
   const dueLabel = formatRowDue(task.dueAt, timeFormat);
   const sub = task.subtasks?.length ? subtaskProgress(task.subtasks) : null;
 
@@ -523,21 +520,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px]">
-        {task.tags?.slice(0, 2).map((tag) => (
-          <span
-            key={tag}
-            className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-tt-blue-soft text-tt-blue text-[11px] font-medium"
-          >
-            {tag}
-          </span>
-        ))}
-
-        {showListName && listName && (
-          <span className="hidden md:inline text-tt-secondary truncate max-w-[7rem]">
-            {listName}
-          </span>
-        )}
-
         {recurring && (
           <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
         )}

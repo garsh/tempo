@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RecurrenceRule, Task, TaskPriority } from '../types/task';
+import type { RecurrenceRule, Task } from '../types/task';
 import {
   combineDueAt,
   formatDate,
@@ -11,14 +11,11 @@ import {
   splitDueAt,
   subtaskProgress,
 } from '../domain/recurrence';
-import { priorityCheckboxColor, TT } from '../theme/ticktick';
 import {
   X,
   Check,
   Edit2,
   Trash2,
-  Flag,
-  List as ListIcon,
   Sparkles,
   Bell,
   RefreshCw,
@@ -29,7 +26,6 @@ import { usePrefs } from '../prefs/prefs';
 
 type TaskPatch = Partial<{
   dueAt: string | null;
-  priority: TaskPriority;
   recurrence: RecurrenceRule | null;
   notes: string;
   title: string;
@@ -49,8 +45,6 @@ interface TaskDetailPaneProps {
   onPatch?: (id: string, patch: TaskPatch) => void;
 }
 
-const PRIORITY_CYCLE: TaskPriority[] = ['none', 'low', 'medium', 'high'];
-
 function shiftDate(base: Date, days: number): string {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
@@ -59,7 +53,6 @@ function shiftDate(base: Date, days: number): string {
 
 export function TaskDetailPane({
   task,
-  listName,
   onClose,
   onComplete,
   onUncomplete,
@@ -119,7 +112,7 @@ export function TaskDetailPane({
 
   const completed = isCompleted(task);
   const progress = subtaskProgress(task.subtasks);
-  const checkColor = priorityCheckboxColor(task.priority);
+  const checkColor = 'var(--tt-pri-none, #c7c7cc)';
   const patch = (p: TaskPatch) => onPatch?.(task.id, p);
 
   const setDuePreset = (days: number | null) => {
@@ -140,13 +133,6 @@ export function TaskDetailPane({
         : formatDate(new Date());
     patch({ dueAt: combineDueAt(date, time) });
     setRemindOpen(false);
-  };
-
-  const cyclePriority = () => {
-    const cur = task.priority ?? 'none';
-    const idx = PRIORITY_CYCLE.indexOf(cur);
-    const next = PRIORITY_CYCLE[(idx + 1) % PRIORITY_CYCLE.length];
-    patch({ priority: next });
   };
 
   const setRepeat = (rule: RecurrenceRule | null) => {
@@ -360,21 +346,6 @@ export function TaskDetailPane({
 
         <button
           type="button"
-          onClick={cyclePriority}
-          className="p-1.5 rounded-lg hover:bg-tt-sidebar"
-          title={`Priority: ${task.priority ?? 'none'} (click to cycle)`}
-        >
-          <Flag
-            className="w-4 h-4"
-            style={{
-              color: checkColor === TT.priority.none ? TT.textMuted : checkColor,
-            }}
-            fill={task.priority && task.priority !== 'none' ? checkColor : 'none'}
-          />
-        </button>
-
-        <button
-          type="button"
           onClick={() => onTogglePin(task.id)}
           className={`p-1.5 rounded-lg hover:bg-tt-sidebar ${
             task.pinned ? 'text-tt-pri-med' : 'text-tt-secondary'
@@ -455,22 +426,7 @@ export function TaskDetailPane({
         )}
       </div>
 
-      <div className="px-4 py-3 border-t border-tt-border flex items-center gap-2 flex-wrap">
-        {listName && (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-tt-sidebar text-xs text-tt-secondary">
-            <ListIcon className="w-3 h-3" />
-            {listName}
-          </span>
-        )}
-        {task.tags?.map((tag) => (
-          <span
-            key={tag}
-            className="px-2 py-1 rounded-md bg-tt-blue-soft text-tt-blue text-xs font-medium"
-          >
-            {tag}
-          </span>
-        ))}
-        <div className="flex-1" />
+      <div className="px-4 py-3 border-t border-tt-border flex items-center justify-end gap-2">
         <button
           type="button"
           onClick={() => onEdit(task)}

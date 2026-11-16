@@ -41,7 +41,7 @@ describe('prefs persistence', () => {
       theme: 'dark' as const,
       showDetails: true,
       hideCompleted: true,
-      groupBy: 'priority' as const,
+      groupBy: 'none' as const,
       sortBy: 'title' as const,
       weekStart: 1 as const,
       timeFormat: '24h' as const,

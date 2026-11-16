@@ -1352,6 +1352,10 @@ export function App() {
                         selectedTaskId={selectedTaskId}
                         selectedDateStr={calSelectedDate}
                         onSelectDate={setCalSelectedDate}
+                        onMonthChange={(y, m) => {
+                          setCalYear(y);
+                          setCalMonth(m);
+                        }}
                       />
                     )}
                   </div>
@@ -1519,8 +1523,6 @@ export function App() {
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
         onSave={handleSave}
-        lists={activeLists}
-        defaultListId={defaultListForNew}
         defaultDueAt={isCalendar ? calSelectedDate : undefined}
         initialTitle={quickCaptureText}
       />

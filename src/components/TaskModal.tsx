@@ -6,7 +6,6 @@ import type {
   Task,
   TaskInput,
   TaskList,
-  TaskPriority,
   Weekday,
 } from '../types/task';
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
@@ -18,8 +17,6 @@ import {
   Calendar,
   Clock,
   RefreshCw,
-  List as ListIcon,
-  Flag,
   Pin,
   Plus,
   Trash2,
@@ -31,7 +28,7 @@ interface TaskModalProps {
   onClose: () => void;
   onSave: (task: TaskInput) => void;
   initialTask?: Task | null;
-  lists: TaskList[];
+  lists?: TaskList[];
   defaultListId?: string;
 }
 
@@ -42,12 +39,10 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   onClose,
   onSave,
   initialTask,
-  lists,
   defaultListId = INBOX_LIST_ID,
 }) => {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
-  const [listId, setListId] = useState(defaultListId);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('after_completion');
   const [intervalValue, setIntervalValue] = useState<number>(3);
@@ -60,9 +55,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [dueDate, setDueDate] = useState<string>('');
   const [dueTime, setDueTime] = useState<string>('');
   const [hasTime, setHasTime] = useState(false);
-  const [priority, setPriority] = useState<TaskPriority>('none');
   const [pinned, setPinned] = useState(false);
-  const [tagsInput, setTagsInput] = useState<string>('');
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
 
@@ -70,7 +63,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     if (initialTask) {
       setTitle(initialTask.title);
       setNotes(initialTask.notes || '');
-      setListId(initialTask.listId || INBOX_LIST_ID);
       const hasRecurrence = !!initialTask.recurrence;
       setIsRecurring(hasRecurrence);
       if (initialTask.recurrence) {
@@ -97,15 +89,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setDueDate(parts.date);
       setDueTime(parts.time || '');
       setHasTime(!!parts.time);
-      setPriority(initialTask.priority ?? 'none');
       setPinned(!!initialTask.pinned);
-      setTagsInput(initialTask.tags ? initialTask.tags.join(', ') : '');
       setSubtasks(initialTask.subtasks ? [...initialTask.subtasks] : []);
       setNewSubtaskTitle('');
     } else {
       setTitle('');
       setNotes('');
-      setListId(defaultListId);
       setIsRecurring(false);
       setRecurrenceType('after_completion');
       setIntervalValue(3);
@@ -118,17 +107,13 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setDueDate('');
       setDueTime('');
       setHasTime(false);
-      setPriority('none');
       setPinned(false);
-      setTagsInput('');
       setSubtasks([]);
       setNewSubtaskTitle('');
     }
   }, [initialTask, isOpen, defaultListId]);
 
   if (!isOpen) return null;
-
-  const activeLists = lists.filter((l) => !l.deletedAt);
 
   const toggleWeekday = (d: Weekday) => {
     setWeekdays((prev) =>
@@ -149,11 +134,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-
-    const tags = tagsInput
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
 
     let datePart = dueDate.trim();
     if (!datePart && isRecurring) {
@@ -189,12 +169,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       id: initialTask?.id,
       title: title.trim(),
       notes: notes.trim() || undefined,
-      listId,
+      listId: initialTask?.listId || defaultListId || INBOX_LIST_ID,
       dueAt: resolvedDue,
-      priority,
+      priority: 'none',
       pinned,
       recurrence,
-      tags: tags.length > 0 ? tags : undefined,
+      tags: undefined,
       subtasks: subtasks.length > 0 ? subtasks : undefined,
     });
 
@@ -323,56 +303,20 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5 flex items-center gap-1">
-              <ListIcon className="w-3.5 h-3.5 text-tt-blue" />
-              List
+              <Pin className="w-3.5 h-3.5 text-tt-pri-med" />
+              Pin
             </label>
-            <select
-              value={listId}
-              onChange={(e) => setListId(e.target.value)}
-              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
+            <button
+              type="button"
+              onClick={() => setPinned((p) => !p)}
+              className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
+                pinned
+                  ? 'bg-tt-blue-soft border-tt-blue/50 text-tt-blue'
+                  : 'bg-tt-sidebar/70 border-tt-border/80 text-tt-secondary hover:border-tt-border accent-tt-blue'
+              }`}
             >
-              {activeLists.map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5 flex items-center gap-1">
-                <Flag className="w-3.5 h-3.5 text-tt-overdue" />
-                Priority
-              </label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
-              >
-                <option value="none">None</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5 flex items-center gap-1">
-                <Pin className="w-3.5 h-3.5 text-tt-pri-med" />
-                Pin
-              </label>
-              <button
-                type="button"
-                onClick={() => setPinned((p) => !p)}
-                className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                  pinned
-                    ? 'bg-tt-blue-soft border-tt-blue/50 text-tt-blue'
-                    : 'bg-tt-sidebar/70 border-tt-border/80 text-tt-secondary hover:border-tt-border accent-tt-blue'
-                }`}
-              >
-                {pinned ? 'Pinned' : 'Not pinned'}
-              </button>
-            </div>
+              {pinned ? 'Pinned to top' : 'Not pinned'}
+            </button>
           </div>
 
           <div className="pt-1">
@@ -602,19 +546,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 />
               )}
             </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
-              Tags (Comma separated)
-            </label>
-            <input
-              type="text"
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="Home, Health, Work"
-              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted text-sm focus:outline-none focus:border-tt-blue"
-            />
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-tt-border">

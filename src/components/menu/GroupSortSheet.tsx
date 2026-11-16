@@ -5,13 +5,9 @@ import { Sheet } from '../ui/Sheet';
 const GROUPS: { id: GroupBy; label: string }[] = [
   { id: 'none', label: 'None' },
   { id: 'date', label: 'Date' },
-  { id: 'list', label: 'List' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'tag', label: 'Tag' },
 ];
 const SORTS: { id: SortBy; label: string }[] = [
   { id: 'due', label: 'Due Date' },
-  { id: 'priority', label: 'Priority' },
   { id: 'title', label: 'Title' },
   { id: 'created', label: 'Created Time' },
 ];

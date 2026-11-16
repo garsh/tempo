@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { completedTasksOnDate, startOfWeek, tasksDueOnDate } from '../domain/calendar';
+import { shiftWeek } from '../domain/calendarUi';
 import { usePrefs, type TimeFormat } from '../prefs/prefs';
 import {
   formatDate,
@@ -22,6 +23,7 @@ interface CalendarAgendaViewProps {
   /** Focus day for the day-timeline (YYYY-MM-DD). Defaults to today. */
   selectedDateStr?: string | null;
   onSelectDate?: (dateStr: string) => void;
+  onMonthChange?: (year: number, monthIndex: number) => void;
   dayCount?: number;
 }
 
@@ -62,11 +64,210 @@ export function CalendarAgendaView({
   selectedTaskId,
   selectedDateStr,
   onSelectDate,
+  onMonthChange,
 }: CalendarAgendaViewProps) {
   const todayStr = formatDate(new Date());
   const focus = selectedDateStr || todayStr;
   const [{ weekStart, timeFormat, showOverdue }] = usePrefs();
-  const week = useMemo(() => weekAround(focus, weekStart), [focus, weekStart]);
+
+  const stripRef = useRef<HTMLDivElement>(null);
+  const justSwipedRef = useRef(false);
+  const isSnappingRef = useRef(false);
+  const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [dragOffset, setDragOffset] = useState(0);
+  const [isSnapping, setIsSnapping] = useState(false);
+
+  const pointerStartXRef = useRef(0);
+  const pointerStartYRef = useRef(0);
+  const pointerStartTimeRef = useRef(0);
+  const pointerDirectionRef = useRef<'none' | 'horizontal' | 'vertical'>('none');
+
+  const prevWeek = useMemo(
+    () => weekAround(shiftWeek(focus, -1).dateStr, weekStart),
+    [focus, weekStart]
+  );
+  const currentWeek = useMemo(
+    () => weekAround(focus, weekStart),
+    [focus, weekStart]
+  );
+  const nextWeek = useMemo(
+    () => weekAround(shiftWeek(focus, 1).dateStr, weekStart),
+    [focus, weekStart]
+  );
+
+  const finishSwipe = useCallback(
+    (dx: number, dt: number) => {
+      const width = stripRef.current?.offsetWidth || 360;
+      const velocity = dx / dt;
+      let target: -1 | 0 | 1 = 0;
+
+      if (dx <= -width * 0.18 || velocity < -0.3) {
+        target = 1;
+      } else if (dx >= width * 0.18 || velocity > 0.3) {
+        target = -1;
+      }
+
+      justSwipedRef.current = true;
+      setIsSnapping(true);
+      isSnappingRef.current = true;
+
+      const targetOffset = target === 1 ? -width : target === -1 ? width : 0;
+      setDragOffset(targetOffset);
+
+      const SNAP_DURATION = 350;
+
+      if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+      snapTimerRef.current = setTimeout(() => {
+        if (target === 1) {
+          const next = shiftWeek(focus, 1);
+          onSelectDate?.(next.dateStr);
+          onMonthChange?.(next.year, next.monthIndex);
+        } else if (target === -1) {
+          const prev = shiftWeek(focus, -1);
+          onSelectDate?.(prev.dateStr);
+          onMonthChange?.(prev.year, prev.monthIndex);
+        }
+
+        setIsSnapping(false);
+        isSnappingRef.current = false;
+        setDragOffset(0);
+
+        setTimeout(() => {
+          justSwipedRef.current = false;
+        }, 100);
+      }, SNAP_DURATION);
+    },
+    [focus, onSelectDate, onMonthChange]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let direction: 'none' | 'horizontal' | 'vertical' = 'none';
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || isSnappingRef.current) return;
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      startTime = Date.now();
+      direction = 'none';
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || isSnappingRef.current) return;
+
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+
+      if (direction === 'none') {
+        if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+          direction = 'horizontal';
+        } else if (Math.abs(dy) > 6 && Math.abs(dy) > Math.abs(dx)) {
+          direction = 'vertical';
+        }
+      }
+
+      if (direction === 'horizontal') {
+        if (e.cancelable) e.preventDefault();
+        setDragOffset(dx);
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (direction !== 'horizontal') {
+        if (direction === 'none') {
+          setDragOffset(0);
+        }
+        return;
+      }
+      direction = 'none';
+      if (e.changedTouches[0]) {
+        const dx = e.changedTouches[0].clientX - startX;
+        const dt = Math.max(1, Date.now() - startTime);
+        finishSwipe(dx, dt);
+      }
+    };
+
+    const onTouchCancel = () => {
+      direction = 'none';
+      setDragOffset(0);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchCancel, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchCancel);
+    };
+  }, [finishSwipe]);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch' || isSnappingRef.current || e.button !== 0) return;
+    pointerStartXRef.current = e.clientX;
+    pointerStartYRef.current = e.clientY;
+    pointerStartTimeRef.current = Date.now();
+    pointerDirectionRef.current = 'none';
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
+    if ((e.buttons & 1) === 0) {
+      if (pointerDirectionRef.current === 'horizontal') {
+        setDragOffset(0);
+      }
+      pointerDirectionRef.current = 'none';
+      return;
+    }
+    const dx = e.clientX - pointerStartXRef.current;
+    const dy = e.clientY - pointerStartYRef.current;
+
+    if (pointerDirectionRef.current === 'none') {
+      if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+        pointerDirectionRef.current = 'horizontal';
+      } else if (Math.abs(dy) > 6) {
+        pointerDirectionRef.current = 'vertical';
+      }
+    }
+
+    if (pointerDirectionRef.current === 'horizontal') {
+      setDragOffset(dx);
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    if (pointerDirectionRef.current === 'horizontal') {
+      const dx = e.clientX - pointerStartXRef.current;
+      const dt = Math.max(1, Date.now() - pointerStartTimeRef.current);
+      finishSwipe(dx, dt);
+    }
+    pointerDirectionRef.current = 'none';
+  };
+
+  const onPointerCancel = () => {
+    if (pointerDirectionRef.current === 'horizontal') {
+      setDragOffset(0);
+    }
+    pointerDirectionRef.current = 'none';
+  };
 
   const overdueTasks = useMemo(() => {
     if (!showOverdue) return [];
@@ -114,6 +315,37 @@ export function CalendarAgendaView({
   const headerLabel = focusDate.toLocaleDateString(undefined, { month: 'short' });
   const isToday = focus === todayStr;
 
+  const renderWeekStrip = (days: typeof currentWeek, isCurrent: boolean) => (
+    <div className="flex items-center justify-between gap-1 px-1">
+      {days.map((d) => {
+        const active = isCurrent && d.dateStr === focus;
+        const today = d.dateStr === todayStr;
+        return (
+          <button
+            key={d.dateStr}
+            type="button"
+            onClick={() => {
+              if (justSwipedRef.current || isSnappingRef.current) return;
+              onSelectDate?.(d.dateStr);
+            }}
+            className="flex-1 flex flex-col items-center gap-1 py-1 rounded-xl hover:bg-tt-sidebar cursor-pointer"
+          >
+            <span className="text-[10px] font-medium text-tt-muted">{d.label}</span>
+            <span
+              className={`w-8 h-8 inline-flex items-center justify-center rounded-full text-sm font-semibold ${
+                active || today
+                  ? 'bg-tt-blue text-white'
+                  : 'text-tt-text'
+              }`}
+            >
+              {d.dayNum}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-bold text-tt-text">
@@ -121,30 +353,38 @@ export function CalendarAgendaView({
         {isToday ? ', Today' : ''}
       </h2>
 
-      <div className="flex items-center justify-between gap-1 px-1">
-        {week.map((d) => {
-          const active = d.dateStr === focus;
-          const today = d.dateStr === todayStr;
-          return (
-            <button
-              key={d.dateStr}
-              type="button"
-              onClick={() => onSelectDate?.(d.dateStr)}
-              className="flex-1 flex flex-col items-center gap-1 py-1 rounded-xl hover:bg-tt-sidebar"
-            >
-              <span className="text-[10px] font-medium text-tt-muted">{d.label}</span>
-              <span
-                className={`w-8 h-8 inline-flex items-center justify-center rounded-full text-sm font-semibold ${
-                  active || today
-                    ? 'bg-tt-blue text-white'
-                    : 'text-tt-text'
-                }`}
-              >
-                {d.dayNum}
-              </span>
-            </button>
-          );
-        })}
+      <div
+        ref={stripRef}
+        className="select-none touch-pan-y overflow-hidden relative w-full"
+        style={{ touchAction: 'pan-y' }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+      >
+        <div
+          style={{
+            transform: `translateX(${dragOffset}px)`,
+            transition: isSnapping ? 'transform 350ms cubic-bezier(0.25, 1, 0.5, 1)' : 'none',
+            willChange: 'transform',
+          }}
+          className="w-full relative"
+        >
+          {/* Previous week */}
+          <div style={{ position: 'absolute', top: 0, left: '-100%', width: '100%' }} aria-hidden="true">
+            {renderWeekStrip(prevWeek, false)}
+          </div>
+
+          {/* Current week */}
+          <div style={{ position: 'relative', top: 0, left: 0, width: '100%' }}>
+            {renderWeekStrip(currentWeek, true)}
+          </div>
+
+          {/* Next week */}
+          <div style={{ position: 'absolute', top: 0, left: '100%', width: '100%' }} aria-hidden="true">
+            {renderWeekStrip(nextWeek, false)}
+          </div>
+        </div>
       </div>
 
       {overdueTasks.length > 0 && (

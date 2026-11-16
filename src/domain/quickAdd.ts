@@ -1,12 +1,13 @@
 import type { TaskInput, TaskPriority } from '../types/task';
+import { INBOX_LIST_ID } from '../types/task';
 
 export type QuickAddDraft = {
   title: string;
   notes: string;
   dueAt: string | null;
-  priority: TaskPriority;
-  listId: string;
-  tags: string[];
+  priority?: TaskPriority;
+  listId?: string;
+  tags?: string[];
 };
 
 /**
@@ -19,10 +20,10 @@ export function buildQuickAddTask(draft: QuickAddDraft): TaskInput | null {
   return {
     title,
     notes: draft.notes.trim() || undefined,
-    listId: draft.listId,
+    listId: draft.listId ?? INBOX_LIST_ID,
     dueAt: draft.dueAt,
-    priority: draft.priority,
-    tags: draft.tags.length ? draft.tags : undefined,
+    priority: draft.priority ?? 'none',
+    tags: draft.tags?.length ? draft.tags : undefined,
     recurrence: null,
   };
 }
