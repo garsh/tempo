@@ -65,7 +65,32 @@ export function QuickAddSheet({
   const [tagDraft, setTagDraft] = useState('');
   const [panel, setPanel] = useState<'none' | 'date' | 'priority' | 'tags' | 'list' | 'more'>('none');
   const [fullScreen, setFullScreen] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
   const todayStr = formatDate(new Date());
+
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      const inset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
+      setKeyboardInset(inset);
+      setVisualViewportHeight(Math.round(vv.height));
+    };
+
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      setKeyboardInset(0);
+      setVisualViewportHeight(null);
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -134,8 +159,18 @@ export function QuickAddSheet({
   );
 
   const shellClass = fullScreen
-    ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated'
-    : 'fixed inset-x-0 bottom-0 z-[60] flex flex-col bg-tt-elevated rounded-t-[16px] shadow-[0_-4px_24px_var(--tt-shadow)]';
+    ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto'
+    : 'fixed inset-x-0 bottom-0 z-[60] flex flex-col bg-tt-elevated rounded-t-[16px] shadow-[0_-4px_24px_var(--tt-shadow)] overflow-y-auto';
+
+  const dialogStyle: React.CSSProperties = fullScreen
+    ? {
+        bottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
+      }
+    : {
+        bottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
+        paddingBottom: keyboardInset > 0 ? '8px' : 'max(8px, env(safe-area-inset-bottom))',
+        maxHeight: visualViewportHeight ? `${visualViewportHeight}px` : undefined,
+      };
 
   return (
     <div className="fixed inset-0 z-[60]" data-testid="quick-add-sheet">
@@ -145,7 +180,7 @@ export function QuickAddSheet({
         aria-modal="true"
         aria-label="Add task"
         className={shellClass}
-        style={fullScreen ? undefined : { paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}
+        style={dialogStyle}
         onClick={(e) => e.stopPropagation()}
       >
         {!fullScreen && <div className="mx-auto mt-2 mb-1 w-9 h-1 rounded-full bg-tt-border" />}
@@ -174,6 +209,11 @@ export function QuickAddSheet({
             onKeyDown={onTitleKeyDown}
             enterKeyHint="done"
             autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            data-form-type="other"
+            data-1p-ignore="true"
+            data-lpignore="true"
             placeholder="What would you like to do?"
             aria-label="Task title"
             className="w-full bg-transparent text-[17px] text-tt-text placeholder:text-tt-muted outline-none py-1.5"
@@ -181,6 +221,11 @@ export function QuickAddSheet({
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            autoComplete="off"
+            autoCorrect="off"
+            data-form-type="other"
+            data-1p-ignore="true"
+            data-lpignore="true"
             placeholder="Description"
             aria-label="Description"
             rows={fullScreen ? 8 : 1}
