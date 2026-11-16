@@ -94,6 +94,7 @@ export async function runDriveSync(opts: {
       const token = await ensureGoogleAccessToken(clientId, {
         allowInteractive: opts.allowInteractive === true,
       });
+      await refreshGoogleAccount(token);
       const result = await syncWithGoogleDrive(token);
       if (result.success) {
         recordSyncSuccess(result.syncedAt);

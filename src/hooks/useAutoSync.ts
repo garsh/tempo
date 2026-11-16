@@ -8,6 +8,7 @@ import {
   type SyncStatusSnapshot,
 } from '../sync/autoSync';
 import { getStoredClientId } from '../sync/googleAuth';
+import { getGoogleAccount } from '../sync/googleAccount';
 
 export function useAutoSync(onSynced?: () => void): {
   status: SyncStatusSnapshot;
@@ -26,7 +27,8 @@ export function useAutoSync(onSynced?: () => void): {
 
   const syncNow = useCallback(
     async (interactive = false) => {
-      if (!getStoredClientId()) {
+      // Background sync requires both a client ID and an already signed-in Google account
+      if (!getStoredClientId() || (!interactive && !getGoogleAccount())) {
         refreshStatus('skipped');
         return;
       }
@@ -42,27 +44,37 @@ export function useAutoSync(onSynced?: () => void): {
         } else {
           setStatus(readSyncStatusSnapshot('skipped'));
         }
-      } catch {
-        setStatus(readSyncStatusSnapshot('error'));
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const quiet =
+          /popup_closed|access_denied|interaction_required|user_logged_out|user_closed|Token request failed/i.test(
+            message
+          );
+        // Silent background auth expiry shouldn't flag a scary error banner
+        if (!interactive && quiet) {
+          setStatus(readSyncStatusSnapshot('idle'));
+        } else {
+          setStatus(readSyncStatusSnapshot('error'));
+        }
       }
     },
     [refreshStatus]
   );
 
   useEffect(() => {
-    if (getStoredClientId() && isAutoSyncEnabled()) {
+    if (getStoredClientId() && isAutoSyncEnabled() && getGoogleAccount()) {
       void syncNow(false);
     }
 
     const interval = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      if (!getStoredClientId() || !isAutoSyncEnabled()) return;
+      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
       void syncNow(false);
     }, AUTO_SYNC_INTERVAL_MS);
 
     const onVis = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!getStoredClientId() || !isAutoSyncEnabled()) return;
+      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
       const last = readSyncStatusSnapshot().lastSyncedAt;
       if (last && Date.now() - last < 2 * 60 * 1000) return;
       void syncNow(false);
@@ -70,7 +82,7 @@ export function useAutoSync(onSynced?: () => void): {
     document.addEventListener('visibilitychange', onVis);
 
     const onOnline = () => {
-      if (!getStoredClientId() || !isAutoSyncEnabled()) return;
+      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
       void syncNow(false);
     };
     window.addEventListener('online', onOnline);

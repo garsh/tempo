@@ -27,15 +27,11 @@ import {
   getDefaultClientId,
   getCustomClientId,
   getStoredClientId,
-  loadGoogleScript,
-  requestGoogleAccessToken,
   setStoredClientId,
 } from '../../sync/googleAuth';
-import { syncWithGoogleDrive } from '../../sync/googleDrive';
 import {
   isAutoSyncEnabled,
-  recordSyncSuccess,
-  refreshGoogleAccount,
+  runDriveSync,
   setAutoSyncEnabled,
   type SyncStatusSnapshot,
 } from '../../sync/autoSync';
@@ -326,25 +322,22 @@ function AccountPage({
     setIsSyncing(true);
     setStatus(null);
     try {
-      await loadGoogleScript();
-      clearStoredToken();
-      const token = await requestGoogleAccessToken(targetClientId, 'interactive');
-      await refreshGoogleAccount(token);
+      if (!syncStatus.account) {
+        clearStoredToken();
+      }
+      const result = await runDriveSync({ allowInteractive: true, force: true });
+      setIsSyncing(false);
       onSyncStatusChange();
-      const result = await syncWithGoogleDrive(token);
-      if (result.success) {
-        recordSyncSuccess(result.syncedAt);
-        await refreshGoogleAccount(token);
+      if (result?.success) {
         setStatus({
           type: 'success',
           message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders, ${result.filtersCount} filters!`,
         });
       }
     } catch (err: unknown) {
-      setStatus({ type: 'error', message: `Sync failed: ${err instanceof Error ? err.message : String(err)}` });
-    } finally {
       setIsSyncing(false);
       onSyncStatusChange();
+      setStatus({ type: 'error', message: `Sync failed: ${err instanceof Error ? err.message : String(err)}` });
     }
   };
 
