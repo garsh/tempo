@@ -133,6 +133,20 @@ describe('Swipe Actions & Dialogs logic', () => {
       expect(clampOffset(-80)).toBe(-80);
       expect(clampOffset(-250)).toBe(-185);
     });
+
+    it('keeps revealed action buttons invisible when not swiping or open', () => {
+      const isDrawerVisible = (offset: number, open: boolean, gesturing: boolean) => {
+        return !(offset === 0 && !open && !gesturing);
+      };
+
+      // Closed and idle: drawer buttons must not show through foreground card
+      expect(isDrawerVisible(0, false, false)).toBe(false);
+
+      // Swiped open or actively gesturing: drawer buttons must be visible
+      expect(isDrawerVisible(-160, true, false)).toBe(true);
+      expect(isDrawerVisible(-50, false, true)).toBe(true);
+      expect(isDrawerVisible(0, true, false)).toBe(true);
+    });
   });
 
   describe('Delete confirmation dialog text logic', () => {
@@ -150,6 +164,34 @@ describe('Swipe Actions & Dialogs logic', () => {
       expect(getWarningText(false, 'Buy milk')).toContain(
         'This task will be removed from your list.'
       );
+    });
+
+    it('dismisses dialog immediately when delete button is pressed before async delete finishes', async () => {
+      let closed = false;
+      let deleteResolved = false;
+
+      const onClose = () => {
+        closed = true;
+      };
+
+      const onConfirm = async (_id: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        deleteResolved = true;
+      };
+
+      const handleConfirm = (taskId: string) => {
+        onClose();
+        void onConfirm(taskId);
+      };
+
+      handleConfirm('task-1');
+
+      // onClose must have been called synchronously before async delete resolves
+      expect(closed).toBe(true);
+      expect(deleteResolved).toBe(false);
+
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(deleteResolved).toBe(true);
     });
   });
 });

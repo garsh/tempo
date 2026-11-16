@@ -395,7 +395,9 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     >
       {/* Revealed Swipe Action Buttons on the Right */}
       <div
-        className="absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1]"
+        className={`absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1] ${
+          swipeOffset === 0 && !isOpen && !isGesturing ? 'invisible pointer-events-none' : ''
+        }`}
         style={{ width: `${DRAWER_WIDTH}px` }}
         onPointerDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
@@ -450,7 +452,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         }}
         className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
           selected || (selectMode && checked)
-            ? 'bg-tt-blue-soft/70'
+            ? 'bg-tt-blue-soft'
             : 'bg-tt-surface hover:bg-tt-hover'
         } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
       >

@@ -6,7 +6,7 @@ import {
   FolderInput,
   Maximize2,
   MoreHorizontal,
-  Send,
+  Plus,
   Settings,
   Tag,
   X,
@@ -113,7 +113,19 @@ export function QuickAddSheet({
 
   const activeLists = lists.filter((l) => !l.deletedAt);
   const canSubmit = title.trim().length > 0;
-  const dateChipLabel = !dueAt ? 'No date' : dueAt === todayStr ? 'Today' : dueAt;
+  const datePart = dueAt ? dueAt.slice(0, 10) : '';
+  const dateChipLabel = !dueAt
+    ? 'No date'
+    : datePart === todayStr
+      ? 'Today'
+      : (() => {
+          const tmrw = new Date();
+          tmrw.setDate(tmrw.getDate() + 1);
+          if (datePart === formatDate(tmrw)) return 'Tomorrow';
+          const [y, m, d] = datePart.split('-').map(Number);
+          const dt = new Date(y, m - 1, d);
+          return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        })();
 
   const submit = async (keepOpen: boolean) => {
     const task = buildQuickAddTask({ title, notes, dueAt, priority, listId, tags });
@@ -294,15 +306,18 @@ export function QuickAddSheet({
           <div className="flex-1" />
           <button
             type="button"
-            aria-label="Add task"
-            title="Add task"
+            aria-label="Create task"
+            title="Create task"
             disabled={!canSubmit}
-            onClick={() => void submit(true)}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
-              canSubmit ? 'bg-tt-blue text-white shadow-md shadow-tt-blue/25' : 'text-tt-muted'
+            onClick={() => void submit(false)}
+            className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 ${
+              canSubmit
+                ? 'bg-tt-blue hover:bg-tt-blue-hover text-white shadow-md shadow-tt-blue/25 cursor-pointer'
+                : 'bg-tt-input text-tt-muted cursor-not-allowed opacity-60'
             }`}
           >
-            <Send className="w-[18px] h-[18px]" strokeWidth={2} />
+            <Plus className="w-4 h-4" strokeWidth={2.5} />
+            <span>Create</span>
           </button>
         </div>
 

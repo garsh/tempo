@@ -623,9 +623,9 @@ export function App() {
   };
 
   const handleConfirmDelete = async (taskId: string) => {
-    await handleDelete(taskId);
     setDeleteConfirmTask(null);
     setSwipedTaskId(null);
+    await handleDelete(taskId);
   };
 
   const handleCreateList = async (e: React.FormEvent) => {
@@ -1521,6 +1521,7 @@ export function App() {
         onSave={handleSave}
         lists={activeLists}
         defaultListId={defaultListForNew}
+        defaultDueAt={isCalendar ? calSelectedDate : undefined}
         initialTitle={quickCaptureText}
       />
 

@@ -32,9 +32,10 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
 
   const recurring = isRecurring(task);
 
-  const handleConfirm = async () => {
-    await onConfirm(task.id);
+  const handleConfirm = () => {
+    const taskId = task.id;
     onClose();
+    void onConfirm(taskId);
   };
 
   return (
