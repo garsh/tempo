@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-/** Service-worker cache generation. v2 = system light/dark theme (drop pre-theme assets). */
-const TEMPO_SW_CACHE_VERSION = 'v6';
+/** Service-worker cache generation. v8 = hero dual-tone checkmark PWA icon. */
+const TEMPO_SW_CACHE_VERSION = 'v8';
 
 // https://vite.dev/config/
 export default defineConfig({

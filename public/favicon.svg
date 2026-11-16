@@ -1,7 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="112" fill="#0f172a"/>
-  <circle cx="256" cy="256" r="164" stroke="#6366f1" stroke-width="40" fill="none"/>
-  <circle cx="256" cy="256" r="112" stroke="#818cf8" stroke-width="28" fill="none"/>
-  <circle cx="256" cy="256" r="28" fill="#6366f1"/>
-  <path d="M256 256 L346 164" stroke="#818cf8" stroke-width="28" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0b1120"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Short stem in Cobalt / Azure Blue -->
+  <path d="M140 264 L224 348" stroke="url(#blue)" stroke-width="60" stroke-linecap="round"/>
+  <!-- Long stem in Radiant Tangerine Orange -->
+  <path d="M224 348 L372 164" stroke="url(#orange)" stroke-width="60" stroke-linecap="round"/>
 </svg>
