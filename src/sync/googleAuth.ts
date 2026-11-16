@@ -32,12 +32,26 @@ const CLIENT_ID_KEY = 'tempo_google_client_id';
 /** Skew so we refresh slightly before real expiry. */
 const EXPIRY_SKEW_MS = 60_000;
 
-export function getStoredClientId(): string {
+export function getDefaultClientId(): string {
+  const envId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
+  return envId || '';
+}
+
+export function getCustomClientId(): string {
   return localStorage.getItem(CLIENT_ID_KEY)?.trim() || '';
 }
 
+export function getStoredClientId(): string {
+  return getCustomClientId() || getDefaultClientId();
+}
+
 export function setStoredClientId(clientId: string): void {
-  localStorage.setItem(CLIENT_ID_KEY, clientId.trim());
+  const trimmed = clientId.trim();
+  if (!trimmed) {
+    localStorage.removeItem(CLIENT_ID_KEY);
+  } else {
+    localStorage.setItem(CLIENT_ID_KEY, trimmed);
+  }
 }
 
 export function clearStoredToken(): void {

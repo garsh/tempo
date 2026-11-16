@@ -31,6 +31,11 @@ describe('account summary (drawer header / settings account)', () => {
   it('errors and syncing states', () => {
     expect(summarizeAccount({ email: 'a@b.c' }, snap({ phase: 'error', lastSyncedAt: 1 }), true).warn).toBe(true);
     expect(summarizeAccount({ email: 'a@b.c' }, snap({ phase: 'syncing' }), true).subtitle).toBe('Syncing…');
+    expect(summarizeAccount(null, snap({ phase: 'syncing' }), true)).toEqual({
+      title: 'Connecting to Drive…',
+      subtitle: 'Syncing routines…',
+      warn: false,
+    });
     expect(summarizeAccount(null, snap({ lastSyncedAt: 1, autoSyncEnabled: false }), true).subtitle).toMatch(/auto-sync off$/);
   });
 

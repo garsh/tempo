@@ -25,8 +25,11 @@ export function summarizeAccount(
   status: SyncStatusSnapshot,
   hasClientId: boolean
 ): AccountSummary {
-  const title = account?.email ?? (status.lastSyncedAt ? 'Google Drive' : 'Not signed in');
-  if (status.phase === 'syncing') return { title, subtitle: 'Syncing…', warn: false };
+  const isSyncing = status.phase === 'syncing';
+  const title =
+    account?.email ??
+    (status.lastSyncedAt ? 'Google Drive' : isSyncing ? 'Connecting to Drive…' : 'Not signed in');
+  if (isSyncing) return { title, subtitle: account ? 'Syncing…' : 'Syncing routines…', warn: false };
   if (status.phase === 'error' || (status.lastError && !status.lastSyncedAt)) {
     return { title, subtitle: 'Sync failed — tap to fix', warn: true };
   }

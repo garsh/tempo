@@ -24,6 +24,8 @@ import {
 } from '../../db/db';
 import {
   clearStoredToken,
+  getDefaultClientId,
+  getCustomClientId,
   getStoredClientId,
   loadGoogleScript,
   requestGoogleAccessToken,
@@ -70,6 +72,7 @@ import {
   DriveIcon,
   ExportIcon,
   GeneralIcon,
+  GoogleGIcon,
   HelpIcon,
   ImportIcon,
   IntegrationsIcon,
@@ -259,17 +262,46 @@ function AccountPage({
   onSyncStatusChange,
   setStatus,
 }: SettingsPageProps & { setStatus: (s: Status) => void }) {
-  const [clientId, setClientId] = useState(() => getStoredClientId());
+  const [customClientId, setCustomClientId] = useState(() => getCustomClientId());
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
-  const summary = summarizeAccount(syncStatus.account, syncStatus, !!getStoredClientId());
+  const activeClientId = getStoredClientId();
+  const defaultClientId = getDefaultClientId();
+  const hasCustomClientId = Boolean(getCustomClientId());
+  const hasActiveClientId = Boolean(activeClientId);
+  const isSignedIn = Boolean(syncStatus.account);
+  const activeSyncStatus: SyncStatusSnapshot = {
+    ...syncStatus,
+    phase: isSyncing ? 'syncing' : syncStatus.phase,
+  };
+  const summary = summarizeAccount(syncStatus.account, activeSyncStatus, hasActiveClientId);
   const lastSynced = syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : 'Never';
 
-  const handleSaveClientId = () => {
-    setStoredClientId(clientId.trim());
-    setStatus({ type: 'success', message: 'Client ID saved locally.' });
+  const handleSaveCustomClientId = () => {
+    setStoredClientId(customClientId.trim());
+    setStatus({
+      type: 'success',
+      message: customClientId.trim()
+        ? 'Custom Client ID saved locally.'
+        : defaultClientId
+        ? 'Custom Client ID cleared. Restored application default Client ID.'
+        : 'Custom Client ID removed.',
+    });
     onSyncStatusChange();
   };
+
+  const handleClearCustomClientId = () => {
+    setStoredClientId('');
+    setCustomClientId('');
+    setStatus({
+      type: 'success',
+      message: defaultClientId
+        ? 'Cleared custom Client ID. Using application default Client ID.'
+        : 'Custom Client ID cleared.',
+    });
+    onSyncStatusChange();
+  };
+
   const handleToggleAutoSync = (next: boolean) => {
     setAutoSyncEnabled(next);
     setAutoSync(next);
@@ -281,19 +313,24 @@ function AccountPage({
     });
     onSyncStatusChange();
   };
+
   const handleGoogleSync = async () => {
-    const trimmedId = clientId.trim();
-    if (!trimmedId) {
-      setStatus({ type: 'error', message: 'Please enter your Google OAuth Client ID below.' });
+    const targetClientId = getStoredClientId();
+    if (!targetClientId) {
+      setStatus({
+        type: 'error',
+        message: 'Google Sign-In is not configured yet. Configure VITE_GOOGLE_CLIENT_ID or provide a custom Client ID in Advanced Settings below.',
+      });
       return;
     }
-    setStoredClientId(trimmedId);
     setIsSyncing(true);
     setStatus(null);
     try {
       await loadGoogleScript();
       clearStoredToken();
-      const token = await requestGoogleAccessToken(trimmedId, 'interactive');
+      const token = await requestGoogleAccessToken(targetClientId, 'interactive');
+      await refreshGoogleAccount(token);
+      onSyncStatusChange();
       const result = await syncWithGoogleDrive(token);
       if (result.success) {
         recordSyncSuccess(result.syncedAt);
@@ -310,6 +347,7 @@ function AccountPage({
       onSyncStatusChange();
     }
   };
+
   const handleSignOut = () => {
     clearStoredToken();
     setGoogleAccount(null);
@@ -325,6 +363,19 @@ function AccountPage({
         <div className={`text-[13px] ${summary.warn ? 'text-tt-icon-amber' : 'text-tt-secondary'}`}>{summary.subtitle}</div>
       </div>
 
+      {!hasActiveClientId && (
+        <Card className="p-4 space-y-2 border border-amber-500/30 bg-amber-500/5 mb-3">
+          <div className="flex items-start gap-2.5">
+            <Key className="w-4 h-4 text-tt-icon-amber shrink-0 mt-0.5" />
+            <div className="text-[13px] text-tt-text font-medium">Google Sign-In Setup Required</div>
+          </div>
+          <p className="text-[12px] text-tt-secondary leading-relaxed">
+            To let users sign in with their Gmail accounts, Tempo needs an OAuth Client ID configured for this app.
+            Set <code className="text-tt-text px-1 py-0.5 bg-tt-input rounded">VITE_GOOGLE_CLIENT_ID</code> in your environment, or expand <em>Advanced Settings</em> below to enter a Client ID.
+          </p>
+        </Card>
+      )}
+
       <SectionLabel>Google Drive sync</SectionLabel>
       <Card>
         <ControlRow icon={<DriveIcon />} label="Last synced" sub="Private Drive AppData folder">
@@ -338,66 +389,116 @@ function AccountPage({
             type="button"
             disabled={isSyncing}
             onClick={() => void handleGoogleSync()}
-            className="w-full h-11 rounded-xl bg-tt-blue hover:bg-tt-blue-hover disabled:opacity-60 text-white font-semibold text-[15px] flex items-center justify-center gap-2"
+            className="w-full h-11 rounded-xl bg-tt-blue hover:bg-tt-blue-hover disabled:opacity-60 text-white font-semibold text-[15px] flex items-center justify-center gap-2.5 transition-colors"
           >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Syncing with Google Drive…' : 'Sign In with Google & Sync Now'}
+            {isSyncing ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>{isSignedIn ? 'Syncing with Google Drive…' : 'Connecting to Google…'}</span>
+              </>
+            ) : isSignedIn ? (
+              <>
+                <RefreshCw className="w-4 h-4" />
+                <span>Sync with Google Drive Now</span>
+              </>
+            ) : (
+              <>
+                <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center shadow-xs">
+                  <GoogleGIcon className="w-3.5 h-3.5" />
+                </div>
+                <span>Sign in with Google</span>
+              </>
+            )}
           </button>
         </div>
       </Card>
       <Note>
-        Syncs privately to Drive AppData. Startup + periodic background sync stays silent when your session token
-        is still valid; conflicts (412) re-merge automatically.
+        Syncs privately to your Google Drive AppData folder. Your tasks and routines stay on your device and your personal Google account.
       </Note>
-
-      <SectionLabel>Google OAuth Client ID</SectionLabel>
-      <Card className="p-4 space-y-3">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"
-            aria-label="Google OAuth Client ID"
-            className="flex-1 min-w-0 px-3 py-2.5 bg-tt-input rounded-xl text-[13px] text-tt-text placeholder:text-tt-muted outline-none focus:ring-1 focus:ring-tt-blue"
-          />
-          <button type="button" onClick={handleSaveClientId} className="px-4 rounded-xl bg-tt-input text-[14px] font-medium text-tt-text hover:bg-tt-hover">
-            Save
-          </button>
-        </div>
-        <details className="text-[13px] text-tt-secondary">
-          <summary className="cursor-pointer font-medium flex items-center gap-1.5">
-            <Key className="w-3.5 h-3.5" />
-            How do I get a Google Client ID? (2 min setup)
-          </summary>
-          <div className="mt-2 space-y-1.5 pl-3 border-l border-tt-border">
-            <p>
-              1. Go to{' '}
-              <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" className="text-tt-blue underline inline-flex items-center gap-0.5">
-                Google Cloud Console <ExternalLink className="w-3 h-3" />
-              </a>{' '}
-              and create a project.
-            </p>
-            <p>
-              2. Enable the <strong>Google Drive API</strong>.
-            </p>
-            <p>
-              3. In <strong>Credentials</strong>, create an <strong>OAuth Client ID</strong> for a <em>Web Application</em>.
-            </p>
-            <p>
-              4. Add your app&apos;s origin URL (e.g. <code className="text-tt-text">http://localhost:5180</code>) to{' '}
-              <strong>Authorized JavaScript Origins</strong>.
-            </p>
-            <p>5. Paste the Client ID above and tap Sign In.</p>
-          </div>
-        </details>
-      </Card>
 
       {(syncStatus.account || syncStatus.lastSyncedAt) && (
         <Card>
           <NavRow icon={<LogOut className="w-5 h-5 text-tt-overdue" />} label="Sign out on this device" onClick={handleSignOut} chevron={false} danger />
         </Card>
       )}
+
+      <details className="mt-4 text-[13px] text-tt-secondary group">
+        <summary className="cursor-pointer font-medium flex items-center justify-between p-2 rounded-lg hover:bg-tt-hover text-tt-secondary hover:text-tt-text transition-colors">
+          <span className="flex items-center gap-1.5">
+            <Key className="w-3.5 h-3.5" />
+            Advanced: OAuth Client ID
+          </span>
+          <span className="text-[11px] font-normal uppercase tracking-wider text-tt-muted">
+            {hasCustomClientId ? 'Custom' : defaultClientId ? 'App Default' : 'None'}
+          </span>
+        </summary>
+        <Card className="mt-2 p-4 space-y-3">
+          <p className="text-[12px] text-tt-secondary leading-relaxed">
+            {defaultClientId
+              ? 'This deployment has a built-in Google Client ID. You can optionally override it with your own Google Cloud Web Client ID.'
+              : 'Enter a Google Cloud OAuth Client ID (Web Application) to connect Google Drive on this device.'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={customClientId}
+              onChange={(e) => setCustomClientId(e.target.value)}
+              placeholder={defaultClientId ? `App default (${defaultClientId.slice(0, 12)}…)` : 'xxxxxxxxxxxx-xxxx.apps.googleusercontent.com'}
+              aria-label="Google OAuth Client ID"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-tt-input rounded-xl text-[13px] text-tt-text placeholder:text-tt-muted outline-none focus:ring-1 focus:ring-tt-blue"
+            />
+            <button
+              type="button"
+              onClick={handleSaveCustomClientId}
+              className="px-4 rounded-xl bg-tt-input text-[14px] font-medium text-tt-text hover:bg-tt-hover shrink-0"
+            >
+              Save
+            </button>
+            {hasCustomClientId && (
+              <button
+                type="button"
+                onClick={handleClearCustomClientId}
+                className="px-3 rounded-xl bg-tt-input text-[13px] font-medium text-tt-overdue hover:bg-tt-hover shrink-0"
+                title="Reset to application default"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="text-[12px] text-tt-muted">
+            Active ID:{' '}
+            <code className="text-tt-secondary font-mono select-all">
+              {activeClientId ? `${activeClientId.slice(0, 14)}…${activeClientId.slice(-20)}` : 'None'}
+            </code>
+            {hasCustomClientId && <span className="ml-2 text-tt-icon-amber">(custom override)</span>}
+          </div>
+          <details className="text-[12px] text-tt-secondary">
+            <summary className="cursor-pointer font-medium flex items-center gap-1 hover:text-tt-text">
+              How do I get a Google Client ID? (Google Cloud setup)
+            </summary>
+            <div className="mt-2 space-y-1.5 pl-3 border-l border-tt-border">
+              <p>
+                1. Go to{' '}
+                <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" className="text-tt-blue underline inline-flex items-center gap-0.5">
+                  Google Cloud Console <ExternalLink className="w-3 h-3" />
+                </a>{' '}
+                and create a project.
+              </p>
+              <p>
+                2. Enable the <strong>Google Drive API</strong>.
+              </p>
+              <p>
+                3. Under <strong>Credentials</strong>, create an <strong>OAuth Client ID</strong> for a <em>Web Application</em>.
+              </p>
+              <p>
+                4. Add your app&apos;s origin URL (e.g. <code className="text-tt-text">https://tempo.bot.nu</code> or <code className="text-tt-text">http://localhost:5180</code>) to{' '}
+                <strong>Authorized JavaScript Origins</strong> (Google requires a public TLD or <code className="text-tt-text">localhost</code>; private domains like <code className="text-tt-text">.lan</code> are not allowed).
+              </p>
+              <p>5. Set it in <code className="text-tt-text">.env</code> as <code className="text-tt-text">VITE_GOOGLE_CLIENT_ID</code> or paste it above.</p>
+            </div>
+          </details>
+        </Card>
+      </details>
     </>
   );
 }
