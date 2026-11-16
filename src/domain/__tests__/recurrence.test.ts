@@ -9,6 +9,7 @@ import {
   getDaysDifference,
   getDueDeadline,
   getNextUncompletedOccurrenceDate,
+  getSkipOccurrenceDate,
   getTaskUrgency,
   hasDueTime,
   isCompleted,
@@ -311,4 +312,66 @@ describe('Per-day recurrence occurrences & completion', () => {
     expect(taskOccursOnDate(limited, '2026-10-06')).toBe(true);
     expect(taskOccursOnDate(limited, '2026-10-07')).toBe(false);
   });
+
+  describe('getSkipOccurrenceDate', () => {
+    it('returns null for non-recurring tasks', () => {
+      const oneoff: Task = {
+        id: 'oneoff',
+        title: 'Single Task',
+        listId: INBOX_LIST_ID,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        dueAt: '2026-11-16',
+        priority: 'none',
+        pinned: false,
+        tags: [],
+        subtasks: [],
+        completionHistory: [],
+        recurrence: null,
+      };
+      expect(getSkipOccurrenceDate(oneoff)).toBeNull();
+    });
+
+    it('skips a daily recurring task to the next day while preserving time', () => {
+      const daily = recurringTask({
+        id: 'daily-bp',
+        title: 'Blood Pressure',
+        dueAt: '2026-11-16T08:00',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+      });
+      expect(getSkipOccurrenceDate(daily, '2026-11-16')).toBe('2026-11-17T08:00');
+    });
+
+    it('skips a weekly recurring task on Mon/Wed to the next scheduled weekday', () => {
+      const mw = recurringTask({
+        id: 'mw',
+        title: 'Exercise',
+        dueAt: '2026-11-16', // Mon Nov 16 2026
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 1,
+          intervalUnit: 'weeks',
+          weekdays: [1, 3],
+        },
+      });
+      // Skipping Monday Nov 16 should advance to Wednesday Nov 18
+      expect(getSkipOccurrenceDate(mw, '2026-11-16')).toBe('2026-11-18');
+    });
+
+    it('returns null if the next occurrence exceeds endOnDate', () => {
+      const ending = recurringTask({
+        id: 'ending',
+        title: 'Last Day',
+        dueAt: '2026-11-16',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 1,
+          intervalUnit: 'days',
+          endOnDate: '2026-11-16',
+        },
+      });
+      expect(getSkipOccurrenceDate(ending, '2026-11-16')).toBeNull();
+    });
+  });
 });
+

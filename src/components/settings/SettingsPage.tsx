@@ -17,6 +17,7 @@ import type { Task, TaskList } from '../../types/task';
 import {
   clearAllData,
   clearSampleTasks,
+  db,
   isSampleId,
   loadSampleTasks,
   repairAndDeduplicateDatabase,
@@ -73,7 +74,6 @@ import {
   ImportIcon,
   IntegrationsIcon,
   SoundsIcon,
-  TabBarIcon,
 } from './settingsIcons';
 
 export type SettingsPageId =
@@ -236,9 +236,6 @@ function RootPage({ syncStatus, go }: SettingsPageProps & { go: (p: SettingsPage
         </svg>
       </button>
 
-      <Card>
-        <NavRow icon={<TabBarIcon />} label="Tab Bar" onClick={() => go('tabbar')} />
-      </Card>
       <Card>
         <NavRow icon={<AppearanceIcon />} label="Appearance" onClick={() => go('appearance')} />
         <NavRow icon={<DateTimeIcon />} label="Date & Time" onClick={() => go('datetime')} />
@@ -749,7 +746,30 @@ function IntegrationsPage({
   };
 
   const handleCopyDiagnostics = async () => {
-    const report = buildDiagnosticsSummary(tasks, lists, diagnosticsContext);
+    const [idbTasks, idbLists, idbFolders] = await Promise.all([
+      db.tasks.toArray().catch(() => []),
+      db.lists.toArray().catch(() => []),
+      db.folders.toArray().catch(() => []),
+    ]);
+    const reportTasks = idbTasks.length > 0 && tasks.length === 0 ? idbTasks : tasks;
+    const report = buildDiagnosticsSummary(reportTasks, lists, {
+      ...diagnosticsContext,
+      origin: typeof window !== 'undefined' ? window.location.origin : '',
+      liveQueryTaskCount: tasks.length,
+      idbTaskCount: idbTasks.length,
+      idbLists: idbLists.map((l) => ({
+        id: l.id,
+        name: l.name,
+        deletedAt: l.deletedAt ?? null,
+      })),
+      idbFolderCount: idbFolders.length,
+      sync: {
+        hasClientId: Boolean(getStoredClientId()),
+        autoSyncEnabled: syncStatus.autoSyncEnabled,
+        lastSyncedAt: syncStatus.lastSyncedAt,
+        lastError: syncStatus.lastError,
+      },
+    });
     const json = JSON.stringify(report, null, 2);
     try {
       if (navigator.clipboard?.writeText) {

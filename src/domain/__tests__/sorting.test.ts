@@ -45,6 +45,20 @@ describe('Sorting & search', () => {
     expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['b', 'a', 'c']);
   });
 
+  it('preserves manual sortOrder across earlier-today overdue times and pinned states', () => {
+    const midDay = new Date(2026, 9, 5, 14, 0, 0);
+    const tasks = [
+      task({ id: 'morning', title: 'Morning timed', dueAt: '2026-10-05T09:00', sortOrder: 3000 }),
+      task({ id: 'untimed', title: 'Untimed today', dueAt: '2026-10-05', sortOrder: 1000 }),
+      task({ id: 'pinned-after', title: 'Pinned moved down', dueAt: '2026-10-05', pinned: true, sortOrder: 2000 }),
+    ];
+    expect(sortTasksForDailyView(tasks, midDay).map((t) => t.id)).toEqual([
+      'untimed',
+      'pinned-after',
+      'morning',
+    ]);
+  });
+
   it('matches search across title notes tags', () => {
     const t = task({
       id: '1',

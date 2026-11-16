@@ -50,6 +50,7 @@ export async function importJsonBackup(content: string): Promise<string> {
     if (mergedFilters.length > 0) await db.savedFilters.bulkPut(mergedFilters);
   });
   await ensureInboxList();
+  recordDiagEvent('json_import', `incoming=${incomingTasks.length} merged=${mergedTasks.length}`);
   return `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders, ${incomingFilters.length} filters!`;
 }
 

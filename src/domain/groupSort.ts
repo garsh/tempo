@@ -28,8 +28,9 @@ const priRank = (p?: TaskPriority | null) => PRIORITY_ORDER[p ?? 'none'] ?? PRIO
 export function sortTasks(tasks: Task[], sortBy: SortBy, now: Date = new Date()): Task[] {
   const byDue = sortTasksForDailyView(tasks, now);
   if (sortBy === 'due') return byDue;
-  const dueIndex = new Map(byDue.map((t, i) => [t.id, i]));
-  const tie = (a: Task, b: Task) => (dueIndex.get(a.id) ?? 0) - (dueIndex.get(b.id) ?? 0);
+  const key = (t: Task) => `${t.id}:${t.dueAt ?? ''}`;
+  const dueIndex = new Map(byDue.map((t, i) => [key(t), i]));
+  const tie = (a: Task, b: Task) => (dueIndex.get(key(a)) ?? 0) - (dueIndex.get(key(b)) ?? 0);
   return [...tasks].sort((a, b) => {
     const pin = pinFirst(a, b);
     if (pin) return pin;

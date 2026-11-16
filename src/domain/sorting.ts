@@ -16,9 +16,9 @@ function priorityRank(p?: TaskPriority | null): number {
 
 /**
  * Sort for daily-driver views:
- * 1. Pinned first
- * 2. Urgency (overdue → today → upcoming → later → none)
- * 3. Manual sortOrder (when reordered within a day; ordered items precede newly added ones)
+ * 1. Manual sortOrder (when reordered; ordered items precede newly added ones)
+ * 2. Pinned first
+ * 3. Urgency (overdue → today → upcoming → later → none)
  * 4. Priority (high → medium → low → none)
  * 5. Earlier due deadline first
  * 6. Creation order (oldest / first-added first)
@@ -26,14 +26,6 @@ function priorityRank(p?: TaskPriority | null): number {
  */
 export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Task[] {
   return [...tasks].sort((a, b) => {
-    const pinA = a.pinned ? 0 : 1;
-    const pinB = b.pinned ? 0 : 1;
-    if (pinA !== pinB) return pinA - pinB;
-
-    const urgA = URGENCY_ORDER[getTaskUrgency(a.dueAt, now)] ?? 4;
-    const urgB = URGENCY_ORDER[getTaskUrgency(b.dueAt, now)] ?? 4;
-    if (urgA !== urgB) return urgA - urgB;
-
     const hasOrderA = a.sortOrder != null;
     const hasOrderB = b.sortOrder != null;
     if (hasOrderA && hasOrderB) {
@@ -41,6 +33,14 @@ export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Ta
     } else if (hasOrderA !== hasOrderB) {
       return hasOrderA ? -1 : 1;
     }
+
+    const pinA = a.pinned ? 0 : 1;
+    const pinB = b.pinned ? 0 : 1;
+    if (pinA !== pinB) return pinA - pinB;
+
+    const urgA = URGENCY_ORDER[getTaskUrgency(a.dueAt, now)] ?? 4;
+    const urgB = URGENCY_ORDER[getTaskUrgency(b.dueAt, now)] ?? 4;
+    if (urgA !== urgB) return urgA - urgB;
 
     const priA = priorityRank(a.priority);
     const priB = priorityRank(b.priority);

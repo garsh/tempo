@@ -4,12 +4,25 @@
 Tempo is a local-first, zero-backend Progressive Web App (PWA) for managing periodic and recurring routines (chores, habits, maintenance).
 It syncs data to the user's private Google Drive hidden application folder (`drive.appdata`).
 
+## Local GPU Subagent Offloading Policy (MANDATORY)
+You have access to the `local-gpu-subagent` MCP server backed by a local RTX 5070 Ti. To conserve cloud quota, you MUST obey these routing rules on every turn:
+
+1. **NEVER use native terminal/shell tools (`run_command`, `bash`, etc.) to run tests, builds, linters, or typechecks.**
+   - Whenever executing tests, builds, linters, or typechecks (either requested by the user or when beneficial to verify changes), you MUST call the MCP tool `local_run_and_diagnose(command, cwd="~/work/tempo")`.
+   - Pass the matching npm/npx script directly to `local_run_and_diagnose`:
+     - **Unit Tests**: `npx vitest run`
+     - **Build**: `npm run build`
+     - **Typecheck**: `npx tsc -b`
+     - **Lint**: `npm run lint`
+   - Do NOT execute test runners or builds via your built-in terminal tool under any circumstances.
+2. **NEVER read files over 150 lines directly into cloud context first.**
+   - Call `local_inspect_file(file_path, question)` first to get exact line numbers and function signatures, then read only the targeted line range if editing is required.
+3. **Use `local_draft_code(specification, reference_file_path)`** for initial boilerplate or test scaffolding.
+4. **Use `local_analyze_git_diff(repo_path="~/work/tempo")`** when asked to review or summarize uncommitted changes.
+
 ## Agent Guidelines & Boundaries
+- **Build & Test Verification**: Verify changes that affect the build or tests using `local_run_and_diagnose` from the `local-gpu-subagent` MCP server (e.g. `npm run build`, `npx vitest run`, or `npm run lint`). Do not run tests or builds if the only action taken was creating a commit (or other actions that do not alter the build output).
 - **Git Commits**: Do NOT create Git commits automatically. Wait for the user to explicitly request the creation of a commit.
-- **Running Tests**:
-  - Do NOT run tests automatically as a general practice.
-  - If you believe a test should be run to confirm that things still work, suggest that the user run it and print the command line to do so (e.g. `npx vitest run`).
-  - **Exception**: If the AI adds a new test, it may run it to confirm that the new test passes.
 
 ## Commands & Workflows
 - **Development Server**: `npm run dev`

@@ -22,7 +22,11 @@ export function PwaUpdatePrompt() {
 
       cleanupRef.current?.();
 
-      let lastCheckAt = Date.now();
+      if (registration.waiting) {
+        setNeedRefresh(true);
+      }
+
+      let lastCheckAt = 0;
       const checkForUpdate = () => {
         if (!navigator.onLine) return;
         if (registration.installing || registration.waiting) return;
@@ -31,6 +35,7 @@ export function PwaUpdatePrompt() {
         lastCheckAt = now;
         void registration.update().catch(() => {});
       };
+      checkForUpdate();
 
       const onVisibilityChange = () => {
         if (document.visibilityState === 'visible') checkForUpdate();
@@ -55,6 +60,21 @@ export function PwaUpdatePrompt() {
   });
 
   useEffect(() => {
+    if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
+      let refreshing = false;
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      const onControllerChange = () => {
+        if (!hadController || refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+      return () => {
+        navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+        cleanupRef.current?.();
+        cleanupRef.current = null;
+      };
+    }
     return () => {
       cleanupRef.current?.();
       cleanupRef.current = null;

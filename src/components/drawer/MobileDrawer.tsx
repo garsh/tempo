@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Filter, Folder as FolderIcon, List, Search, Tag } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronRight, Filter, Folder as FolderIcon, List, Search, Tag } from 'lucide-react';
 import type { AppView, Folder, SavedFilter, TaskList } from '../../types/task';
 import type { SmartListId } from '../../prefs/prefs';
 import { SMART_LIST_LABELS } from '../../prefs/prefs';
@@ -134,6 +134,14 @@ export function MobileDrawer(props: MobileDrawerProps) {
 
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3">
           <div className="space-y-[1px]">
+            <button
+              type="button"
+              className={rowCls(activeView === 'calendar-month' || activeView === 'calendar-agenda')}
+              onClick={() => props.onGo('calendar-month')}
+            >
+              <CalendarDays className="w-5 h-5 text-tt-blue shrink-0" />
+              <span className="truncate">Calendar</span>
+            </button>
             {SMART_ROWS.filter((id) => smartLists[id]).map((id) => (
               <button key={id} type="button" className={rowCls(activeView === id)} onClick={() => props.onGo(id)}>
                 <SmartListIcon id={id} />

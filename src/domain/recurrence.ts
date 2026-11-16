@@ -730,3 +730,43 @@ export function subtaskProgress(subtasks: { completed: boolean }[] | undefined):
     total: list.length,
   };
 }
+
+/**
+ * Calculates the next occurrence date for a recurring task after skipping the current one.
+ * If referenceDateStr is given, skips that occurrence and returns the next scheduled date.
+ * Returns null if the task does not recur or has reached its end condition.
+ */
+export function getSkipOccurrenceDate(
+  task: Task,
+  referenceDateStr?: string
+): string | null {
+  if (!task.recurrence) return null;
+  const curDateStr =
+    referenceDateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date()));
+  const fromDate = parseDate(curDateStr);
+  const time = task.dueAt && hasDueTime(task.dueAt) ? splitDueAt(task.dueAt).time : null;
+
+  // Search forward strictly after curDateStr
+  const startForward = addDays(fromDate, 1);
+  for (let i = 0; i <= 1100; i++) {
+    const candidate = addDays(startForward, i);
+    const dStr = formatDate(candidate);
+    if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) return null;
+    if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+      return combineDueAt(dStr, time);
+    }
+  }
+
+  // Fallback for after_completion rules
+  try {
+    const rawNext = computeRawNextDue({ ...task, recurrence: task.recurrence }, fromDate);
+    const rawStr = formatDate(rawNext);
+    if (task.recurrence.endOnDate && rawStr > task.recurrence.endOnDate) {
+      return null;
+    }
+    return combineDueAt(rawStr, time);
+  } catch {
+    return null;
+  }
+}
+

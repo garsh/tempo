@@ -3,6 +3,7 @@ import { INBOX_LIST_ID } from '../../types/task';
 import { listDotColor } from '../../theme/listColors';
 import type { SmartListId } from '../../prefs/prefs';
 import {
+  CalendarDays,
   Sun,
   Sunrise,
   CalendarRange,
@@ -14,7 +15,6 @@ import {
   Folder as FolderIcon,
   Tag,
   Filter,
-  Columns3,
   SlidersHorizontal,
 } from 'lucide-react';
 
@@ -142,6 +142,16 @@ export function SidebarNav(props: SidebarNavProps) {
     <div className="h-full flex flex-col bg-tt-sidebar text-tt-text">
       <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         <div className="space-y-0.5">
+          <button
+            type="button"
+            className={rowClass(activeView === 'calendar-month' || activeView === 'calendar-agenda')}
+            onClick={() => onGo('calendar-month')}
+          >
+            <span className="inline-flex items-center gap-2.5 min-w-0">
+              <CalendarDays className="w-4 h-4 shrink-0 text-tt-blue" />
+              <span className="truncate">Calendar</span>
+            </span>
+          </button>
           {smart.filter(({ id }) => smartLists[id]).map(({ id, label, Icon, count }) => (
             <button
               key={id}
@@ -318,19 +328,6 @@ export function SidebarNav(props: SidebarNavProps) {
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="space-y-0.5 pt-1">
-          <button
-            type="button"
-            className={rowClass(activeView === 'board-status' || activeView === 'board-list')}
-            onClick={() => onGo('board-status')}
-          >
-            <span className="inline-flex items-center gap-2.5">
-              <Columns3 className="w-4 h-4 opacity-80" />
-              Board
-            </span>
-          </button>
         </div>
       </div>
 

@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 /** Service-worker cache generation. v2 = system light/dark theme (drop pre-theme assets). */
-const TEMPO_SW_CACHE_VERSION = 'v4';
+const TEMPO_SW_CACHE_VERSION = 'v6';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -26,7 +26,7 @@ export default defineConfig({
         name: 'Tempo - Task Manager',
         short_name: 'Tempo',
         description:
-          'Local-first tasks with smart lists, calendar, board, and Google Drive sync.',
+          'Local-first tasks with smart lists, calendar, and Google Drive sync.',
         theme_color: '#F2F4F9',
         background_color: '#F2F4F9',
         display: 'standalone',
@@ -77,6 +77,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
         clientsClaim: true,
+        skipWaiting: true,
       },
     }),
   ],

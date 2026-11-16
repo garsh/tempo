@@ -29,6 +29,7 @@ describe('prefs persistence', () => {
     const p = loadPrefs(storage);
     expect(p).toEqual(DEFAULT_PREFS);
     expect(p.theme).toBe('system');
+    expect(p.showOverdue).toBe(true);
     expect(p.tabs).toEqual(['tasks', 'calendar', 'settings']);
     expect(p.smartLists.today && p.smartLists.inbox).toBe(true);
     expect(p.smartLists.tomorrow || p.smartLists.next7 || p.smartLists.all || p.smartLists.completed).toBe(false);

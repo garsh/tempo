@@ -45,6 +45,7 @@ interface DragState {
   settling: boolean;
   draggedHeight: number;
   indicatorTop: number | null;
+  orderKeys: string[];
 }
 
 interface PendingPress {
@@ -65,6 +66,7 @@ interface ActiveDrag {
   draggedHeight: number;
   containerTop: number;
   snapshots: RowSnapshot[];
+  orderKeys: string[];
 }
 
 function computeDestOffsetY(
@@ -124,12 +126,11 @@ export function ReorderableTaskList({
   const onDragActiveChangeRef = useRef(onDragActiveChange);
 
   useEffect(() => {
-    tasksRef.current = tasks;
     onReorderRef.current = onReorder;
     onDragActiveChangeRef.current = onDragActiveChange;
   });
 
-  // Clear optimistic pending order once `tasks` from Dexie reflects the new order (or after timeout)
+  // Clear optimistic pending order once `tasks` reflects the new order or the item set changes
   useEffect(() => {
     if (!pendingOrderIds) return;
     const sameOrder =
@@ -139,15 +140,21 @@ export function ReorderableTaskList({
       setPendingOrderIds(null);
       return;
     }
-    const timer = window.setTimeout(() => setPendingOrderIds(null), 1000);
-    return () => window.clearTimeout(timer);
+    const pendingSet = new Set(pendingOrderIds);
+    const sameKeys =
+      tasks.length === pendingOrderIds.length &&
+      tasks.every((t) => pendingSet.has(rowKey(t)));
+    if (!sameKeys) {
+      setPendingOrderIds(null);
+    }
   }, [tasks, pendingOrderIds]);
 
   const displayTasks = useMemo(() => {
-    if (!pendingOrderIds) return tasks;
+    const activeOrderIds = dragState?.orderKeys ?? pendingOrderIds;
+    if (!activeOrderIds) return tasks;
     const byKey = new Map(tasks.map((t) => [rowKey(t), t]));
     const ordered: Task[] = [];
-    for (const key of pendingOrderIds) {
+    for (const key of activeOrderIds) {
       const t = byKey.get(key);
       if (t) {
         ordered.push(t);
@@ -156,7 +163,11 @@ export function ReorderableTaskList({
     }
     for (const t of byKey.values()) ordered.push(t);
     return ordered;
-  }, [tasks, pendingOrderIds]);
+  }, [tasks, pendingOrderIds, dragState?.orderKeys]);
+
+  useEffect(() => {
+    tasksRef.current = displayTasks;
+  }, [displayTasks]);
 
   const clearPending = useCallback(() => {
     const p = pendingRef.current;
@@ -229,7 +240,16 @@ export function ReorderableTaskList({
       if (!active || e.pointerId !== active.pointerId) return;
 
       const offsetY = e.clientY - active.startY;
-      const targetIndex = computeTargetIndex(e.clientY, active.snapshots);
+      const fromSnap = active.snapshots[active.fromIndex];
+      const probeY =
+        fromSnap && fromSnap.height > 0
+          ? offsetY < 0
+            ? fromSnap.top + offsetY
+            : offsetY > 0
+              ? fromSnap.top + fromSnap.height + offsetY
+              : fromSnap.midpoint
+          : e.clientY;
+      const targetIndex = computeTargetIndex(probeY, active.snapshots);
       active.offsetY = offsetY;
       active.targetIndex = targetIndex;
       setDragState({
@@ -240,6 +260,7 @@ export function ReorderableTaskList({
         settling: false,
         draggedHeight: active.draggedHeight,
         indicatorTop: computeIndicatorTop(active, targetIndex),
+        orderKeys: active.orderKeys,
       });
     };
 
@@ -268,6 +289,9 @@ export function ReorderableTaskList({
       const reorderedIds = reordered !== list ? reordered.map((t) => t.id) : null;
       const reorderedKeys = reordered !== list ? reordered.map(rowKey) : null;
 
+      if (reorderedKeys) {
+        setPendingOrderIds(reorderedKeys);
+      }
       if (reorderedIds) {
         onReorderRef.current(reorderedIds);
       }
@@ -281,13 +305,11 @@ export function ReorderableTaskList({
         settling: true,
         draggedHeight,
         indicatorTop: null,
+        orderKeys: active.orderKeys,
       });
 
       settleTimerRef.current = window.setTimeout(() => {
         settleTimerRef.current = null;
-        if (reorderedKeys) {
-          setPendingOrderIds(reorderedKeys);
-        }
         setDragState(null);
         onDragActiveChangeRef.current?.(false);
         window.setTimeout(() => {
@@ -337,6 +359,7 @@ export function ReorderableTaskList({
 
         const list = tasksRef.current;
         const fromIndex = list.findIndex((t) => rowKey(t) === taskId);
+        const orderKeys = list.map(rowKey);
         if (fromIndex === -1) return;
 
         const containerTop = containerRef.current?.getBoundingClientRect().top ?? 0;
@@ -364,6 +387,7 @@ export function ReorderableTaskList({
           draggedHeight,
           containerTop,
           snapshots,
+          orderKeys,
         };
         activeRef.current = nextActive;
         onDragActiveChangeRef.current?.(true);
@@ -375,6 +399,7 @@ export function ReorderableTaskList({
           settling: false,
           draggedHeight,
           indicatorTop: null,
+          orderKeys,
         });
       }, LONG_PRESS_MS);
 

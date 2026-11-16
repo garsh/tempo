@@ -154,8 +154,6 @@ export type AppView =
   | SmartView
   | 'calendar-month'
   | 'calendar-agenda'
-  | 'board-status'
-  | 'board-list'
   /** Search across all tasks (drawer search icon / Search tab). */
   | 'search'
   | `filter:${string}`;

@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { ViewMode } from '../../prefs/prefs';
+import { useEffect, useRef } from 'react';
 
 const ICON = {
   width: 20,
@@ -14,16 +12,6 @@ const ICON = {
   'aria-hidden': true,
 } as const;
 
-function ViewIcon() {
-  return (
-    <svg {...ICON}>
-      <path d="M3 2.5v15" />
-      <rect x="6.5" y="2.5" width="10.5" height="4" rx="1.2" />
-      <rect x="6.5" y="8" width="10.5" height="4" rx="1.2" />
-      <rect x="6.5" y="13.5" width="10.5" height="4" rx="1.2" />
-    </svg>
-  );
-}
 function DetailsIcon() {
   return (
     <svg {...ICON}>
@@ -32,6 +20,7 @@ function DetailsIcon() {
     </svg>
   );
 }
+
 function HideCompletedIcon() {
   return (
     <svg {...ICON}>
@@ -41,6 +30,16 @@ function HideCompletedIcon() {
     </svg>
   );
 }
+
+function OverdueIcon() {
+  return (
+    <svg {...ICON}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M10 5.5v5l3 2" />
+    </svg>
+  );
+}
+
 function GroupSortIcon() {
   return (
     <svg {...ICON}>
@@ -48,6 +47,7 @@ function GroupSortIcon() {
     </svg>
   );
 }
+
 function SelectIcon() {
   return (
     <svg {...ICON}>
@@ -57,31 +57,40 @@ function SelectIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg {...ICON}>
+      <circle cx="10" cy="10" r="3" />
+      <path d="M10 1.5v2.2M10 16.3v2.2M1.5 10h2.2M16.3 10h2.2M4 4l1.6 1.6M14.4 14.4l1.6 1.6M4 16l1.6-1.6M14.4 5.6l1.6-1.6" />
+    </svg>
+  );
+}
+
 interface OverflowMenuProps {
   open: boolean;
   /** Bounding rect of the ⋮ button the card anchors to. */
   anchor: DOMRect | null;
-  viewMode: ViewMode;
   showDetails: boolean;
   hideCompleted: boolean;
+  showOverdue: boolean;
   onClose: () => void;
-  onViewMode: (mode: ViewMode) => void;
   onToggleDetails: () => void;
   onToggleHideCompleted: () => void;
+  onToggleShowOverdue: () => void;
   onGroupSort: () => void;
   onSelect: () => void;
+  onSettings: () => void;
 }
 
 /**
- * TickTick "⋮" menu: white rounded card (dark card in dark mode) anchored to the
- * button. View › (List / Board) · Show/Hide Details · Hide/Show Completed ·
- * Group & Sort · Select. Background / View Options / Share are intentionally absent.
+ * Three-dot "⋮" menu: rounded card anchored to the button.
+ * Show/Hide Details · Hide/Show Completed · Show/Hide Overdue ·
+ * Group & Sort · Select · Settings.
  */
 export function OverflowMenu(props: OverflowMenuProps) {
   const { open, anchor, onClose } = props;
-  const [sub, setSub] = useState<'root' | 'view'>('root');
   const cardRef = useRef<HTMLDivElement>(null);
-  // Card overlaps the ⋮ button like TickTick (top ≈ button top + 4, right edge ≥ 12px in).
+  // Card overlaps the ⋮ button (top ≈ button top + 4, right edge ≥ 12px in).
   const pos = anchor
     ? { top: Math.max(8, anchor.top + 4), right: Math.max(12, window.innerWidth - anchor.right) }
     : { top: 14, right: 12 };
@@ -99,23 +108,19 @@ export function OverflowMenu(props: OverflowMenuProps) {
 
   useEffect(() => {
     if (open) cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
-  }, [open, sub]);
+  }, [open]);
 
   if (!open) return null;
 
-  const close = () => {
-    setSub('root');
-    onClose();
-  };
   const act = (fn: () => void) => () => {
     fn();
-    close();
+    onClose();
   };
   const row =
     'w-full h-[43px] flex items-center pl-[20px] pr-[18px] gap-[12px] text-left text-[18px] leading-none text-tt-text outline-none focus-visible:bg-tt-hover active:bg-tt-hover';
 
   return (
-    <div className="fixed inset-0 z-[65]" onClick={close} data-testid="overflow-menu-layer">
+    <div className="fixed inset-0 z-[65]" onClick={onClose} data-testid="overflow-menu-layer">
       <div
         ref={cardRef}
         role="menu"
@@ -124,53 +129,32 @@ export function OverflowMenu(props: OverflowMenuProps) {
         className="absolute w-[247px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
         style={{ top: pos.top, right: pos.right }}
       >
-        {sub === 'root' ? (
-          <>
-            <button type="button" role="menuitem" className={row} onClick={() => setSub('view')} aria-haspopup="menu">
-              <ViewIcon />
-              <span className="flex-1">View</span>
-              <ChevronRight className="w-[18px] h-[18px] text-tt-secondary -mr-[2px]" strokeWidth={1.8} />
-            </button>
-            <button type="button" role="menuitem" className={row} onClick={act(props.onToggleDetails)}>
-              <DetailsIcon />
-              {props.showDetails ? 'Hide Details' : 'Show Details'}
-            </button>
-            <button type="button" role="menuitem" className={row} onClick={act(props.onToggleHideCompleted)}>
-              <HideCompletedIcon />
-              {props.hideCompleted ? 'Show Completed' : 'Hide Completed'}
-            </button>
-            <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
-            <button type="button" role="menuitem" className={row} onClick={act(props.onGroupSort)}>
-              <GroupSortIcon />
-              Group &amp; Sort
-            </button>
-            <button type="button" role="menuitem" className={row} onClick={act(props.onSelect)}>
-              <SelectIcon />
-              Select
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" role="menuitem" className={`${row} text-tt-secondary`} onClick={() => setSub('root')}>
-              <ChevronLeft className="w-5 h-5" strokeWidth={1.8} />
-              View
-            </button>
-            {(['list', 'board'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="menuitemradio"
-                aria-checked={props.viewMode === mode}
-                className={row}
-                onClick={act(() => props.onViewMode(mode))}
-              >
-                <span className="w-5" />
-                <span className="flex-1">{mode === 'list' ? 'List' : 'Board'}</span>
-                {props.viewMode === mode && <Check className="w-[18px] h-[18px] text-tt-blue" strokeWidth={2.2} />}
-              </button>
-            ))}
-          </>
-        )}
+        <button type="button" role="menuitem" className={row} onClick={act(props.onToggleDetails)}>
+          <DetailsIcon />
+          {props.showDetails ? 'Hide Details' : 'Show Details'}
+        </button>
+        <button type="button" role="menuitem" className={row} onClick={act(props.onToggleHideCompleted)}>
+          <HideCompletedIcon />
+          {props.hideCompleted ? 'Show Completed' : 'Hide Completed'}
+        </button>
+        <button type="button" role="menuitem" className={row} onClick={act(props.onToggleShowOverdue)}>
+          <OverdueIcon />
+          {props.showOverdue ? 'Hide Overdue' : 'Show Overdue'}
+        </button>
+        <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
+        <button type="button" role="menuitem" className={row} onClick={act(props.onGroupSort)}>
+          <GroupSortIcon />
+          Group &amp; Sort
+        </button>
+        <button type="button" role="menuitem" className={row} onClick={act(props.onSelect)}>
+          <SelectIcon />
+          Select
+        </button>
+        <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
+        <button type="button" role="menuitem" className={row} onClick={act(props.onSettings)}>
+          <SettingsIcon />
+          Settings
+        </button>
       </div>
     </div>
   );

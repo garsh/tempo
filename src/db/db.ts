@@ -101,6 +101,7 @@ export async function loadSampleTasks(nowDate: Date = new Date()): Promise<numbe
     await db.lists.bulkPut(lists);
     await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: null })));
   });
+  recordDiagEvent('load_sample', `tasks=${tasks.length}`);
   return tasks.length;
 }
 
@@ -120,6 +121,7 @@ export async function clearSampleTasks(): Promise<number> {
     const folders = (await db.folders.toArray()).filter((f) => isSampleId(f.id) && !f.deletedAt);
     await db.folders.bulkPut(folders.map((f) => ({ ...f, deletedAt: now, updatedAt: now })));
   });
+  recordDiagEvent('clear_sample', `removed=${removed}`);
   return removed;
 }
 
@@ -149,6 +151,7 @@ export async function clearAllData(): Promise<number> {
     if (filters.length) await db.savedFilters.bulkPut(filters);
   });
   await ensureInboxList();
+  recordDiagEvent('clear_all_data', `removedTasks=${removedTasks}`);
   return removedTasks;
 }
 
@@ -211,7 +214,7 @@ export async function saveTask(task: TaskInput): Promise<Task> {
 export async function reorderTasks(orderedIds: string[]): Promise<void> {
   if (orderedIds.length === 0) return;
   const now = Date.now();
-  await db.transaction('rw', db.tasks, async () => {
+  const updatedCount = await db.transaction('rw', db.tasks, async () => {
     const existing = await db.tasks.bulkGet(orderedIds);
     const updates: Task[] = [];
     for (let i = 0; i < orderedIds.length; i++) {
@@ -229,7 +232,9 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
     if (updates.length > 0) {
       await db.tasks.bulkPut(updates);
     }
+    return updates.length;
   });
+  recordDiagEvent('reorder', `ids=${orderedIds.join(',')} updated=${updatedCount}`);
 }
 
 /**
@@ -327,9 +332,30 @@ export async function togglePinTask(id: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
   const now = Date.now();
+  const nextPinned = !task.pinned;
+  let sortOrder: number | undefined = task.sortOrder;
+
+  if (nextPinned) {
+    const all = await db.tasks.toArray();
+    let minOrder: number | null = null;
+    for (const t of all) {
+      if (!t.deletedAt && t.sortOrder != null) {
+        if (minOrder === null || t.sortOrder < minOrder) {
+          minOrder = t.sortOrder;
+        }
+      }
+    }
+    if (minOrder !== null) {
+      sortOrder = minOrder - 1000;
+    }
+  } else {
+    sortOrder = undefined;
+  }
+
   const updated: Task = {
     ...task,
-    pinned: !task.pinned,
+    pinned: nextPinned,
+    sortOrder,
     updatedAt: now,
   };
   await db.tasks.put(updated);
@@ -373,6 +399,7 @@ export async function softDeleteTask(id: string): Promise<void> {
     deletedAt: now,
     updatedAt: now,
   });
+  recordDiagEvent('delete_task', `id=${id} title=${task.title.slice(0, 30)}`);
 }
 
 export async function restoreTask(id: string): Promise<void> {
@@ -551,12 +578,14 @@ export async function softDeleteSavedFilter(id: string): Promise<void> {
 
 /** Select-mode batch write (move / set date / delete) in one transaction. Returns count changed. */
 export async function applyBatchOp(ids: string[], op: BatchOp): Promise<number> {
-  return db.transaction('rw', db.tasks, async () => {
+  const count = await db.transaction('rw', db.tasks, async () => {
     const tasks = (await db.tasks.bulkGet(ids)).filter((t): t is Task => !!t);
     const updated = planBatch(tasks, ids, op);
     if (updated.length) await db.tasks.bulkPut(updated);
     return updated.length;
   });
+  recordDiagEvent('batch_op', `type=${op.type} count=${ids.length}`);
+  return count;
 }
 
 /** Select-mode batch complete; recurring tasks advance to their next occurrence. */
@@ -731,7 +760,8 @@ export async function repairAndDeduplicateDatabase(): Promise<{
       }
 
       let purgedTombstones = 0;
-      if (!syncConfigured) {
+      const hasAnyActiveTask = Array.from(taskMap.values()).some((t) => !t.deletedAt);
+      if (!syncConfigured && hasAnyActiveTask) {
         const deletedTaskIds = Array.from(taskMap.values())
           .filter((t) => !!t.deletedAt)
           .map((t) => t.id);

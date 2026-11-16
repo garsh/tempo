@@ -1,9 +1,9 @@
 import type { Task, TaskList } from '../types/task';
 import { isCompleted, isRecurring } from './recurrence';
 
-export const BUILD_ID = '2026-11-15-fix2';
+export const BUILD_ID = '2026-11-15-fix5';
 const DIAG_STORAGE_KEY = 'tempo_diag_log_v1';
-const MAX_DIAG_EVENTS = 40;
+const MAX_DIAG_EVENTS = 60;
 
 export interface DiagEvent {
   at: string;
@@ -32,13 +32,53 @@ export interface DiagnosticsSummary {
 let inMemoryEvents: DiagEvent[] = [];
 let diagnosticsInitialized = false;
 
+function parseEventsJson(raw: string | null): DiagEvent[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as DiagEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function readStorageEvents(): DiagEvent[] {
   try {
-    if (typeof sessionStorage === 'undefined') return inMemoryEvents;
-    const raw = sessionStorage.getItem(DIAG_STORAGE_KEY);
-    if (!raw) return inMemoryEvents;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as DiagEvent[]) : inMemoryEvents;
+    if (typeof localStorage === 'undefined') return inMemoryEvents;
+    const localRaw = localStorage.getItem(DIAG_STORAGE_KEY);
+    let events = parseEventsJson(localRaw);
+    if (!localRaw && inMemoryEvents.length > 0) {
+      events = inMemoryEvents;
+    }
+
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        const sessionRaw = sessionStorage.getItem(DIAG_STORAGE_KEY);
+        if (sessionRaw) {
+          const sessionEvents = parseEventsJson(sessionRaw);
+          if (sessionEvents.length > 0) {
+            const seen = new Set(events.map((e) => `${e.at}|${e.type}|${e.detail}`));
+            const merged = [...events];
+            for (const e of sessionEvents) {
+              const key = `${e.at}|${e.type}|${e.detail}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                merged.push(e);
+              }
+            }
+            merged.sort((a, b) => a.at.localeCompare(b.at));
+            events = merged.slice(-MAX_DIAG_EVENTS);
+            localStorage.setItem(DIAG_STORAGE_KEY, JSON.stringify(events));
+          }
+          sessionStorage.removeItem(DIAG_STORAGE_KEY);
+        }
+      } catch {
+        /* ignore sessionStorage access errors */
+      }
+    }
+
+    inMemoryEvents = events;
+    return events;
   } catch {
     return inMemoryEvents;
   }
@@ -47,8 +87,8 @@ function readStorageEvents(): DiagEvent[] {
 function writeStorageEvents(events: DiagEvent[]): void {
   inMemoryEvents = events;
   try {
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem(DIAG_STORAGE_KEY, JSON.stringify(events));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DIAG_STORAGE_KEY, JSON.stringify(events));
     }
   } catch {
     /* ignore storage quota / private mode */
@@ -74,6 +114,13 @@ export function getDiagEvents(): DiagEvent[] {
 
 export function clearDiagEvents(): void {
   writeStorageEvents([]);
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(DIAG_STORAGE_KEY);
+    }
+  } catch {
+    /* ignore storage access errors */
+  }
 }
 
 export function initDiagnostics(): void {

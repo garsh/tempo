@@ -99,7 +99,7 @@ function SettingsGlyph() {
 export function MobileBottomBar({ activeView, tabs, onTab }: MobileBottomBarProps) {
   const dayNum = new Date().getDate();
   const calActive = activeView === 'calendar-month' || activeView === 'calendar-agenda';
-  const boardActive = activeView === 'board-status' || activeView === 'board-list';
+  const boardActive = false;
   const searchActive = activeView === 'search';
   const active: Record<TabId, boolean> = {
     tasks: !calActive && !boardActive && !searchActive,

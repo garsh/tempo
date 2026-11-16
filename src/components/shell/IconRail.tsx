@@ -36,8 +36,7 @@ export function IconRail({
 }: IconRailProps) {
   const tasksActive =
     activeView !== 'calendar-month' &&
-    activeView !== 'calendar-agenda' &&
-    !String(activeView).startsWith('board');
+    activeView !== 'calendar-agenda';
   const calActive =
     activeView === 'calendar-month' || activeView === 'calendar-agenda';
 

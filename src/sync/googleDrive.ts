@@ -1,4 +1,5 @@
 import { db, ensureInboxList } from '../db/db';
+import { recordDiagEvent } from '../domain/diagnostics';
 import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../domain/merge';
 import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../types/task';
 
@@ -153,6 +154,10 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
   });
 
   await ensureInboxList();
+  recordDiagEvent(
+    'drive_sync',
+    `local=${localTasks.length} remote=${remoteTasks.length} merged=${mergedTasks.length}`
+  );
 
   return {
     tasks: mergedTasks,

@@ -18,7 +18,11 @@ import {
   Bell,
   ListTree,
   Pin,
+  Calendar,
+  SkipForward,
+  Trash2,
 } from 'lucide-react';
+import { SwipeActionButton } from './SwipeActionButton';
 import { usePrefs, type TimeFormat } from '../prefs/prefs';
 
 interface TaskCardProps {
@@ -51,6 +55,12 @@ interface TaskCardProps {
   onRowPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onRowClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  /** Swipe action triggers */
+  onRequestChangeDate?: (task: Task) => void;
+  onRequestSkipOccurrence?: (task: Task) => void;
+  onRequestDelete?: (task: Task) => void;
+  isSwipedOpen?: boolean;
+  onSwipeChange?: (taskId: string, isOpen: boolean) => void;
 }
 
 function dueTextClass(urgency: string): string {
@@ -83,6 +93,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onUncomplete,
   onSelect,
   onEdit,
+  onDelete,
   showDetails = false,
   selectMode = false,
   checked = false,
@@ -97,6 +108,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onRowPointerDown,
   onRowClickCapture,
   onRowContextMenu,
+  onRequestChangeDate,
+  onRequestSkipOccurrence,
+  onRequestDelete,
+  isSwipedOpen,
+  onSwipeChange,
 }) => {
   const [{ timeFormat }] = usePrefs();
   const [pendingSnapshot, setPendingSnapshot] = useState<{
@@ -170,6 +186,156 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const subPreview = showDetails ? (task.subtasks ?? []).slice(0, 3) : [];
   const activate = () => (selectMode ? onToggleCheck?.(task.id) : onSelect?.(task));
 
+  // --- Swipe-to-reveal gesture logic ---
+  const DRAWER_WIDTH = 160;
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isGesturing, setIsGesturing] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const slidingRef = useRef<HTMLDivElement | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
+  const mouseStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
+  const swipeDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    if (isSwipedOpen !== undefined) {
+      if (isSwipedOpen) {
+        setIsOpen(true);
+        setSwipeOffset(-DRAWER_WIDTH);
+      } else {
+        setIsOpen(false);
+        setSwipeOffset(0);
+      }
+    }
+  }, [isSwipedOpen]);
+
+  const closeSwipe = () => {
+    setIsOpen(false);
+    setSwipeOffset(0);
+    onSwipeChange?.(task.id, false);
+  };
+
+  useEffect(() => {
+    const el = slidingRef.current;
+    if (!el || selectMode || isDragging) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      touchStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        initialOffset: isOpen ? -DRAWER_WIDTH : 0,
+      };
+      swipeDirectionRef.current = null;
+      setIsGesturing(true);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const start = touchStartRef.current;
+      if (!start || e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+
+      if (swipeDirectionRef.current === null) {
+        if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 7) {
+          swipeDirectionRef.current = 'vertical';
+        } else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 7) {
+          swipeDirectionRef.current = 'horizontal';
+        }
+      }
+
+      if (swipeDirectionRef.current === 'horizontal') {
+        if (e.cancelable) e.preventDefault();
+        let next = start.initialOffset + dx;
+        next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
+        setSwipeOffset(next);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      const dir = swipeDirectionRef.current;
+      touchStartRef.current = null;
+      swipeDirectionRef.current = null;
+      setIsGesturing(false);
+
+      if (dir === 'horizontal') {
+        suppressClickRef.current = true;
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 220);
+
+        if (swipeOffset < -DRAWER_WIDTH * 0.35) {
+          setIsOpen(true);
+          setSwipeOffset(-DRAWER_WIDTH);
+          onSwipeChange?.(task.id, true);
+        } else {
+          closeSwipe();
+        }
+      }
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+      el.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [selectMode, isDragging, isOpen, swipeOffset, task.id, onSwipeChange]);
+
+  const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    onRowPointerDown?.(e);
+    if (e.pointerType === 'mouse' && e.button === 0 && !selectMode && !isDragging) {
+      if ((e.target as HTMLElement).closest('button, input, a')) return;
+      mouseStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        initialOffset: isOpen ? -DRAWER_WIDTH : 0,
+      };
+    }
+  };
+
+  const handleRowPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && mouseStartRef.current) {
+      const dx = e.clientX - mouseStartRef.current.x;
+      if (Math.abs(dx) > 10) {
+        setIsGesturing(true);
+        let next = mouseStartRef.current.initialOffset + dx;
+        next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
+        setSwipeOffset(next);
+      }
+    }
+  };
+
+  const handleRowPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && mouseStartRef.current) {
+      const dx = e.clientX - mouseStartRef.current.x;
+      mouseStartRef.current = null;
+      setIsGesturing(false);
+      if (Math.abs(dx) > 10) {
+        suppressClickRef.current = true;
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 220);
+
+        if (swipeOffset < -DRAWER_WIDTH * 0.35) {
+          setIsOpen(true);
+          setSwipeOffset(-DRAWER_WIDTH);
+          onSwipeChange?.(task.id, true);
+        } else {
+          closeSwipe();
+        }
+      }
+    }
+  };
+
+
   return (
     <div
       ref={rowRef}
@@ -177,15 +343,32 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       tabIndex={0}
       aria-pressed={selectMode ? checked : undefined}
       data-dragging={isDragging ? 'true' : undefined}
-      onPointerDown={onRowPointerDown}
+      onPointerDown={handleRowPointerDown}
+      onPointerMove={handleRowPointerMove}
+      onPointerUp={handleRowPointerUp}
       onClickCapture={onRowClickCapture}
       onContextMenu={onRowContextMenu}
-      onClick={activate}
-      onDoubleClick={() => !selectMode && onEdit?.(task)}
+      onClick={(e) => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
+        if (isOpen) {
+          e.stopPropagation();
+          closeSwipe();
+          return;
+        }
+        activate();
+      }}
+      onDoubleClick={() => !selectMode && !isOpen && onEdit?.(task)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          activate();
+          if (isOpen) {
+            closeSwipe();
+          } else {
+            activate();
+          }
         }
       }}
       style={
@@ -204,16 +387,73 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               }
             : undefined
       }
-      className={`group relative flex items-center gap-3 px-3 sm:px-4 border-b border-tt-border/80 cursor-pointer ${
+      className={`group relative overflow-hidden border-b border-tt-border/80 cursor-pointer ${
         isDragging
           ? 'z-20 bg-tt-elevated/45 backdrop-blur-[1px] shadow-md ring-2 ring-tt-blue/60 rounded-xl opacity-60 select-none'
-          : `transition-colors ${reorderEnabled ? 'select-none' : ''} ${
-              selected || (selectMode && checked)
-                ? 'bg-tt-blue-soft/70'
-                : 'bg-transparent hover:bg-tt-hover'
-            }`
-      } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
+          : `transition-colors ${reorderEnabled ? 'select-none' : ''}`
+      }`}
     >
+      {/* Revealed Swipe Action Buttons on the Right */}
+      <div
+        className="absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1]"
+        style={{ width: `${DRAWER_WIDTH}px` }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+      >
+        <SwipeActionButton
+          icon={<Calendar className="w-4 h-4" />}
+          label="Change Date"
+          explanation="Change Date: Pick a new date for this task"
+          colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
+          onClick={() => {
+            closeSwipe();
+            onRequestChangeDate?.(task);
+          }}
+        />
+        <SwipeActionButton
+          icon={<SkipForward className="w-4 h-4" />}
+          label="Skip Occurrence"
+          explanation={
+            recurring
+              ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
+              : "Skip Occurrence: Only available for recurring tasks"
+          }
+          disabled={!recurring}
+          colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
+          onClick={() => {
+            closeSwipe();
+            onRequestSkipOccurrence?.(task);
+          }}
+        />
+        <SwipeActionButton
+          icon={<Trash2 className="w-4 h-4" />}
+          label="Delete"
+          explanation="Delete: Remove this task"
+          colorClasses="bg-red-500 hover:bg-red-600 active:bg-red-700 text-white"
+          onClick={() => {
+            closeSwipe();
+            if (onRequestDelete) {
+              onRequestDelete(task);
+            } else {
+              onDelete?.(task.id);
+            }
+          }}
+        />
+      </div>
+
+      {/* Sliding Foreground Card */}
+      <div
+        ref={slidingRef}
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          transition: isGesturing ? 'none' : 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+        className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
+          selected || (selectMode && checked)
+            ? 'bg-tt-blue-soft/70'
+            : 'bg-tt-surface hover:bg-tt-hover'
+        } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
+      >
       {selectMode ? (
         <span
           aria-hidden
@@ -321,5 +561,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         )}
       </div>
     </div>
-  );
+  </div>
+);
 };

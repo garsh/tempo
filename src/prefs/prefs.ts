@@ -36,6 +36,8 @@ export interface Prefs {
   showDetails: boolean;
   /** List views hide the trailing Completed group. */
   hideCompleted: boolean;
+  /** Calendar views show overdue tasks. */
+  showOverdue: boolean;
   groupBy: GroupBy;
   sortBy: SortBy;
   viewMode: ViewMode;
@@ -85,6 +87,7 @@ export const DEFAULT_PREFS: Prefs = {
   defaultListId: INBOX_LIST_ID,
   showDetails: false,
   hideCompleted: false,
+  showOverdue: true,
   groupBy: 'date',
   sortBy: 'due',
   viewMode: 'list',
@@ -162,6 +165,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
       typeof r.defaultListId === 'string' && r.defaultListId ? r.defaultListId : DEFAULT_PREFS.defaultListId,
     showDetails: typeof r.showDetails === 'boolean' ? r.showDetails : DEFAULT_PREFS.showDetails,
     hideCompleted: typeof r.hideCompleted === 'boolean' ? r.hideCompleted : DEFAULT_PREFS.hideCompleted,
+    showOverdue: typeof r.showOverdue === 'boolean' ? r.showOverdue : DEFAULT_PREFS.showOverdue,
     groupBy: oneOf(r.groupBy, ['none', 'date', 'list', 'priority', 'tag'] as const, DEFAULT_PREFS.groupBy),
     sortBy: oneOf(r.sortBy, ['due', 'priority', 'title', 'created'] as const, DEFAULT_PREFS.sortBy),
     viewMode: oneOf(r.viewMode, ['list', 'board'] as const, DEFAULT_PREFS.viewMode),

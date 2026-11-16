@@ -8,6 +8,10 @@ import {
   formatClockTime,
   isCompleted,
   splitDueAt,
+  isRecurring,
+  getNextUncompletedOccurrenceDate,
+  getDueDatePart,
+  projectTaskForDate,
 } from '../domain/recurrence';
 import { Check } from 'lucide-react';
 
@@ -61,8 +65,25 @@ export function CalendarAgendaView({
 }: CalendarAgendaViewProps) {
   const todayStr = formatDate(new Date());
   const focus = selectedDateStr || todayStr;
-  const [{ weekStart, timeFormat }] = usePrefs();
+  const [{ weekStart, timeFormat, showOverdue }] = usePrefs();
   const week = useMemo(() => weekAround(focus, weekStart), [focus, weekStart]);
+
+  const overdueTasks = useMemo(() => {
+    if (!showOverdue) return [];
+    const overdue: Task[] = [];
+    for (const t of tasks) {
+      if (t.deletedAt || isCompleted(t)) continue;
+      if (isRecurring(t)) {
+        const nextDate = getNextUncompletedOccurrenceDate(t, new Date());
+        if (nextDate && nextDate < todayStr) {
+          overdue.push(projectTaskForDate(t, nextDate));
+        }
+      } else if (t.dueAt && getDueDatePart(t.dueAt) < todayStr) {
+        overdue.push(t);
+      }
+    }
+    return overdue.sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || ''));
+  }, [tasks, showOverdue, todayStr]);
 
   const dayTasks = useMemo(() => {
     const due = tasksDueOnDate(tasks, focus);
@@ -125,6 +146,29 @@ export function CalendarAgendaView({
           );
         })}
       </div>
+
+      {overdueTasks.length > 0 && (
+        <div className="rounded-xl border border-tt-overdue/30 bg-tt-overdue/5 p-3 space-y-2">
+          <div className="text-xs font-bold text-tt-overdue">
+            Overdue ({overdueTasks.length})
+          </div>
+          <div className="space-y-1.5">
+            {overdueTasks.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelectTask(t)}
+                className="w-full text-left p-2 rounded-lg bg-tt-elevated border border-tt-border hover:border-tt-blue flex items-center justify-between gap-2"
+              >
+                <span className="text-[14px] font-medium text-tt-text truncate">{t.title}</span>
+                <span className="text-[11px] text-tt-overdue shrink-0 font-medium">
+                  {t.dueAt ? getDueDatePart(t.dueAt) : 'Overdue'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {dayTasks.length === 0 ? (
         <div className="py-12 text-center">

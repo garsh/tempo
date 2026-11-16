@@ -25,7 +25,9 @@ import {
   addDays,
   formatDate,
   getDueDatePart,
+  getNextUncompletedOccurrenceDate,
   isCompleted,
+  isRecurring,
   projectTaskForDate,
 } from './domain/recurrence';
 import {
@@ -39,10 +41,10 @@ import {
 import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorting';
 import { groupAndSortTasks, sortTasks } from './domain/groupSort';
 import { toggleSelected } from './domain/batch';
-import { usePrefs, type TabId } from './prefs/prefs';
+import { usePrefs } from './prefs/prefs';
 import { getStoredClientId } from './sync/googleAuth';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
-import { initDiagnostics } from './domain/diagnostics';
+import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
 import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
@@ -55,12 +57,14 @@ import { TaskDetailPane } from './components/TaskDetailPane';
 import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { QuickCaptureModal } from './components/QuickCaptureModal';
-import { KanbanBoard } from './components/KanbanBoard';
 import { SavedFilterModal } from './components/SavedFilterModal';
+import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
+import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
+import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
+import { getSkipOccurrenceDate } from './domain/recurrence';
 import { InstallPrompt } from './components/InstallPrompt';
 import { IconRail } from './components/shell/IconRail';
 import { SidebarNav } from './components/shell/SidebarNav';
-import { MobileBottomBar } from './components/shell/MobileBottomBar';
 import { EmptyInboxState } from './components/shell/EmptyInboxState';
 import { EmptyTodayState } from './components/shell/EmptyTodayState';
 import { TodayTipBanner } from './components/shell/TodayTipBanner';
@@ -109,8 +113,6 @@ function viewTitle(view: AppView, lists: TaskList[]): string {
   if (view === 'completed') return 'Completed';
   if (view === 'calendar-month') return 'Calendar';
   if (view === 'calendar-agenda') return 'Agenda';
-  if (view === 'board-status') return 'Board · Status';
-  if (view === 'board-list') return 'Board · Lists';
   if (view === 'search') return 'Search';
   if (view.startsWith('list:')) {
     const id = view.slice(5);
@@ -130,7 +132,7 @@ const ACTIVE_VIEW_STORAGE_KEY = 'tempo_active_view';
 function readInitialView(): AppView {
   try {
     const raw = localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
-    if (!raw || raw === 'search') return 'today';
+    if (!raw || raw === 'search' || raw === 'board-status' || raw === 'board-list') return 'calendar-month';
     const fixed = new Set([
       'today',
       'tomorrow',
@@ -140,8 +142,6 @@ function readInitialView(): AppView {
       'completed',
       'calendar-month',
       'calendar-agenda',
-      'board-status',
-      'board-list',
     ]);
     if (fixed.has(raw) || raw.startsWith('list:') || raw.startsWith('filter:')) {
       return raw as AppView;
@@ -149,7 +149,7 @@ function readInitialView(): AppView {
   } catch {
     /* ignore storage access errors */
   }
-  return 'today';
+  return 'calendar-month';
 }
 
 export function App() {
@@ -216,6 +216,10 @@ export function App() {
   >(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
+  const [changeDateTask, setChangeDateTask] = useState<Task | null>(null);
+  const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
+  const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
     setSelectedIds(new Set());
@@ -226,9 +230,33 @@ export function App() {
     setSidebarOpen(false);
   }, []);
 
+  const [fallbackTasks, setFallbackTasks] = useState<Task[] | null>(null);
+  const [dbRevision, setDbRevision] = useState(0);
+
   useEffect(() => {
     initDiagnostics();
-    void initDatabase();
+    void (async () => {
+      try {
+        await initDatabase();
+        const [idbTasks, idbLists] = await Promise.all([
+          db.tasks.toArray(),
+          db.lists.toArray(),
+        ]);
+        setFallbackTasks(idbTasks);
+        const listSummary = idbLists
+          .map((l) => `${l.name}${l.deletedAt ? '(del)' : ''}`)
+          .join(',');
+        recordDiagEvent(
+          'db_init',
+          `idbTasks=${idbTasks.length} idbLists=${idbLists.length} [${listSummary}]`
+        );
+      } catch (err) {
+        recordDiagEvent(
+          'db_init_error',
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    })();
   }, []);
 
   // PWA Web Share Target / URL capture (?text=&title=&url= or ?share=1)
@@ -247,7 +275,21 @@ export function App() {
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
-  const allTasks = useLiveQuery(() => db.tasks.toArray(), []) ?? EMPTY_TASKS;
+  const liveTasks = useLiveQuery(() => db.tasks.toArray(), [dbRevision]);
+  const allTasks = useMemo(() => {
+    if (!liveTasks && !fallbackTasks) return EMPTY_TASKS;
+    if (!liveTasks) return fallbackTasks!;
+    if (!fallbackTasks) return liveTasks;
+    let maxLive = 0;
+    for (const t of liveTasks) {
+      if (t.updatedAt > maxLive) maxLive = t.updatedAt;
+    }
+    let maxFallback = 0;
+    for (const t of fallbackTasks) {
+      if (t.updatedAt > maxFallback) maxFallback = t.updatedAt;
+    }
+    return maxFallback >= maxLive ? fallbackTasks : liveTasks;
+  }, [liveTasks, fallbackTasks]);
   const allLists = useLiveQuery(() => db.lists.toArray(), []) ?? EMPTY_LISTS;
   const allFolders = useLiveQuery(() => db.folders.toArray(), []) ?? EMPTY_FOLDERS;
   const allSavedFilters = useLiveQuery(() => db.savedFilters.toArray(), []) ?? EMPTY_SAVED_FILTERS;
@@ -291,7 +333,6 @@ export function App() {
 
   const isCalendar =
     activeView === 'calendar-month' || activeView === 'calendar-agenda';
-  const isBoard = activeView === 'board-status' || activeView === 'board-list';
 
   const baseForView = useMemo((): Task[] => {
     const withTodayCompleted = (openList: Task[], listId?: string): Task[] => {
@@ -321,8 +362,6 @@ export function App() {
         );
       case 'calendar-month':
       case 'calendar-agenda':
-      case 'board-status':
-      case 'board-list':
         return open;
       case 'search':
         return activeTasks;
@@ -377,6 +416,28 @@ export function App() {
     );
     return sortTasksForDailyView(list);
   }, [isCalendar, activeView, calSelectedDate, activeTasks, searchQuery, selectedTag]);
+
+  const calOverdueTasks = useMemo(() => {
+    if (!isCalendar || activeView !== 'calendar-month' || !prefs.showOverdue) return [];
+    const todayStr = formatDate(new Date());
+    const overdue: Task[] = [];
+    for (const t of activeTasks) {
+      if (t.deletedAt || isCompleted(t)) continue;
+      if (isRecurring(t)) {
+        const nextDate = getNextUncompletedOccurrenceDate(t, new Date());
+        if (nextDate && nextDate < todayStr) {
+          overdue.push(projectTaskForDate(t, nextDate));
+        }
+      } else if (t.dueAt && getDueDatePart(t.dueAt) < todayStr) {
+        overdue.push(t);
+      }
+    }
+    const displayedIds = new Set(displayedTasks.map((t) => t.id));
+    const filtered = overdue
+      .filter((t) => !displayedIds.has(t.id))
+      .filter((t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag));
+    return sortTasksForDailyView(filtered);
+  }, [isCalendar, activeView, prefs.showOverdue, activeTasks, displayedTasks, searchQuery, selectedTag]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
     const todayStr = formatDate(new Date());
@@ -545,6 +606,28 @@ export function App() {
     });
   };
 
+  const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
+    await handlePatchTask(taskId, { dueAt: newDueAt });
+    setChangeDateTask(null);
+    setSwipedTaskId(null);
+  };
+
+  const handleConfirmSkipOccurrence = async (task: Task) => {
+    const curDate = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
+    const nextDate = getSkipOccurrenceDate(task, curDate);
+    if (nextDate) {
+      await handlePatchTask(task.id, { dueAt: nextDate });
+    }
+    setSkipOccurrenceTask(null);
+    setSwipedTaskId(null);
+  };
+
+  const handleConfirmDelete = async (taskId: string) => {
+    await handleDelete(taskId);
+    setDeleteConfirmTask(null);
+    setSwipedTaskId(null);
+  };
+
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newListName.trim();
@@ -595,23 +678,6 @@ export function App() {
     if (activeView === `filter:${filter.id}`) setActiveView('today');
   };
 
-  const handleMoveToList = async (taskId: string, listId: string) => {
-    const task = await db.tasks.get(taskId);
-    if (!task || task.listId === listId) return;
-    await saveTask({
-      id: task.id,
-      title: task.title,
-      notes: task.notes,
-      listId,
-      dueAt: task.dueAt,
-      priority: task.priority,
-      pinned: task.pinned,
-      tags: task.tags,
-      subtasks: task.subtasks,
-      recurrence: task.recurrence,
-    });
-  };
-
   const goView = useCallback((view: AppView) => {
     setActiveView((prev) => {
       // Mobile has no search field outside the Search view — don't leave a hidden filter on.
@@ -627,14 +693,6 @@ export function App() {
     setActiveView('search');
     setSidebarOpen(false);
   }, []);
-
-  const handleTab = (tab: TabId) => {
-    if (tab === 'tasks') goView(emptyInbox ? 'inbox' : 'today');
-    else if (tab === 'calendar') goView('calendar-month');
-    else if (tab === 'board') goView('board-status');
-    else if (tab === 'search') openSearch();
-    else openSettings('root');
-  };
 
   const selectableIds = () => displayedTasks.map((t) => t.id);
   const runBatch = async (fn: (ids: string[]) => Promise<unknown>) => {
@@ -772,7 +830,7 @@ export function App() {
     id === INBOX_LIST_ID ? 'var(--tt-smart-orange)' : listDotColor(listColorIndex.get(id) ?? 0);
   // ⋮ › Group & Sort + Hide Completed
   const taskGroups = useMemo(() => {
-    if (isCalendar || isBoard || activeView === 'completed') return [];
+    if (isCalendar || activeView === 'completed') return [];
     const completedCapable =
       activeView === 'today' ||
       activeView === 'inbox' ||
@@ -788,7 +846,7 @@ export function App() {
     });
     // listColor / activeLists derive from allLists each render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayedTasks, isCalendar, isBoard, activeView, prefs.groupBy, prefs.sortBy, prefs.hideCompleted, allLists]);
+  }, [displayedTasks, isCalendar, activeView, prefs.groupBy, prefs.sortBy, prefs.hideCompleted, allLists]);
 
   const toggleGroup = (id: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -856,8 +914,6 @@ export function App() {
   );
 
   const accountSummary = summarizeAccount(syncStatus.account, syncStatus, !!getStoredClientId());
-  const listLike = !isCalendar && !isBoard && activeView !== 'completed';
-  const showBoardMode = prefs.viewMode === 'board' && listLike && activeView !== 'search' && !emptyState;
   const openOverflow = (e: React.MouseEvent<HTMLElement>) =>
     setOverflowAnchor(e.currentTarget.getBoundingClientRect());
 
@@ -867,7 +923,27 @@ export function App() {
       <ReorderableTaskList
         tasks={tasks}
         enabled={canReorder}
-        onReorder={(ids) => void reorderTasks(ids)}
+        onReorder={(ids) => {
+          const nowMs = Date.now();
+          const orderMap = new Map(ids.map((id, idx) => [id, (idx + 1) * 1000]));
+          setFallbackTasks((prev) => {
+            const source = prev ?? allTasks;
+            return source.map((t) => {
+              const nextOrder = orderMap.get(t.id);
+              return nextOrder !== undefined
+                ? { ...t, sortOrder: nextOrder, updatedAt: nowMs }
+                : t;
+            });
+          });
+          void reorderTasks(ids).then(async () => {
+            try {
+              setFallbackTasks(await db.tasks.toArray());
+              setDbRevision((r) => r + 1);
+            } catch {
+              /* ignore */
+            }
+          });
+        }}
         onDragActiveChange={(active) => {
           if (active) calGestureRef.current = null;
         }}
@@ -890,6 +966,13 @@ export function App() {
             onDelete={handleDelete}
             onTogglePin={handleTogglePin}
             onToggleSubtask={handleToggleSubtask}
+            onRequestChangeDate={(t) => setChangeDateTask(t)}
+            onRequestSkipOccurrence={(t) => setSkipOccurrenceTask(t)}
+            onRequestDelete={(t) => setDeleteConfirmTask(t)}
+            isSwipedOpen={swipedTaskId === task.id}
+            onSwipeChange={(id, open) => {
+              setSwipedTaskId(open ? id : null);
+            }}
             reorderEnabled={canReorder}
             {...dragProps}
           />
@@ -997,17 +1080,15 @@ export function App() {
           </header>
         ) : (
           <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
-            {!isCalendar && (
-              <button
-                type="button"
-                className="w-11 h-11 flex items-center justify-center text-tt-text"
-                onClick={() => setSidebarOpen(true)}
-                title="Menu"
-                aria-label="Menu"
-              >
-                <Menu className="w-6 h-6" strokeWidth={1.75} />
-              </button>
-            )}
+            <button
+              type="button"
+              className="w-11 h-11 flex items-center justify-center text-tt-text"
+              onClick={() => setSidebarOpen(true)}
+              title="Menu"
+              aria-label="Menu"
+            >
+              <Menu className="w-6 h-6" strokeWidth={1.75} />
+            </button>
             {isCalendar ? (
               <button
                 type="button"
@@ -1151,7 +1232,7 @@ export function App() {
                   className="w-full pl-9 pr-3 py-2 rounded-xl bg-tt-input border border-transparent focus:border-tt-blue focus:bg-tt-elevated text-sm outline-none placeholder:text-tt-muted"
                 />
               </div>
-              {!isCalendar && !isBoard && activeView !== 'completed' && (
+              {!isCalendar && activeView !== 'completed' && (
                 <div className="hidden xl:block">
                   <QuickAddBar onClick={openCapture} />
                 </div>
@@ -1238,41 +1319,6 @@ export function App() {
                     No tasks here — add one
                   </p>
                 </>
-              ) : isBoard ? (
-                <div className="px-3 sm:px-5">
-                  <div className="flex gap-2 mb-3">
-                    <button
-                      type="button"
-                      onClick={() => goView('board-status')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                        activeView === 'board-status'
-                          ? 'bg-tt-blue text-white'
-                          : 'bg-tt-sidebar text-tt-secondary'
-                      }`}
-                    >
-                      By status
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => goView('board-list')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                        activeView === 'board-list'
-                          ? 'bg-tt-blue text-white'
-                          : 'bg-tt-sidebar text-tt-secondary'
-                      }`}
-                    >
-                      By list
-                    </button>
-                  </div>
-                  <KanbanBoard
-                    tasks={displayedTasks}
-                    lists={activeLists}
-                    mode={activeView === 'board-list' ? 'list' : 'status'}
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={selectTask}
-                    onMoveToList={handleMoveToList}
-                  />
-                </div>
               ) : isCalendar ? (
                 <div
                   className={
@@ -1314,10 +1360,23 @@ export function App() {
                       ref={calScrollRef}
                       className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
                     >
-                      {displayedTasks.length === 0 && calCompletedTasks.length === 0 ? (
+                      {displayedTasks.length === 0 && calCompletedTasks.length === 0 && calOverdueTasks.length === 0 ? (
                         <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
                       ) : (
                         <>
+                          {calOverdueTasks.length > 0 && (
+                            <div>
+                              <TaskGroupHeader
+                                label="Overdue"
+                                count={calOverdueTasks.length}
+                                tone="overdue"
+                                collapsed={!!collapsedGroups['cal-overdue']}
+                                onToggle={() => toggleGroup('cal-overdue')}
+                                sticky={false}
+                              />
+                              {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks, false)}
+                            </div>
+                          )}
                           {displayedTasks.length > 0 && (
                             <div>
                               <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
@@ -1355,17 +1414,6 @@ export function App() {
                   ) : (
                     renderTaskRows(displayedTasks, false)
                   )}
-                </div>
-              ) : showBoardMode ? (
-                <div className="px-3 sm:px-5 pt-1" data-testid="view-board-mode">
-                  <KanbanBoard
-                    tasks={displayedTasks}
-                    lists={activeLists}
-                    mode="status"
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={selectTask}
-                    onMoveToList={handleMoveToList}
-                  />
                 </div>
               ) : taskGroups.length === 0 ? (
                 <p className="text-sm text-tt-muted px-4 py-10 text-center">
@@ -1425,7 +1473,7 @@ export function App() {
           type="button"
           onClick={openCapture}
           className="xl:hidden fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)]"
-          style={{ bottom: 'calc(67px + env(safe-area-inset-bottom))' }}
+          style={{ bottom: 'calc(16px + env(safe-area-inset-bottom))' }}
           title="Add task"
           aria-label="Add task"
         >
@@ -1433,7 +1481,7 @@ export function App() {
         </button>
         )}
 
-        {selectMode ? (
+        {selectMode && (
           <SelectionBar
             count={selectedIds.size}
             lists={activeLists}
@@ -1442,8 +1490,6 @@ export function App() {
             onSetDate={(d) => void batchSetDate(d)}
             onDelete={() => void batchDelete()}
           />
-        ) : (
-          <MobileBottomBar activeView={activeView} tabs={prefs.tabs} onTab={handleTab} />
         )}
       </div>
 
@@ -1534,22 +1580,19 @@ export function App() {
       <OverflowMenu
         open={!!overflowAnchor}
         anchor={overflowAnchor}
-        viewMode={prefs.viewMode}
         showDetails={prefs.showDetails}
         hideCompleted={prefs.hideCompleted}
+        showOverdue={prefs.showOverdue}
         onClose={() => setOverflowAnchor(null)}
-        onViewMode={(viewMode) => {
-          updatePrefs({ viewMode });
-          if (viewMode === 'board' && !listLike) goView('board-status');
-          if (viewMode === 'list' && isBoard) goView('today');
-        }}
         onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
         onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
+        onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
         onGroupSort={() => setIsGroupSortOpen(true)}
         onSelect={() => {
           setSelectedIds(new Set());
           setSelectMode(true);
         }}
+        onSettings={() => openSettings('root')}
       />
 
       <GroupSortSheet
@@ -1637,6 +1680,27 @@ export function App() {
           </div>
         </div>
       )}
+      {/* Swipe Action Dialogs */}
+      <ChangeDateDialog
+        isOpen={!!changeDateTask}
+        task={changeDateTask}
+        onClose={() => setChangeDateTask(null)}
+        onSave={handleConfirmChangeDate}
+      />
+
+      <SkipOccurrenceDialog
+        isOpen={!!skipOccurrenceTask}
+        task={skipOccurrenceTask}
+        onClose={() => setSkipOccurrenceTask(null)}
+        onConfirm={handleConfirmSkipOccurrence}
+      />
+
+      <DeleteConfirmDialog
+        isOpen={!!deleteConfirmTask}
+        task={deleteConfirmTask}
+        onClose={() => setDeleteConfirmTask(null)}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }
