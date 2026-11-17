@@ -323,40 +323,6 @@ export async function uncompleteTask(id: string, dateStr?: string): Promise<Task
   return updated;
 }
 
-export async function togglePinTask(id: string): Promise<Task | null> {
-  const task = await db.tasks.get(id);
-  if (!task) return null;
-  const now = Date.now();
-  const nextPinned = !task.pinned;
-  let sortOrder: number | undefined = task.sortOrder;
-
-  if (nextPinned) {
-    const all = await db.tasks.toArray();
-    let minOrder: number | null = null;
-    for (const t of all) {
-      if (!t.deletedAt && t.sortOrder != null) {
-        if (minOrder === null || t.sortOrder < minOrder) {
-          minOrder = t.sortOrder;
-        }
-      }
-    }
-    if (minOrder !== null) {
-      sortOrder = minOrder - 1000;
-    }
-  } else {
-    sortOrder = undefined;
-  }
-
-  const updated: Task = {
-    ...task,
-    pinned: nextPinned,
-    sortOrder,
-    updatedAt: now,
-  };
-  await db.tasks.put(updated);
-  return updated;
-}
-
 export async function softDeleteTask(id: string): Promise<void> {
   const task = await db.tasks.get(id);
   if (!task) return;

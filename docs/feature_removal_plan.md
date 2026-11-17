@@ -39,13 +39,12 @@ The following table provides an overview of all candidate features to remove, ra
 | **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate | **Completed** |
 | **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit | **Completed** |
 | **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate | **Completed** |
-| **13** | **Global Keyboard Shortcuts for List Navigation** | `useKeyboardShortcuts.ts`, hotkeys 1–5, modal triggers | ~120 LOC | Low | Proposed |
-| **14** | **Search View & Search Mode** | Dedicated search view, query filters across titles/notes/tags | ~150 LOC | Low | Proposed |
-| **15** | **Priority Levels & Urgency Flagging** | `priority` field (`high`, `medium`, `low`), flags, urgency logic | ~250 LOC | Low | Proposed |
-| **16** | **Tags System** | `tags` string array, tag parsing, tag chips | ~200 LOC | Low | Proposed |
-| **17** | **Pinned Tasks** | `pinned` boolean, pin toggle buttons, pinned card badges | ~150 LOC | Low |
-| **18** | **Today Tips & Motivational Banners** | `TodayTipBanner.tsx`, `CalendarTodayTip.tsx`, `LightbulbIcon.tsx` | ~160 LOC | Low |
-| **19** | **Tab Bar Customization & Extraneous Settings** | Tab reordering settings, quick stats summary, sample task loaders | ~200 LOC | Low |
+| **13** | **Priority Levels & Urgency Flagging** | `priority` field (`high`, `medium`, `low`), flags, urgency logic | ~250 LOC | Low | **Completed** |
+| **14** | **Tags System** | `tags` string array, tag parsing, tag chips | ~200 LOC | Low | **Completed** |
+| **15** | **Pinned Tasks** | `pinned` boolean, pin toggle buttons, pinned card badges | ~150 LOC | Low | **Completed** |
+| **16** | **Today Tips & Motivational Banners** | `TodayTipBanner.tsx`, `CalendarTodayTip.tsx`, `LightbulbIcon.tsx` | ~160 LOC | Low | **Completed** |
+| **17** | **Global Keyboard Shortcuts & Search View** | `useKeyboardShortcuts.ts`, search mode and filters | ~270 LOC | Low | Proposed |
+| **18** | **Tab Bar Customization & Extraneous Settings** | Tab reordering settings, quick stats summary, sample task loaders | ~200 LOC | Low | Proposed |
 
 ---
 
@@ -238,7 +237,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 13. Priority Levels & Urgency Flagging
+### 13. Priority Levels & Urgency Flagging *(Completed)*
 * **Description**: 4-tier task priorities (`high`, `medium`, `low`, `none`) with red/yellow/blue flag badges, urgency calculations, and priority-based filters.
 * **Files Involved**:
   - Priority selectors in `src/components/TaskModal.tsx` and `TaskDetailPane.tsx`
@@ -252,7 +251,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 14. Tags System
+### 14. Tags System *(Completed)*
 * **Description**: Freeform text tags (`#tag`) attached to tasks with tag chips and filtering.
 * **Files Involved**:
   - Tag array handling in `src/types/task.ts`
@@ -265,7 +264,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 15. Pinned Tasks
+### 15. Pinned Tasks *(Completed)*
 * **Description**: Ability to "pin" tasks to the top of list views with a thumbtack icon.
 * **Files Involved**:
   - `pinned: boolean` in `src/types/task.ts`
@@ -278,7 +277,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 16. Today Tips & Motivational Banners
+### 16. Today Tips & Motivational Banners *(Completed)*
 * **Description**: A banner displaying random productivity tips and motivational quotes at the top of views.
 * **Files Involved**:
   - `src/components/shell/TodayTipBanner.tsx` (75 LOC)

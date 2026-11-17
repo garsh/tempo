@@ -20,8 +20,7 @@ export type SmartListId =
   | 'next7'
   | 'inbox'
   | 'all'
-  | 'completed'
-  | 'tags';
+  | 'completed';
 
 export interface Prefs {
   theme: ThemePref;
@@ -72,7 +71,6 @@ export const SMART_LIST_LABELS: Record<SmartListId, string> = {
   inbox: 'Inbox',
   all: 'All Open',
   completed: 'Completed',
-  tags: 'Tags',
 };
 
 export const DEFAULT_PREFS: Prefs = {
@@ -95,7 +93,6 @@ export const DEFAULT_PREFS: Prefs = {
     next7: false,
     all: false,
     completed: false,
-    tags: false,
   },
 };
 

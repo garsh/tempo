@@ -51,8 +51,11 @@ export interface Task {
   notes?: string;
   listId: string;
   dueAt?: string | null;
+  /** @deprecated Priority UI has been removed. Field retained for sync schema compatibility. */
   priority?: TaskPriority;
+  /** @deprecated Pinned UI has been removed. Field retained for sync schema compatibility. */
   pinned?: boolean;
+  /** @deprecated Tags UI has been removed. Field retained for sync schema compatibility. */
   tags?: string[];
   /** @deprecated Subtasks UI has been removed. Field retained for sync schema compatibility. */
   subtasks?: Subtask[];

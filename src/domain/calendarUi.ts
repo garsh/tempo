@@ -1,32 +1,6 @@
 import { addDays, formatDate } from './recurrence';
 import { shiftMonth, startOfWeek, type CalendarDayCell } from './calendar';
 
-export const CAL_TODAY_TIP_KEY = 'tempo_cal_today_tip_dismissed';
-
-export function isCalTodayTipDismissed(storage: Pick<Storage, 'getItem'> | null = defaultStorage()): boolean {
-  try {
-    return storage?.getItem(CAL_TODAY_TIP_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function dismissCalTodayTip(storage: Pick<Storage, 'setItem'> | null = defaultStorage()): void {
-  try {
-    storage?.setItem(CAL_TODAY_TIP_KEY, '1');
-  } catch {
-    /* private mode */
-  }
-}
-
-function defaultStorage(): Storage | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Month name only ("October"), matching TickTick's calendar header. */
 export function monthName(year: number, monthIndex: number, locale?: string): string {
   return new Date(year, monthIndex, 1).toLocaleString(locale, { month: 'long' });

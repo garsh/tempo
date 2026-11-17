@@ -1,38 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CAL_TODAY_TIP_KEY,
   buildWeekCells,
   calendarRowDueLabel,
   dayCardTitle,
   defaultDateForMonth,
-  dismissCalTodayTip,
   dueAtForSelectedDay,
-  isCalTodayTipDismissed,
   jumpToToday,
   monthContains,
   monthName,
   shiftMonthView,
   shiftWeek,
 } from '../calendarUi';
-
-function mem() {
-  const map = new Map<string, string>();
-  return {
-    getItem: (k: string) => map.get(k) ?? null,
-    setItem: (k: string, v: string) => void map.set(k, v),
-    map,
-  };
-}
-
-describe('calendar tip dismissal', () => {
-  it('starts shown; dismiss persists', () => {
-    const s = mem();
-    expect(isCalTodayTipDismissed(s)).toBe(false);
-    dismissCalTodayTip(s);
-    expect(s.map.get(CAL_TODAY_TIP_KEY)).toBe('1');
-    expect(isCalTodayTipDismissed(s)).toBe(true);
-  });
-});
 
 describe('jump to today', () => {
   it('returns today\'s year/month/dateStr', () => {

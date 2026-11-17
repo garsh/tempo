@@ -13,7 +13,6 @@ import {
   Sparkles,
   Calendar,
   RefreshCw,
-  Pin,
 } from 'lucide-react';
 
 interface TaskModalProps {
@@ -45,7 +44,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [endOnDate, setEndOnDate] = useState('');
   const [endAfterCount, setEndAfterCount] = useState('');
   const [dueDate, setDueDate] = useState<string>('');
-  const [pinned, setPinned] = useState(false);
 
   useEffect(() => {
     if (initialTask) {
@@ -74,7 +72,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         setEndAfterCount('');
       }
       setDueDate(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : defaultDueAt ? getDueDatePart(defaultDueAt) : '');
-      setPinned(!!initialTask.pinned);
     } else {
       setTitle('');
       setNotes('');
@@ -88,7 +85,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setEndOnDate('');
       setEndAfterCount('');
       setDueDate(defaultDueAt ? getDueDatePart(defaultDueAt) : '');
-      setPinned(false);
     }
   }, [initialTask, isOpen, defaultDueAt]);
 
@@ -138,10 +134,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       notes: notes.trim() || undefined,
       listId: initialTask?.listId || INBOX_LIST_ID,
       dueAt: resolvedDue,
-      priority: 'none',
-      pinned,
       recurrence,
-      tags: undefined,
     });
 
     onClose();
@@ -194,24 +187,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               placeholder="Additional details..."
               className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted text-sm focus:outline-none focus:border-tt-blue transition-colors resize-none"
             />
-          </div>
-
-          <div className="flex items-center justify-between py-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-tt-secondary flex items-center gap-1.5">
-              <Pin className="w-3.5 h-3.5" />
-              Pin to Top
-            </span>
-            <button
-              type="button"
-              onClick={() => setPinned((p) => !p)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
-                pinned
-                  ? 'bg-tt-blue text-white border-tt-blue'
-                  : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:text-tt-text'
-              }`}
-            >
-              {pinned ? 'Pinned' : 'Normal'}
-            </button>
           </div>
 
           <div className="pt-2 border-t border-tt-border/80">

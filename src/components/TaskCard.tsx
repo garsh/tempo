@@ -10,7 +10,6 @@ import {
 import {
   Check,
   RefreshCw,
-  Pin,
   Calendar,
   SkipForward,
   Trash2,
@@ -28,7 +27,6 @@ interface TaskCardProps {
   onSelect?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (id: string) => void;
-  onTogglePin?: (id: string) => void;
   /** ⋮ › Show Details: notes preview under the title. */
   showDetails?: boolean;
   /** Long-press drag-to-reorder support. */
@@ -417,9 +415,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
-          {task.pinned && (
-            <Pin className="w-3 h-3 text-tt-pri-med flex-shrink-0 fill-tt-pri-med/40" />
-          )}
           <span
             className={`text-[19px] leading-snug truncate ${
               completed ? 'text-tt-secondary line-through' : 'text-tt-text'

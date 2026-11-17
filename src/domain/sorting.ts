@@ -1,30 +1,14 @@
-import type { Task, TaskPriority } from '../types/task';
-import { PRIORITY_ORDER } from '../types/task';
-import { getDueDeadline, getTaskUrgency } from './recurrence';
-
-const URGENCY_ORDER: Record<string, number> = {
-  overdue: 0,
-  due_today: 1,
-  upcoming: 2,
-  later: 3,
-  none: 4,
-};
-
-function priorityRank(p?: TaskPriority | null): number {
-  return PRIORITY_ORDER[p ?? 'none'] ?? PRIORITY_ORDER.none;
-}
+import type { Task } from '../types/task';
+import { getDueDeadline } from './recurrence';
 
 /**
  * Sort for daily-driver views:
  * 1. Manual sortOrder (when reordered; ordered items precede newly added ones)
- * 2. Pinned first
- * 3. Urgency (overdue → today → upcoming → later → none)
- * 4. Priority (high → medium → low → none)
- * 5. Earlier due deadline first
- * 6. Creation order (oldest / first-added first)
- * 7. Title A–Z
+ * 2. Earlier due deadline first
+ * 3. Creation order (oldest / first-added first)
+ * 4. Title A–Z
  */
-export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Task[] {
+export function sortTasksForDailyView(tasks: Task[], _now: Date = new Date()): Task[] {
   return [...tasks].sort((a, b) => {
     const hasOrderA = a.sortOrder != null;
     const hasOrderB = b.sortOrder != null;
@@ -33,18 +17,6 @@ export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Ta
     } else if (hasOrderA !== hasOrderB) {
       return hasOrderA ? -1 : 1;
     }
-
-    const pinA = a.pinned ? 0 : 1;
-    const pinB = b.pinned ? 0 : 1;
-    if (pinA !== pinB) return pinA - pinB;
-
-    const urgA = URGENCY_ORDER[getTaskUrgency(a.dueAt, now)] ?? 4;
-    const urgB = URGENCY_ORDER[getTaskUrgency(b.dueAt, now)] ?? 4;
-    if (urgA !== urgB) return urgA - urgB;
-
-    const priA = priorityRank(a.priority);
-    const priB = priorityRank(b.priority);
-    if (priA !== priB) return priA - priB;
 
     const dueA = a.dueAt ? getDueDeadline(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
     const dueB = b.dueAt ? getDueDeadline(b.dueAt).getTime() : Number.POSITIVE_INFINITY;

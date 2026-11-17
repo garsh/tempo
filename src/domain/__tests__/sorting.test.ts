@@ -17,14 +17,14 @@ function task(partial: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
 describe('Sorting & search', () => {
   const now = new Date(2026, 9, 5, 12, 0, 0);
 
-  it('sorts pinned, then urgency, then priority', () => {
+  it('sorts earlier due date first, then creation order, then title', () => {
     const tasks = [
-      task({ id: 'a', title: 'Low later', dueAt: '2026-10-20', priority: 'low' }),
-      task({ id: 'b', title: 'High overdue', dueAt: '2026-10-01', priority: 'high' }),
-      task({ id: 'c', title: 'Pinned medium', dueAt: '2026-10-20', priority: 'medium', pinned: true }),
-      task({ id: 'd', title: 'Today low', dueAt: '2026-10-05', priority: 'low' }),
+      task({ id: 'a', title: 'Later A', dueAt: '2026-10-20' }),
+      task({ id: 'b', title: 'Overdue', dueAt: '2026-10-01' }),
+      task({ id: 'c', title: 'Later B', dueAt: '2026-10-20' }),
+      task({ id: 'd', title: 'Today', dueAt: '2026-10-05' }),
     ];
-    expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['c', 'b', 'd', 'a']);
+    expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['b', 'd', 'a', 'c']);
   });
 
   it('keeps untimed same-day tasks in addition order (createdAt ascending)', () => {
@@ -38,23 +38,23 @@ describe('Sorting & search', () => {
 
   it('respects manual sortOrder within a day and places newly added items after ordered ones', () => {
     const tasks = [
-      task({ id: 'a', title: 'First', dueAt: '2026-10-05', priority: 'high', sortOrder: 2000, createdAt: 100 }),
-      task({ id: 'b', title: 'Second', dueAt: '2026-10-05', priority: 'none', sortOrder: 1000, createdAt: 200 }),
-      task({ id: 'c', title: 'Third (new)', dueAt: '2026-10-05', priority: 'high', createdAt: 300 }),
+      task({ id: 'a', title: 'First', dueAt: '2026-10-05', sortOrder: 2000, createdAt: 100 }),
+      task({ id: 'b', title: 'Second', dueAt: '2026-10-05', sortOrder: 1000, createdAt: 200 }),
+      task({ id: 'c', title: 'Third (new)', dueAt: '2026-10-05', createdAt: 300 }),
     ];
     expect(sortTasksForDailyView(tasks, now).map((t) => t.id)).toEqual(['b', 'a', 'c']);
   });
 
-  it('preserves manual sortOrder across earlier-today overdue times and pinned states', () => {
+  it('preserves manual sortOrder across earlier-today overdue times', () => {
     const midDay = new Date(2026, 9, 5, 14, 0, 0);
     const tasks = [
       task({ id: 'morning', title: 'Morning timed', dueAt: '2026-10-05T09:00', sortOrder: 3000 }),
       task({ id: 'untimed', title: 'Untimed today', dueAt: '2026-10-05', sortOrder: 1000 }),
-      task({ id: 'pinned-after', title: 'Pinned moved down', dueAt: '2026-10-05', pinned: true, sortOrder: 2000 }),
+      task({ id: 'afternoon', title: 'Afternoon moved down', dueAt: '2026-10-05T15:00', sortOrder: 2000 }),
     ];
     expect(sortTasksForDailyView(tasks, midDay).map((t) => t.id)).toEqual([
       'untimed',
-      'pinned-after',
+      'afternoon',
       'morning',
     ]);
   });

@@ -305,11 +305,9 @@ export function App() {
     id: string,
     patch: Partial<{
       dueAt: string | null;
-      priority: Task['priority'];
       recurrence: Task['recurrence'];
       notes: string;
       title: string;
-      pinned: boolean;
     }>
   ) => {
     const existing = await db.tasks.get(id);
@@ -320,10 +318,6 @@ export function App() {
       notes: patch.notes ?? existing.notes,
       listId: existing.listId,
       dueAt: patch.dueAt !== undefined ? patch.dueAt : existing.dueAt,
-      priority: patch.priority !== undefined ? patch.priority : existing.priority,
-      pinned: patch.pinned !== undefined ? patch.pinned : existing.pinned,
-      tags: existing.tags,
-      subtasks: existing.subtasks,
       recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
     });
     scheduleSync();
