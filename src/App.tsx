@@ -10,8 +10,6 @@ import {
   saveSavedFilter,
   saveTask,
   softDeleteTask,
-  togglePinTask,
-  toggleSubtask,
   uncompleteTask,
 } from './db/db';
 import type { AppView, SavedFilter, Task, TaskInput } from './types/task';
@@ -29,14 +27,12 @@ import { toggleSelected } from './domain/batch';
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
-import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
 import { ReorderableTaskList } from './components/ReorderableTaskList';
 import { TaskModal } from './components/TaskModal';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
-import { TaskDetailPane } from './components/TaskDetailPane';
 import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { QuickCaptureModal } from './components/QuickCaptureModal';
@@ -75,8 +71,6 @@ function readInitialView(): AppView {
 
 export function App() {
   const [activeView, setActiveView] = useState<AppView>(readInitialView);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedTaskDate, setSelectedTaskDate] = useState<string | null>(null);
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -86,8 +80,6 @@ export function App() {
   const [quickCaptureText, setQuickCaptureText] = useState('');
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [editingFilter, setEditingFilter] = useState<SavedFilter | null>(null);
-
-  const [detailOpenMobile, setDetailOpenMobile] = useState(false);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -177,8 +169,6 @@ export function App() {
       return order !== undefined ? { ...t, sortOrder: order } : t;
     });
   }, [liveTasks, initialTasks, reorderOverride]);
-
-  useDueNotifications(allTasks);
 
   const { status: syncStatus, refreshStatus: refreshSyncStatus, scheduleSync } = useAutoSync();
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
@@ -307,22 +297,6 @@ export function App() {
     };
   }, [activeView, calExpanded]);
 
-  const selectedTask = useMemo(() => {
-    if (selectedTaskId == null) return null;
-    const raw = activeTasks.find((t) => t.id === selectedTaskId);
-    if (!raw) return null;
-    if (raw.recurrence && selectedTaskDate) {
-      return projectTaskForDate(raw, selectedTaskDate);
-    }
-    return raw;
-  }, [activeTasks, selectedTaskId, selectedTaskDate]);
-
-  const selectTask = useCallback((task: Task) => {
-    setSelectedTaskId(task.id);
-    setSelectedTaskDate(task.dueAt ? getDueDatePart(task.dueAt) : null);
-    setDetailOpenMobile(true);
-  }, []);
-
   const openCapture = useCallback(() => {
     setQuickCaptureText('');
     setIsQuickCaptureOpen(true);
@@ -346,24 +320,12 @@ export function App() {
 
   const handleDelete = async (id: string) => {
     await softDeleteTask(id);
-    if (selectedTaskId === id) {
-      setSelectedTaskId(null);
-      setSelectedTaskDate(null);
-      setDetailOpenMobile(false);
-    }
-    scheduleSync();
-  };
-
-  const handleTogglePin = async (id: string) => {
-    await togglePinTask(id);
     scheduleSync();
   };
 
   const handleSave = async (taskData: TaskInput) => {
-    const saved = await saveTask(taskData);
+    await saveTask(taskData);
     setEditingTask(null);
-    setSelectedTaskId(saved.id);
-    setSelectedTaskDate(saved.dueAt ? getDueDatePart(saved.dueAt) : null);
     scheduleSync();
   };
 
@@ -417,11 +379,6 @@ export function App() {
     await handleDelete(taskId);
   };
 
-  const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
-    await toggleSubtask(taskId, subtaskId);
-    scheduleSync();
-  };
-
   const handleSaveFilter = async (filter: {
     id?: string;
     name: string;
@@ -458,10 +415,6 @@ export function App() {
   const batchDelete = () =>
     runBatch(async (ids) => {
       await applyBatchOp(ids, { type: 'delete' });
-      if (selectedTaskId && ids.includes(selectedTaskId)) {
-        setSelectedTaskId(null);
-        setDetailOpenMobile(false);
-      }
     });
 
   useKeyboardShortcuts({
@@ -491,39 +444,9 @@ export function App() {
         exitSelectMode();
         return;
       }
-      if (detailOpenMobile) {
-        setDetailOpenMobile(false);
-        return;
-      }
-      setSelectedTaskId(null);
     },
     onGoCalendarMonth: () => goView('calendar-month'),
     onGoCalendarAgenda: () => goView('calendar-agenda'),
-    onNextTask: () => {
-      if (displayedTasks.length === 0) return;
-      const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
-      const next = displayedTasks[Math.min(idx + 1, displayedTasks.length - 1)] ?? displayedTasks[0];
-      selectTask(next);
-    },
-    onPrevTask: () => {
-      if (displayedTasks.length === 0) return;
-      const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
-      const prev = displayedTasks[Math.max(idx - 1, 0)] ?? displayedTasks[displayedTasks.length - 1];
-      selectTask(prev);
-    },
-    onCompleteSelected: () => {
-      if (selectedTaskId) {
-        const dateStr = selectedTask?.dueAt ? getDueDatePart(selectedTask.dueAt) : undefined;
-        if (selectedTask && isCompleted(selectedTask)) {
-          void handleUncomplete(selectedTaskId, dateStr);
-        } else {
-          void handleComplete(selectedTaskId, dateStr);
-        }
-      }
-    },
-    onEditSelected: () => {
-      if (selectedTask) handleEdit(selectedTask);
-    },
     onOpenHelp: () => setShowShortcutsHelp(true),
   });
 
@@ -555,13 +478,12 @@ export function App() {
           <TaskCard
             key={`${t.id}-${t.dueAt ?? ''}`}
             task={t}
-            selected={t.id === selectedTaskId}
             dense={dense}
             showDetails={prefs.showDetails}
             selectMode={selectMode}
             checked={selectedIds.has(t.id)}
             onToggleCheck={() => setSelectedIds((prev) => toggleSelected(prev, t.id))}
-            onSelect={() => selectTask(t)}
+            onSelect={() => handleEdit(t)}
             onComplete={() => handleComplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
             onUncomplete={() => handleUncomplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
             onEdit={() => handleEdit(t)}
@@ -730,8 +652,7 @@ export function App() {
                 ) : (
                   <CalendarAgendaView
                     tasks={activeTasks}
-                    onSelectTask={selectTask}
-                    selectedTaskId={selectedTaskId}
+                    onSelectTask={handleEdit}
                     selectedDateStr={calSelectedDate}
                     onSelectDate={setCalSelectedDate}
                     onMonthChange={(y, m) => {
@@ -797,44 +718,7 @@ export function App() {
             </div>
           </div>
         </main>
-
-        {/* Desktop Task Detail Pane */}
-        {selectedTask && (
-          <aside className="hidden xl:block w-[380px] shrink-0 border-l border-tt-border bg-tt-surface overflow-y-auto">
-            <TaskDetailPane
-              task={selectedTask}
-              onClose={() => setSelectedTaskId(null)}
-              onComplete={(id) => handleComplete(id, selectedTaskDate ?? undefined)}
-              onUncomplete={(id) => handleUncomplete(id, selectedTaskDate ?? undefined)}
-              onEdit={() => handleEdit(selectedTask)}
-              onDelete={() => handleDelete(selectedTask.id)}
-              onTogglePin={() => handleTogglePin(selectedTask.id)}
-              onToggleSubtask={handleToggleSubtask}
-              onPatch={handlePatchTask}
-            />
-          </aside>
-        )}
       </div>
-
-      {/* Mobile Detail Modal */}
-      {selectedTask && detailOpenMobile && (
-        <div className="xl:hidden fixed inset-0 z-50 flex flex-col bg-tt-bg">
-          <TaskDetailPane
-            task={selectedTask}
-            onClose={() => {
-              setDetailOpenMobile(false);
-              setSelectedTaskId(null);
-            }}
-            onComplete={(id) => handleComplete(id, selectedTaskDate ?? undefined)}
-            onUncomplete={(id) => handleUncomplete(id, selectedTaskDate ?? undefined)}
-            onEdit={() => handleEdit(selectedTask)}
-            onDelete={() => handleDelete(selectedTask.id)}
-            onTogglePin={() => handleTogglePin(selectedTask.id)}
-            onToggleSubtask={handleToggleSubtask}
-            onPatch={handlePatchTask}
-          />
-        </div>
-      )}
 
       {/* FAB */}
       {!selectMode && (
@@ -956,10 +840,7 @@ export function App() {
               {[
                 ['n / c', 'New task (capture)'],
                 ['m / a', 'Calendar month / Agenda'],
-                ['j / k', 'Next / previous task'],
-                ['x', 'Complete selected'],
-                ['e', 'Edit selected'],
-                ['Esc', 'Close panels / deselect'],
+                ['Esc', 'Close modals'],
                 ['?', 'This help'],
               ].map(([key, desc]) => (
                 <li key={key} className="flex items-center justify-between gap-3">

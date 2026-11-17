@@ -37,15 +37,7 @@ import {
 } from '../../sync/autoSync';
 import { setGoogleAccount } from '../../sync/googleAccount';
 import { computeTempoStats } from '../../domain/stats';
-import { formatClockTime } from '../../domain/recurrence';
 import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
-import {
-  getNotificationPermission,
-  isNotificationsEnabled,
-  notificationsSupported,
-  requestNotificationPermission,
-  setNotificationsEnabled,
-} from '../../domain/notifications';
 import {
   ALL_TABS,
   MAX_TABS,
@@ -71,7 +63,6 @@ import {
   HelpIcon,
   ImportIcon,
   IntegrationsIcon,
-  SoundsIcon,
 } from './settingsIcons';
 
 export type SettingsPageId =
@@ -80,7 +71,6 @@ export type SettingsPageId =
   | 'tabbar'
   | 'appearance'
   | 'datetime'
-  | 'notifications'
   | 'general'
   | 'integrations';
 
@@ -92,7 +82,6 @@ const TITLES: Record<SettingsPageId, string> = {
   tabbar: 'Tab Bar',
   appearance: 'Appearance',
   datetime: 'Date & Time',
-  notifications: 'Sounds & Notifications',
   general: 'General',
   integrations: 'Integrations & Import',
 };
@@ -159,9 +148,6 @@ export function SettingsPage(props: SettingsPageProps) {
       break;
     case 'datetime':
       body = <DateTimePage />;
-      break;
-    case 'notifications':
-      body = <NotificationsPage setStatus={setStatus} go={go} />;
       break;
     case 'general':
       body = <GeneralPage {...props} setStatus={setStatus} />;
@@ -237,7 +223,6 @@ function RootPage({ syncStatus, go }: SettingsPageProps & { go: (p: SettingsPage
       <Card>
         <NavRow icon={<AppearanceIcon />} label="Appearance" onClick={() => go('appearance')} />
         <NavRow icon={<DateTimeIcon />} label="Date & Time" onClick={() => go('datetime')} />
-        <NavRow icon={<SoundsIcon />} label="Sounds & Notifications" onClick={() => go('notifications')} />
         <NavRow icon={<GeneralIcon />} label="General" onClick={() => go('general')} />
       </Card>
       <Card>
@@ -606,82 +591,6 @@ function DateTimePage() {
           <RadioRow label="24-hour" sub="17:30" checked={prefs.timeFormat === '24h'} onSelect={() => update({ timeFormat: '24h' })} />
         </div>
       </Card>
-      <SectionLabel>Reminders</SectionLabel>
-      <Card>
-        <ControlRow
-          label="Default reminder time"
-          sub={`Tasks with only a date remind at ${formatClockTime(prefs.defaultReminderTime, prefs.timeFormat)}`}
-        >
-          <input
-            type="time"
-            value={prefs.defaultReminderTime}
-            onChange={(e) => e.target.value && update({ defaultReminderTime: e.target.value })}
-            aria-label="Default reminder time"
-            className="px-2 py-1.5 rounded-lg bg-tt-input text-[15px] text-tt-text outline-none"
-          />
-        </ControlRow>
-      </Card>
-    </>
-  );
-}
-
-/* ─────────────────────── Sounds & Notifications ─────────────────────── */
-
-function NotificationsPage({ setStatus, go }: { setStatus: (s: Status) => void; go: (p: SettingsPageId) => void }) {
-  const [prefs] = usePrefs();
-  const [on, setOn] = useState(() => isNotificationsEnabled());
-  const [permission, setPermission] = useState(() => getNotificationPermission());
-
-  const toggle = async (next: boolean) => {
-    if (!notificationsSupported()) {
-      setStatus({ type: 'error', message: 'Notifications are not supported in this browser.' });
-      return;
-    }
-    if (next) {
-      const perm = await requestNotificationPermission();
-      setPermission(perm);
-      if (perm !== 'granted') {
-        setStatus({ type: 'error', message: 'Notification permission was not granted. Check browser site settings.' });
-        setOn(false);
-        return;
-      }
-      setNotificationsEnabled(true);
-      setOn(true);
-      setStatus({ type: 'success', message: 'Due-task reminders enabled. Installed PWA + service worker improve reliability.' });
-      try {
-        new Notification('Tempo reminders on', {
-          body: 'You will get a notification when a task becomes due while Tempo is open.',
-          icon: '/pwa-192x192.png',
-        });
-      } catch {
-        /* ignore */
-      }
-    } else {
-      setNotificationsEnabled(false);
-      setOn(false);
-      setStatus({ type: 'success', message: 'Reminders disabled.' });
-    }
-  };
-
-  return (
-    <>
-      <Card>
-        <ControlRow icon={<SoundsIcon />} label="Due reminders" sub="Notify when a task becomes due">
-          <Switch checked={on} onChange={(v) => void toggle(v)} label="Due reminders" />
-        </ControlRow>
-        <ControlRow label="Permission">
-          <span className="text-[14px] text-tt-secondary">{permission}</span>
-        </ControlRow>
-        <NavRow
-          label="Default reminder time"
-          value={formatClockTime(prefs.defaultReminderTime, prefs.timeFormat)}
-          onClick={() => go('datetime')}
-        />
-      </Card>
-      <Note>
-        Fires when a due date/time is reached while Tempo is open, on focus, when you come back online, and via the
-        service worker when installed as a PWA.
-      </Note>
     </>
   );
 }

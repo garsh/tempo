@@ -25,24 +25,24 @@ The user's actual workflow consists solely of five operations:
 
 The following table provides an overview of all candidate features to remove, ranked from highest complexity to lowest:
 
-| Rank | Feature | Scope / Files | Estimated LOC | Complexity Level |
-|---|---|---|---|---|
-| **1** | **Non-Calendar Smart Lists & Traditional List Views** | Sidebar, Drawer, Today, Tomorrow, Next 7, Inbox, All, Completed views, empty states | ~1,500 LOC | Critical |
-| **2** | **Lists & Folders Organizational Hierarchy** | `lists` & `folders` tables, drawer sheets, list colors, `listId` dependencies | ~1,100 LOC | High |
-| **3** | **TickTick CSV & Backup Import Subsystem** | `ticktickImport.ts`, `csvParse.ts`, repeat/timezone parsing, import UI | ~950 LOC | High |
-| **4** | **Task Detail Pane & Subtasks / Checklists** | `TaskDetailPane.tsx`, subtask models, subtask CRUD, card previews | ~800 LOC | High |
-| **5** | **Time-of-Day, Due Time Pickers & Push Notifications** | `notifications.ts`, Web Notification API, time pickers, 12h/24h time formatting | ~650 LOC | Moderate-High |
-| **6** | **Natural Language Quick Add & Quick Capture** | `quickCapture.ts`, `QuickAddSheet.tsx`, token regex parsers (`#tag`, `!priority`) | ~580 LOC | Moderate |
-| **7** | **Custom Saved Filters & Query Builder** | `filters.ts`, `SavedFilterModal.tsx`, `savedFilters` table, query evaluator | ~550 LOC | Moderate |
-| **8** | **Swipe Actions & Manual Drag-and-Drop Reordering in Lists** | `SwipeActionButton.tsx`, `ReorderableTaskList.tsx`, `reorder.ts` | ~550 LOC | Moderate |
-| **9** | **Task Grouping & Multi-Criteria Sorting Engine** | `groupSort.ts`, `sorting.ts`, `taskGroups.ts`, `GroupSortSheet.tsx` | ~450 LOC | Moderate |
-| **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate |
-| **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit |
-| **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate |
-| **13** | **Global Keyboard Shortcuts for List Navigation** | `useKeyboardShortcuts.ts`, hotkeys 1–5, modal triggers | ~120 LOC | Low |
-| **14** | **Search View & Search Mode** | Dedicated search view, query filters across titles/notes/tags | ~150 LOC | Low |
-| **15** | **Priority Levels & Urgency Flagging** | `priority` field (`high`, `medium`, `low`), flags, urgency logic | ~250 LOC | Low |
-| **16** | **Tags System** | `tags` string array, tag parsing, tag chips | ~200 LOC | Low |
+| Rank | Feature | Scope / Files | Estimated LOC | Complexity Level | Status |
+|---|---|---|---|---|---|
+| **1** | **Non-Calendar Smart Lists & Traditional List Views** | Sidebar, Drawer, Today, Tomorrow, Next 7, Inbox, All, Completed views, empty states | ~1,500 LOC | Critical | **Completed** |
+| **2** | **Lists & Folders Organizational Hierarchy** | `lists` & `folders` tables, drawer sheets, list colors, `listId` dependencies | ~1,100 LOC | High | **Completed** |
+| **3** | **TickTick CSV & Backup Import Subsystem** | `ticktickImport.ts`, `csvParse.ts`, repeat/timezone parsing, import UI | ~950 LOC | High | **Kept (deferred)** |
+| **4** | **Task Detail Pane & Subtasks / Checklists** | `TaskDetailPane.tsx`, subtask models, subtask CRUD, card previews | ~800 LOC | High | **Completed** |
+| **5** | **Time-of-Day, Due Time Pickers & Push Notifications** | `notifications.ts`, Web Notification API, time pickers, 12h/24h time formatting | ~650 LOC | Moderate-High | **Completed** |
+| **6** | **Natural Language Quick Add & Quick Capture** | `quickCapture.ts`, `QuickAddSheet.tsx`, token regex parsers (`#tag`, `!priority`) | ~580 LOC | Moderate | Proposed |
+| **7** | **Custom Saved Filters & Query Builder** | `filters.ts`, `SavedFilterModal.tsx`, `savedFilters` table, query evaluator | ~550 LOC | Moderate | Proposed |
+| **8** | **Swipe Actions & Manual Drag-and-Drop Reordering in Lists** | `SwipeActionButton.tsx`, `ReorderableTaskList.tsx`, `reorder.ts` | ~550 LOC | Moderate | Proposed |
+| **9** | **Task Grouping & Multi-Criteria Sorting Engine** | `groupSort.ts`, `sorting.ts`, `taskGroups.ts`, `GroupSortSheet.tsx` | ~450 LOC | Moderate | Proposed |
+| **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate | Proposed |
+| **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit | Proposed |
+| **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate | Proposed |
+| **13** | **Global Keyboard Shortcuts for List Navigation** | `useKeyboardShortcuts.ts`, hotkeys 1–5, modal triggers | ~120 LOC | Low | Proposed |
+| **14** | **Search View & Search Mode** | Dedicated search view, query filters across titles/notes/tags | ~150 LOC | Low | Proposed |
+| **15** | **Priority Levels & Urgency Flagging** | `priority` field (`high`, `medium`, `low`), flags, urgency logic | ~250 LOC | Low | Proposed |
+| **16** | **Tags System** | `tags` string array, tag parsing, tag chips | ~200 LOC | Low | Proposed |
 | **17** | **Pinned Tasks** | `pinned` boolean, pin toggle buttons, pinned card badges | ~150 LOC | Low |
 | **18** | **Today Tips & Motivational Banners** | `TodayTipBanner.tsx`, `CalendarTodayTip.tsx`, `LightbulbIcon.tsx` | ~160 LOC | Low |
 | **19** | **Tab Bar Customization & Extraneous Settings** | Tab reordering settings, quick stats summary, sample task loaders | ~200 LOC | Low |
@@ -103,7 +103,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 4. Task Detail Pane & Subtasks / Checklists
+### 4. Task Detail Pane & Subtasks / Checklists [COMPLETED]
 * **Description**: A side-by-side desktop inspector / mobile bottom sheet (`TaskDetailPane.tsx`) allowing inline viewing of task metadata, combined with an interactive subtasks/checklist system (`Subtask[]`).
 * **Files Involved**:
   - `src/components/TaskDetailPane.tsx` (449 LOC)
@@ -119,7 +119,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 5. Time-of-Day, Due Time Pickers & Push Notifications
+### 5. Time-of-Day, Due Time Pickers & Push Notifications [COMPLETED]
 * **Description**: The user creates tasks for *days*, never specifying a *time of day*. Tempo currently contains an entire Web Notification background scheduler, time pickers (`dueTime`, `hasTime`), 12h/24h time display preferences, and time parsing utilities in `dueAt`.
 * **Files Involved**:
   - `src/hooks/useDueNotifications.ts` (92 LOC)

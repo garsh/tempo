@@ -2,25 +2,18 @@ import { useState, useEffect } from 'react';
 import type {
   IntervalUnit,
   RecurrenceType,
-  Subtask,
   Task,
   TaskInput,
-  TaskList,
   Weekday,
 } from '../types/task';
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
-import { combineDueAt, formatDate, splitDueAt } from '../domain/recurrence';
-import { newId } from '../domain/id';
+import { formatDate, getDueDatePart } from '../domain/recurrence';
 import {
   X,
   Sparkles,
   Calendar,
-  Clock,
   RefreshCw,
   Pin,
-  Plus,
-  Trash2,
-  CheckSquare,
 } from 'lucide-react';
 
 interface TaskModalProps {
@@ -28,8 +21,7 @@ interface TaskModalProps {
   onClose: () => void;
   onSave: (task: TaskInput) => void;
   initialTask?: Task | null;
-  lists?: TaskList[];
-  defaultListId?: string;
+  defaultDueAt?: string | null;
 }
 
 const ALL_WEEKDAYS: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
@@ -39,7 +31,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   onClose,
   onSave,
   initialTask,
-  defaultListId = INBOX_LIST_ID,
+  defaultDueAt,
 }) => {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
@@ -53,11 +45,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [endOnDate, setEndOnDate] = useState('');
   const [endAfterCount, setEndAfterCount] = useState('');
   const [dueDate, setDueDate] = useState<string>('');
-  const [dueTime, setDueTime] = useState<string>('');
-  const [hasTime, setHasTime] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
-  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
 
   useEffect(() => {
     if (initialTask) {
@@ -85,13 +73,8 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         setEndOnDate('');
         setEndAfterCount('');
       }
-      const parts = splitDueAt(initialTask.dueAt);
-      setDueDate(parts.date);
-      setDueTime(parts.time || '');
-      setHasTime(!!parts.time);
+      setDueDate(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : '');
       setPinned(!!initialTask.pinned);
-      setSubtasks(initialTask.subtasks ? [...initialTask.subtasks] : []);
-      setNewSubtaskTitle('');
     } else {
       setTitle('');
       setNotes('');
@@ -104,14 +87,10 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setMonthDay(1);
       setEndOnDate('');
       setEndAfterCount('');
-      setDueDate('');
-      setDueTime('');
-      setHasTime(false);
+      setDueDate(defaultDueAt ? getDueDatePart(defaultDueAt) : '');
       setPinned(false);
-      setSubtasks([]);
-      setNewSubtaskTitle('');
     }
-  }, [initialTask, isOpen, defaultListId]);
+  }, [initialTask, isOpen, defaultDueAt]);
 
   if (!isOpen) return null;
 
@@ -119,16 +98,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     setWeekdays((prev) =>
       prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)
     );
-  };
-
-  const addSubtask = () => {
-    const t = newSubtaskTitle.trim();
-    if (!t) return;
-    setSubtasks((prev) => [
-      ...prev,
-      { id: newId(), title: t, completed: false },
-    ]);
-    setNewSubtaskTitle('');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -140,9 +109,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       datePart = formatDate(new Date());
     }
 
-    const resolvedDue = datePart
-      ? combineDueAt(datePart, hasTime ? dueTime || '09:00' : null)
-      : null;
+    const resolvedDue = datePart || null;
 
     let recurrence = null;
     if (isRecurring) {
@@ -169,13 +136,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       id: initialTask?.id,
       title: title.trim(),
       notes: notes.trim() || undefined,
-      listId: initialTask?.listId || defaultListId || INBOX_LIST_ID,
+      listId: initialTask?.listId || INBOX_LIST_ID,
       dueAt: resolvedDue,
       priority: 'none',
       pinned,
       recurrence,
       tags: undefined,
-      subtasks: subtasks.length > 0 ? subtasks : undefined,
     });
 
     onClose();
@@ -204,15 +170,16 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
-              Title *
+              Task Title
             </label>
             <input
               type="text"
               required
+              autoFocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Buy milk, Water plants, Pay rent"
-              className="w-full px-3.5 py-2.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue text-sm"
+              placeholder="What needs to be done?"
+              className="w-full px-3.5 py-2.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted text-sm focus:outline-none focus:border-tt-blue transition-colors"
             />
           </div>
 
@@ -221,183 +188,116 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               Notes (Optional)
             </label>
             <textarea
+              rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              placeholder="Add details..."
-              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted focus:outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue text-sm resize-none"
+              placeholder="Additional details..."
+              className="w-full px-3.5 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted text-sm focus:outline-none focus:border-tt-blue transition-colors resize-none"
             />
           </div>
 
-          {/* Subtasks / check items */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5 flex items-center gap-1">
-              <CheckSquare className="w-3.5 h-3.5 text-tt-success" />
-              Check items
-            </label>
-            <div className="space-y-1.5 mb-2">
-              {subtasks.map((st) => (
-                <div
-                  key={st.id}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-tt-sidebar/50 border border-tt-border"
-                >
-                  <input
-                    type="checkbox"
-                    checked={st.completed}
-                    onChange={() =>
-                      setSubtasks((prev) =>
-                        prev.map((s) =>
-                          s.id === st.id ? { ...s, completed: !s.completed } : s
-                        )
-                      )
-                    }
-                    className="rounded border-tt-border accent-tt-blue"
-                  />
-                  <input
-                    type="text"
-                    value={st.title}
-                    onChange={(e) =>
-                      setSubtasks((prev) =>
-                        prev.map((s) =>
-                          s.id === st.id ? { ...s, title: e.target.value } : s
-                        )
-                      )
-                    }
-                    className={`flex-1 bg-transparent text-xs focus:outline-none ${
-                      st.completed ? 'line-through text-tt-muted' : 'text-tt-text'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setSubtasks((prev) => prev.filter((s) => s.id !== st.id))}
-                    className="p-1 text-tt-muted hover:text-tt-overdue"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newSubtaskTitle}
-                onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addSubtask();
-                  }
-                }}
-                placeholder="Add a check item..."
-                className="flex-1 px-3 py-1.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text placeholder-tt-muted text-xs focus:outline-none focus:border-tt-blue"
-              />
-              <button
-                type="button"
-                onClick={addSubtask}
-                className="px-2.5 py-1.5 bg-tt-sidebar hover:bg-tt-hover text-tt-text rounded-xl"
-              >
-                <Plus className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5 flex items-center gap-1">
-              <Pin className="w-3.5 h-3.5 text-tt-pri-med" />
-              Pin
-            </label>
+          <div className="flex items-center justify-between py-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-tt-secondary flex items-center gap-1.5">
+              <Pin className="w-3.5 h-3.5" />
+              Pin to Top
+            </span>
             <button
               type="button"
               onClick={() => setPinned((p) => !p)}
-              className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
                 pinned
-                  ? 'bg-tt-blue-soft border-tt-blue/50 text-tt-blue'
-                  : 'bg-tt-sidebar/70 border-tt-border/80 text-tt-secondary hover:border-tt-border accent-tt-blue'
+                  ? 'bg-tt-blue text-white border-tt-blue'
+                  : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:text-tt-text'
               }`}
             >
-              {pinned ? 'Pinned to top' : 'Not pinned'}
+              {pinned ? 'Pinned' : 'Normal'}
             </button>
           </div>
 
-          <div className="pt-1">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-2">
+          <div className="pt-2 border-t border-tt-border/80">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-2 flex items-center gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5 text-tt-blue" />
               Task Type
             </label>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setIsRecurring(false)}
-                className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-medium border transition-all ${
                   !isRecurring
-                    ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
-                    : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
+                    ? 'bg-tt-blue text-white border-tt-blue shadow-sm'
+                    : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:bg-tt-hover'
                 }`}
               >
-                <div className="font-semibold text-xs text-tt-text">One-off</div>
+                One-off Task
               </button>
               <button
                 type="button"
                 onClick={() => setIsRecurring(true)}
-                className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-medium border transition-all ${
                   isRecurring
-                    ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
-                    : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
+                    ? 'bg-tt-blue text-white border-tt-blue shadow-sm'
+                    : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:bg-tt-hover'
                 }`}
               >
-                <div className="font-semibold text-xs text-tt-text">Recurring</div>
+                Recurring Routine
               </button>
             </div>
           </div>
 
           {isRecurring && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setRecurrenceType('after_completion')}
-                  className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
-                    recurrenceType === 'after_completion'
-                      ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
-                      : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-xs text-tt-text">
-                    <RefreshCw className="w-3.5 h-3.5 text-tt-blue" />
-                    After Completion
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecurrenceType('fixed_interval')}
-                  className={`flex flex-col text-left p-3 rounded-2xl border transition-all ${
-                    recurrenceType === 'fixed_interval'
-                      ? 'bg-tt-blue-soft/60 border-tt-blue text-tt-blue'
-                      : 'bg-tt-sidebar/40 border-tt-border text-tt-secondary hover:border-tt-border'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-xs text-tt-text">
-                    <Clock className="w-3.5 h-3.5 text-tt-blue" />
-                    Fixed Schedule
-                  </div>
-                </button>
+            <div className="p-4 rounded-2xl bg-tt-sidebar/40 border border-tt-border space-y-4 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div>
+                <label className="block text-xs font-medium text-tt-secondary mb-1.5">
+                  Recurrence Logic
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRecurrenceType('after_completion')}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      recurrenceType === 'after_completion'
+                        ? 'border-tt-blue bg-tt-blue-soft/40 text-tt-blue font-medium'
+                        : 'border-tt-border bg-tt-sidebar text-tt-secondary hover:bg-tt-hover'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">After Completion</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">
+                      Reschedules after each completion
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRecurrenceType('fixed_interval')}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      recurrenceType === 'fixed_interval'
+                        ? 'border-tt-blue bg-tt-blue-soft/40 text-tt-blue font-medium'
+                        : 'border-tt-border bg-tt-sidebar text-tt-secondary hover:bg-tt-hover'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">Fixed Schedule</div>
+                    <div className="text-[10px] opacity-80 mt-0.5">
+                      Repeats strictly on set days
+                    </div>
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
+                  <label className="block text-xs font-medium text-tt-secondary mb-1">
                     Repeat Every
                   </label>
                   <input
                     type="number"
                     min="1"
-                    max="365"
                     value={intervalValue}
-                    onChange={(e) => setIntervalValue(parseInt(e.target.value) || 1)}
-                    className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
+                    onChange={(e) => setIntervalValue(parseInt(e.target.value, 10) || 1)}
+                    className="w-full px-3 py-1.5 bg-tt-sidebar/70 border border-tt-border rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
+                  <label className="block text-xs font-medium text-tt-secondary mb-1">
                     Unit
                   </label>
                   <select
@@ -408,7 +308,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                       if (u !== 'weeks') setWeekdays([]);
                       if (u !== 'months') setUseMonthDay(false);
                     }}
-                    className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
+                    className="w-full px-3 py-1.5 bg-tt-sidebar/70 border border-tt-border rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
                   >
                     <option value="days">Days</option>
                     <option value="weeks">Weeks</option>
@@ -419,82 +319,82 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
               {intervalUnit === 'weeks' && (
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
-                    Weekdays (optional)
+                  <label className="block text-xs font-medium text-tt-secondary mb-1.5">
+                    On Weekdays (Optional)
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {ALL_WEEKDAYS.map((d) => (
-                      <button
-                        key={d}
-                        type="button"
-                        onClick={() => toggleWeekday(d)}
-                        className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${
-                          weekdays.includes(d)
-                            ? 'bg-tt-blue border-tt-blue text-white'
-                            : 'bg-tt-sidebar border-tt-border text-tt-secondary'
-                        }`}
-                      >
-                        {WEEKDAY_LABELS[d]}
-                      </button>
-                    ))}
+                  <div className="flex gap-1.5">
+                    {ALL_WEEKDAYS.map((d) => {
+                      const sel = weekdays.includes(d);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => toggleWeekday(d)}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                            sel
+                              ? 'bg-tt-blue text-white border-tt-blue'
+                              : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:bg-tt-hover'
+                          }`}
+                        >
+                          {WEEKDAY_LABELS[d]}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <p className="text-[11px] text-tt-muted mt-1">
-                    e.g. Mon–Fri for every weekday. Leave empty to keep the same weekday.
-                  </p>
                 </div>
               )}
 
               {intervalUnit === 'months' && (
-                <div>
-                  <label className="inline-flex items-center gap-2 text-xs text-tt-secondary cursor-pointer mb-1.5">
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-2 text-xs text-tt-secondary cursor-pointer">
                     <input
                       type="checkbox"
                       checked={useMonthDay}
                       onChange={(e) => setUseMonthDay(e.target.checked)}
                       className="rounded border-tt-border accent-tt-blue"
                     />
-                    On a specific day of month
+                    On Day of Month
                   </label>
                   {useMonthDay && (
                     <input
                       type="number"
-                      min={1}
-                      max={31}
+                      min="1"
+                      max="31"
                       value={monthDay}
-                      onChange={(e) => setMonthDay(parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
+                      onChange={(e) => setMonthDay(parseInt(e.target.value, 10) || 1)}
+                      className="w-16 px-2 py-1 bg-tt-sidebar/70 border border-tt-border rounded-xl text-tt-text text-xs focus:outline-none focus:border-tt-blue"
                     />
                   )}
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-tt-border/60">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
-                    End on date
+                  <label className="block text-[11px] text-tt-muted mb-1">
+                    End on Date (Optional)
                   </label>
                   <input
                     type="date"
                     value={endOnDate}
                     onChange={(e) => setEndOnDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
+                    className="w-full px-2.5 py-1.5 bg-tt-sidebar/70 border border-tt-border rounded-xl text-tt-text text-xs focus:outline-none focus:border-tt-blue"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-1.5">
-                    End after count
+                  <label className="block text-[11px] text-tt-muted mb-1">
+                    End after occurrences
                   </label>
                   <input
                     type="number"
-                    min={1}
-                    placeholder="e.g. 10"
+                    min="1"
+                    placeholder="Unlimited"
                     value={endAfterCount}
                     onChange={(e) => setEndAfterCount(e.target.value)}
-                    className="w-full px-3 py-2 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm placeholder-tt-muted focus:outline-none focus:border-tt-blue"
+                    className="w-full px-2.5 py-1.5 bg-tt-sidebar/70 border border-tt-border rounded-xl text-tt-text text-xs focus:outline-none focus:border-tt-blue placeholder:text-tt-muted/60"
                   />
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           <div>
@@ -512,38 +412,11 @@ export const TaskModal: React.FC<TaskModalProps> = ({
               {dueDate && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setDueDate('');
-                    setDueTime('');
-                    setHasTime(false);
-                  }}
+                  onClick={() => setDueDate('')}
                   className="px-3 py-2 text-xs text-tt-secondary hover:text-tt-text bg-tt-sidebar rounded-xl"
                 >
                   Clear
                 </button>
-              )}
-            </div>
-            <div className="mt-2 flex items-center gap-3">
-              <label className="inline-flex items-center gap-2 text-xs text-tt-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={hasTime}
-                  disabled={!dueDate}
-                  onChange={(e) => {
-                    setHasTime(e.target.checked);
-                    if (e.target.checked && !dueTime) setDueTime('09:00');
-                  }}
-                  className="rounded border-tt-border accent-tt-blue"
-                />
-                Include time
-              </label>
-              {hasTime && dueDate && (
-                <input
-                  type="time"
-                  value={dueTime || '09:00'}
-                  onChange={(e) => setDueTime(e.target.value)}
-                  className="px-3 py-1.5 bg-tt-sidebar/70 border border-tt-border/80 rounded-xl text-tt-text text-sm focus:outline-none focus:border-tt-blue"
-                />
               )}
             </div>
           </div>

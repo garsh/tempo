@@ -21,7 +21,6 @@ import {
 } from '../domain/recurrence';
 import { planBatch, type BatchOp } from '../domain/batch';
 import { newId } from '../domain/id';
-import { clearFiredForTask } from '../domain/notifications';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { getStoredClientId } from '../sync/googleAuth';
 import { buildSampleData, isSampleId } from './sampleData';
@@ -294,7 +293,6 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
     );
   }
 
-  clearFiredForTask(id);
   await db.tasks.put(updated);
   return updated;
 }

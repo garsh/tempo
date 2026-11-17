@@ -1,28 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import {
-  formatClockTime,
   formatDueLabel,
   getDueDatePart,
   getTaskUrgency,
-  hasDueTime,
   isCompleted,
   isRecurring,
-  subtaskProgress,
-  splitDueAt,
 } from '../domain/recurrence';
 import {
   Check,
   RefreshCw,
-  Bell,
-  ListTree,
   Pin,
   Calendar,
   SkipForward,
   Trash2,
 } from 'lucide-react';
 import { SwipeActionButton } from './SwipeActionButton';
-import { usePrefs, type TimeFormat } from '../prefs/prefs';
 
 interface TaskCardProps {
   task: Task;
@@ -36,8 +29,7 @@ interface TaskCardProps {
   onEdit?: (task: Task) => void;
   onDelete?: (id: string) => void;
   onTogglePin?: (id: string) => void;
-  onToggleSubtask?: (taskId: string, subtaskId: string) => void;
-  /** ⋮ › Show Details: notes + subtask preview under the title. */
+  /** ⋮ › Show Details: notes preview under the title. */
   showDetails?: boolean;
   /** ⋮ › Select: rows toggle selection instead of opening / completing. */
   selectMode?: boolean;
@@ -68,18 +60,14 @@ function dueTextClass(urgency: string): string {
   return 'text-tt-secondary';
 }
 
-function formatRowDue(dueAt: string | null | undefined, timeFormat: TimeFormat): string | null {
+function formatRowDue(dueAt: string | null | undefined): string | null {
   if (!dueAt) return null;
   const urgency = getTaskUrgency(dueAt);
-  if (urgency === 'due_today' && hasDueTime(dueAt)) {
-    const t = splitDueAt(dueAt).time;
-    return t ? formatClockTime(t, timeFormat) : 'Today';
-  }
   if (urgency === 'due_today') return 'Today';
   if (urgency === 'overdue') {
-    return formatDueLabel(dueAt, timeFormat) || 'Overdue';
+    return formatDueLabel(dueAt) || 'Overdue';
   }
-  return formatDueLabel(dueAt, timeFormat);
+  return formatDueLabel(dueAt);
 }
 
 export const TaskCard: React.FC<TaskCardProps> = ({
@@ -111,15 +99,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   isSwipedOpen,
   onSwipeChange,
 }) => {
-  const [{ timeFormat }] = usePrefs();
   const [justCompleted, setJustCompleted] = useState(false);
-
   const completed = isCompleted(task);
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
-  const dueLabel = formatRowDue(task.dueAt, timeFormat);
-  const sub = task.subtasks?.length ? subtaskProgress(task.subtasks) : null;
+  const dueLabel = formatRowDue(task.dueAt);
 
   useEffect(() => {
     if (completed && justCompleted) {
@@ -149,7 +134,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
   const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
   const notesPreview = showDetails ? task.notes?.trim().split('\n').find((l) => l.trim()) : undefined;
-  const subPreview = showDetails ? (task.subtasks ?? []).slice(0, 3) : [];
   const activate = () => (selectMode ? onToggleCheck?.(task.id) : onSelect?.(task));
 
   // --- Swipe-to-reveal gesture logic ---
@@ -469,42 +453,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             {notesPreview}
           </p>
         )}
-        {subPreview.length > 0 && (
-          <ul className="mt-1 space-y-0.5" data-testid="task-subtask-preview">
-            {subPreview.map((st) => (
-              <li key={st.id} className="flex items-center gap-1.5 text-[13px] text-tt-secondary min-w-0">
-                <span
-                  className={`w-[11px] h-[11px] rounded-[3px] border flex-shrink-0 ${
-                    st.completed ? 'bg-tt-muted border-tt-muted' : 'border-tt-muted'
-                  }`}
-                />
-                <span className={`truncate ${st.completed ? 'line-through' : ''}`}>{st.title}</span>
-              </li>
-            ))}
-            {(task.subtasks?.length ?? 0) > 3 && (
-              <li className="text-[12px] text-tt-muted pl-[17px]">+{(task.subtasks?.length ?? 0) - 3} more</li>
-            )}
-          </ul>
-        )}
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px]">
         {recurring && (
           <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
-        )}
-        {sub && (
-          <span
-            className="inline-flex items-center gap-0.5 text-tt-muted"
-            title={`${sub.done}/${sub.total} subtasks`}
-          >
-            <ListTree className="w-3 h-3" />
-            <span className="text-[10px] tabular-nums">
-              {sub.done}/{sub.total}
-            </span>
-          </span>
-        )}
-        {task.dueAt && hasDueTime(task.dueAt) && (
-          <Bell className="w-3 h-3 text-tt-muted hidden sm:block" />
         )}
 
         {dueLabel && (

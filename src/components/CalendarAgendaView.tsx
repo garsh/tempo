@@ -2,13 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { completedTasksOnDate, startOfWeek, tasksDueOnDate } from '../domain/calendar';
 import { shiftWeek } from '../domain/calendarUi';
-import { usePrefs, type TimeFormat } from '../prefs/prefs';
+import { usePrefs } from '../prefs/prefs';
 import {
   formatDate,
-  hasDueTime,
-  formatClockTime,
   isCompleted,
-  splitDueAt,
   isRecurring,
   getNextUncompletedOccurrenceDate,
   getDueDatePart,
@@ -49,12 +46,6 @@ function weekAround(
   return days;
 }
 
-function timeLabel(dueAt: string | null | undefined, timeFormat: TimeFormat): string {
-  if (!dueAt || !hasDueTime(dueAt)) return 'All day';
-  const t = splitDueAt(dueAt).time;
-  return t ? formatClockTime(t, timeFormat) : 'All day';
-}
-
 /**
  * TickTick-like day agenda: week strip + vertical timeline for the selected day.
  */
@@ -68,7 +59,7 @@ export function CalendarAgendaView({
 }: CalendarAgendaViewProps) {
   const todayStr = formatDate(new Date());
   const focus = selectedDateStr || todayStr;
-  const [{ weekStart, timeFormat, showOverdue }] = usePrefs();
+  const [{ weekStart, showOverdue }] = usePrefs();
 
   const stripRef = useRef<HTMLDivElement>(null);
   const justSwipedRef = useRef(false);
@@ -293,10 +284,6 @@ export function CalendarAgendaView({
     const map = new Map<string, Task>();
     for (const t of [...due, ...completedToday]) map.set(t.id, t);
     return [...map.values()].sort((a, b) => {
-      const at = a.dueAt && hasDueTime(a.dueAt) ? a.dueAt : `${focus}T99:99`;
-      const bt = b.dueAt && hasDueTime(b.dueAt) ? b.dueAt : `${focus}T99:99`;
-      const cmp = at.localeCompare(bt);
-      if (cmp !== 0) return cmp;
       const hasOrderA = a.sortOrder != null;
       const hasOrderB = b.sortOrder != null;
       if (hasOrderA && hasOrderB && a.sortOrder !== b.sortOrder) {
@@ -430,7 +417,7 @@ export function CalendarAgendaView({
                   className={`relative w-full flex gap-3 text-left ${selected ? '' : ''}`}
                 >
                   <div className="w-10 shrink-0 text-[11px] text-tt-secondary tabular-nums pt-3 text-right pr-1">
-                    {timeLabel(t.dueAt, timeFormat)}
+                    All day
                   </div>
                   <div
                     className={`mt-3 w-3.5 h-3.5 rounded-full border-2 shrink-0 z-[1] flex items-center justify-center ${
@@ -448,10 +435,6 @@ export function CalendarAgendaView({
                         : 'border-tt-border bg-tt-elevated hover:bg-tt-sidebar/50'
                     } ${done ? 'opacity-60' : ''}`}
                   >
-                    <div className={`text-[12px] font-medium text-tt-blue mb-0.5`}>
-                      {timeLabel(t.dueAt, timeFormat)}
-                      {hasDueTime(t.dueAt || '') ? '' : ''}
-                    </div>
                     <div
                       className={`text-[15px] font-semibold ${
                         done ? 'text-tt-secondary line-through' : 'text-tt-text'

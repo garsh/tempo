@@ -54,6 +54,7 @@ export interface Task {
   priority?: TaskPriority;
   pinned?: boolean;
   tags?: string[];
+  /** @deprecated Subtasks UI has been removed. Field retained for sync schema compatibility. */
   subtasks?: Subtask[];
   recurrence?: RecurrenceRule | null;
   completedAt?: number | null;
