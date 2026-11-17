@@ -127,9 +127,10 @@ export interface SyncData {
 
 export type TaskInput = Omit<
   Task,
-  'id' | 'createdAt' | 'updatedAt' | 'completionHistory' | 'completedAt'
+  'id' | 'createdAt' | 'updatedAt' | 'completionHistory' | 'completedAt' | 'listId'
 > & {
   id?: string;
+  listId?: string;
   completedAt?: number | null;
 };
 
@@ -141,19 +142,4 @@ export type FolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'> & {
   id?: string;
 };
 
-export type SmartView =
-  | 'today'
-  | 'tomorrow'
-  | 'next7'
-  | 'inbox'
-  | 'all'
-  | 'completed'
-  | `list:${string}`;
-
-export type AppView =
-  | SmartView
-  | 'calendar-month'
-  | 'calendar-agenda'
-  /** Search across all tasks (drawer search icon / Search tab). */
-  | 'search'
-  | `filter:${string}`;
+export type AppView = 'calendar-month' | 'calendar-agenda';

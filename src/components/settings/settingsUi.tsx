@@ -1,5 +1,36 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight } from 'lucide-react';
+import type { GoogleAccount } from '../../sync/googleAccount';
+
+export function Avatar({ account, size }: { account: GoogleAccount | null; size: number }) {
+  if (account?.photoUrl) {
+    return (
+      <img
+        src={account.photoUrl}
+        alt=""
+        width={size}
+        height={size}
+        referrerPolicy="no-referrer"
+        className="rounded-full shrink-0 object-cover"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 34 34" aria-hidden className="shrink-0">
+      <defs>
+        <clipPath id="tempo-avatar-clip">
+          <circle cx="17" cy="17" r="17" />
+        </clipPath>
+      </defs>
+      <circle cx="17" cy="17" r="17" fill="#ededed" />
+      <g clipPath="url(#tempo-avatar-clip)" fill="#d6d6d6">
+        <circle cx="17" cy="13.2" r="6" />
+        <ellipse cx="17" cy="31" rx="11.5" ry="8.5" />
+      </g>
+    </svg>
+  );
+}
 
 /** Page header: ← + bold title (TickTick settings). */
 export function SettingsHeader({ title, onBack, backLabel = 'Back' }: { title: string; onBack: () => void; backLabel?: string }) {

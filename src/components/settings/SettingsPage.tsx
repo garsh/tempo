@@ -57,10 +57,9 @@ import {
   type TabId,
 } from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
-import { Avatar } from '../drawer/drawerBits';
 import { summarizeAccount } from '../../sync/accountSummary';
 import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
-import { Card, ControlRow, NavRow, Note, RadioRow, SectionLabel, SettingsHeader } from './settingsUi';
+import { Avatar, Card, ControlRow, NavRow, Note, RadioRow, SectionLabel, SettingsHeader } from './settingsUi';
 import {
   AppearanceIcon,
   CsvIcon,
@@ -103,7 +102,7 @@ interface SettingsPageProps {
   initialPage?: SettingsPageId;
   onClose: () => void;
   tasks: Task[];
-  lists: TaskList[];
+  lists?: TaskList[];
   syncStatus: SyncStatusSnapshot;
   onSyncStatusChange: () => void;
   onShowShortcuts: () => void;
@@ -691,7 +690,7 @@ function NotificationsPage({ setStatus, go }: { setStatus: (s: Status) => void; 
 
 function GeneralPage({
   tasks,
-  lists,
+  lists = [],
   onShowShortcuts,
   setStatus,
 }: SettingsPageProps & { setStatus: (s: Status) => void }) {
@@ -702,23 +701,27 @@ function GeneralPage({
 
   return (
     <>
-      <SectionLabel>New tasks</SectionLabel>
-      <Card>
-        <ControlRow label="Default list" sub="Used outside a specific list">
-          <select
-            value={defaultListValid ? prefs.defaultListId : 'inbox'}
-            onChange={(e) => update({ defaultListId: e.target.value })}
-            aria-label="Default list for new tasks"
-            className="max-w-[45%] px-2 py-1.5 rounded-lg bg-tt-input text-[15px] text-tt-text outline-none"
-          >
-            {lists.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </ControlRow>
-      </Card>
+      {lists.length > 0 && (
+        <>
+          <SectionLabel>New tasks</SectionLabel>
+          <Card>
+            <ControlRow label="Default list" sub="Used outside a specific list">
+              <select
+                value={defaultListValid ? prefs.defaultListId : 'inbox'}
+                onChange={(e) => update({ defaultListId: e.target.value })}
+                aria-label="Default list for new tasks"
+                className="max-w-[45%] px-2 py-1.5 rounded-lg bg-tt-input text-[15px] text-tt-text outline-none"
+              >
+                {lists.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </ControlRow>
+          </Card>
+        </>
+      )}
 
       <SectionLabel>Sample tasks</SectionLabel>
       <Card>
@@ -811,7 +814,7 @@ function FileRow({
 
 function IntegrationsPage({
   tasks,
-  lists,
+  lists = [],
   syncStatus,
   diagnosticsContext,
   setStatus,

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { CalendarDays, CheckSquare, FolderInput, Trash2, X } from 'lucide-react';
 import type { TaskList } from '../../types/task';
 import { formatDate } from '../../domain/recurrence';
-import { listDotColor } from '../../theme/listColors';
 import { ConfirmDialog, Sheet } from '../ui/Sheet';
 
 /** Select-mode header (replaces the title row): ✕ · "N selected" · Select all. */
@@ -35,15 +34,15 @@ export function SelectionHeader({
 
 interface SelectionBarProps {
   count: number;
-  lists: TaskList[];
+  lists?: TaskList[];
   onComplete: () => void;
-  onMove: (listId: string) => void;
+  onMove?: (listId: string) => void;
   onSetDate: (date: string | null) => void;
   onDelete: () => void;
 }
 
 /** Batch action bar shown instead of the tab bar while selecting. */
-export function SelectionBar({ count, lists, onComplete, onMove, onSetDate, onDelete }: SelectionBarProps) {
+export function SelectionBar({ count, lists = [], onComplete, onMove, onSetDate, onDelete }: SelectionBarProps) {
   const [sheet, setSheet] = useState<'move' | 'date' | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [customDate, setCustomDate] = useState('');
@@ -90,17 +89,17 @@ export function SelectionBar({ count, lists, onComplete, onMove, onSetDate, onDe
       </nav>
 
       <Sheet open={sheet === 'move'} onClose={() => setSheet(null)} title="Move to list">
-        {lists.map((l, i) => (
+        {lists.map((l) => (
           <button
             key={l.id}
             type="button"
             onClick={() => {
-              onMove(l.id);
+              onMove?.(l.id);
               setSheet(null);
             }}
             className="w-full flex items-center gap-3 h-[50px] px-5 text-[16px] text-left hover:bg-tt-hover"
           >
-            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: i === 0 ? 'var(--tt-smart-orange)' : listDotColor(i - 1) }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-tt-blue" />
             {l.name}
           </button>
         ))}

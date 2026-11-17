@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from '../sampleData';
-import { filterToday } from '../../domain/smartLists';
+import { formatDate } from '../../domain/recurrence';
 
 describe('buildSampleData', () => {
   const now = new Date(2026, 9, 6, 9, 0);
@@ -15,9 +15,10 @@ describe('buildSampleData', () => {
   });
 
   it('dates sample tasks relative to the given day', () => {
-    const today = filterToday(data.tasks, now).map((t) => t.id);
-    expect(today).toContain('demo-3');
-    expect(data.tasks.find((t) => t.id === 'demo-3')!.dueAt).toBe('2026-10-06T17:30');
+    const todayStr = formatDate(now);
+    const demo3 = data.tasks.find((t) => t.id === 'demo-3');
+    expect(demo3?.dueAt?.startsWith(todayStr)).toBe(true);
+    expect(demo3?.dueAt).toBe('2026-10-06T17:30');
   });
 
   it('references only sample lists or the Inbox', () => {

@@ -12,7 +12,7 @@ interface SavedFilterModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (filter: { id?: string; name: string; match: 'and' | 'or'; criteria: FilterCriteria }) => void;
-  lists: TaskList[];
+  lists?: TaskList[];
   availableTags: string[];
   initial?: SavedFilter | null;
 }
@@ -36,7 +36,7 @@ export function SavedFilterModal({
   isOpen,
   onClose,
   onSave,
-  lists,
+  lists = [],
   availableTags,
   initial,
 }: SavedFilterModalProps) {

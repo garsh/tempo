@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Settings } from 'lucide-react';
 
 const ICON = {
   width: 20,
@@ -53,15 +54,6 @@ function SelectIcon() {
     <svg {...ICON}>
       <path d="M2.8 4.6l1.4 1.4 2.3-2.6M2.8 10.4l1.4 1.4 2.3-2.6M3.2 16h.01" />
       <path d="M9.5 4.8h7.5M9.5 10.6h7.5M5.5 16h11.5" />
-    </svg>
-  );
-}
-
-function SettingsIcon() {
-  return (
-    <svg {...ICON}>
-      <circle cx="10" cy="10" r="3" />
-      <path d="M10 1.5v2.2M10 16.3v2.2M1.5 10h2.2M16.3 10h2.2M4 4l1.6 1.6M14.4 14.4l1.6 1.6M4 16l1.6-1.6M14.4 5.6l1.6-1.6" />
     </svg>
   );
 }
@@ -168,7 +160,7 @@ export function OverflowMenu(props: OverflowMenuProps) {
           Update App
         </button>
         <button type="button" role="menuitem" className={row} onClick={act(props.onSettings)}>
-          <SettingsIcon />
+          <Settings className="w-5 h-5 shrink-0" strokeWidth={1.8} />
           Settings
         </button>
       </div>

@@ -164,7 +164,7 @@ export function countDuplicateOpenTasks(tasks: Task[]): {
 
 export function buildDiagnosticsSummary(
   tasks: Task[],
-  lists: TaskList[],
+  lists: TaskList[] = [],
   extra?: Record<string, unknown>
 ): DiagnosticsSummary {
   let activeTasks = 0;

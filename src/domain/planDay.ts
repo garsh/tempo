@@ -1,6 +1,5 @@
 import type { Task } from '../types/task';
-import { formatDate, getDaysDifference, splitDueAt } from './recurrence';
-import { openTasks } from './smartLists';
+import { formatDate, getDaysDifference, getNextUncompletedOccurrenceDate, projectTaskForDate, splitDueAt } from './recurrence';
 import { sortTasksForDailyView } from './sorting';
 
 export interface PlanDaySuggestions {
@@ -10,6 +9,20 @@ export interface PlanDaySuggestions {
   upcoming: Task[];
   /** Open tasks with no due date (most recently created first). */
   noDate: Task[];
+}
+
+function getOpenTasks(tasks: Task[], now: Date = new Date()): Task[] {
+  const out: Task[] = [];
+  for (const t of tasks) {
+    if (t.deletedAt || t.completedAt) continue;
+    if (t.recurrence) {
+      const nextDate = getNextUncompletedOccurrenceDate(t, now);
+      if (nextDate) out.push(projectTaskForDate(t, nextDate));
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 /**
@@ -23,7 +36,7 @@ export function planDaySuggestions(
 ): PlanDaySuggestions {
   const upcomingDays = opts.upcomingDays ?? 7;
   const noDateLimit = opts.noDateLimit ?? 5;
-  const open = openTasks(tasks);
+  const open = getOpenTasks(tasks, now);
 
   const overdue: Task[] = [];
   const upcoming: Task[] = [];

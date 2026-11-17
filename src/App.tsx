@@ -5,22 +5,16 @@ import {
   completeTask,
   completeTasks,
   db,
-  saveFolder,
-  saveList,
-  saveSavedFilter,
-  saveTask,
   initDatabase,
   reorderTasks,
-  softDeleteFolder,
-  softDeleteList,
-  softDeleteSavedFilter,
+  saveSavedFilter,
+  saveTask,
   softDeleteTask,
   togglePinTask,
   toggleSubtask,
   uncompleteTask,
 } from './db/db';
-import type { AppView, Folder, SavedFilter, Task, TaskInput, TaskList } from './types/task';
-import { INBOX_LIST_ID } from './types/task';
+import type { AppView, SavedFilter, Task, TaskInput } from './types/task';
 import {
   addDays,
   formatDate,
@@ -30,22 +24,11 @@ import {
   isRecurring,
   projectTaskForDate,
 } from './domain/recurrence';
-import {
-  filterByListId,
-  filterInbox,
-  filterNext7Days,
-  filterToday,
-  filterTomorrow,
-  openTasks,
-} from './domain/smartLists';
-import { matchesSearch, matchesTag, sortTasksForDailyView } from './domain/sorting';
-import { groupAndSortTasks, sortTasks } from './domain/groupSort';
+import { sortTasksForDailyView } from './domain/sorting';
 import { toggleSelected } from './domain/batch';
 import { usePrefs } from './prefs/prefs';
-import { getStoredClientId } from './sync/googleAuth';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
-import { applySavedFilter } from './domain/filters';
 import { useDueNotifications } from './hooks/useDueNotifications';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -63,90 +46,27 @@ import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog'
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
 import { getSkipOccurrenceDate } from './domain/recurrence';
 import { InstallPrompt } from './components/InstallPrompt';
-import { IconRail } from './components/shell/IconRail';
-import { SidebarNav } from './components/shell/SidebarNav';
-import { EmptyInboxState } from './components/shell/EmptyInboxState';
-import { EmptyTodayState } from './components/shell/EmptyTodayState';
-import { TodayTipBanner } from './components/shell/TodayTipBanner';
-import { LightbulbIcon } from './components/shell/LightbulbIcon';
-import { PlanDaySheet } from './components/PlanDaySheet';
-import { dueAtMovedToToday } from './domain/planDay';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
-import { QuickAddBar } from './components/shell/QuickAddBar';
-import { MobileDrawer } from './components/drawer/MobileDrawer';
-import { AddListSheet, ItemActionSheet, ManageSmartListsSheet } from './components/drawer/DrawerSheets';
-import { summarizeAccount } from './sync/accountSummary';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import { GroupSortSheet } from './components/menu/GroupSortSheet';
 import { SelectionBar, SelectionHeader } from './components/menu/SelectionBar';
-import { listDotColor } from './theme/listColors';
 import {
-  Plus,
-  Search,
-  Menu,
-  Keyboard,
-  X,
-  MoreVertical,
-  ArrowLeft,
   CalendarRange,
+  Keyboard,
   LayoutList,
+  MoreVertical,
+  Plus,
+  X,
 } from 'lucide-react';
 
-function resolveViewTitle(
-  view: AppView,
-  lists: TaskList[],
-  filters: SavedFilter[] = []
-): string {
-  if (view.startsWith('filter:')) {
-    const id = view.slice(7);
-    return filters.find((f) => f.id === id)?.name ?? 'Saved filter';
-  }
-  return viewTitle(view, lists);
-}
-
-function viewTitle(view: AppView, lists: TaskList[]): string {
-  if (view === 'today') return 'Today';
-  if (view === 'tomorrow') return 'Tomorrow';
-  if (view === 'next7') return 'Next 7 Days';
-  if (view === 'inbox') return 'Inbox';
-  if (view === 'all') return 'All Open';
-  if (view === 'completed') return 'Completed';
-  if (view === 'calendar-month') return 'Calendar';
-  if (view === 'calendar-agenda') return 'Agenda';
-  if (view === 'search') return 'Search';
-  if (view.startsWith('list:')) {
-    const id = view.slice(5);
-    return lists.find((l) => l.id === id)?.name ?? 'List';
-  }
-  if (view.startsWith('filter:')) return 'Saved filter';
-  return 'Tasks';
-}
-
-const EMPTY_SAVED_FILTERS: SavedFilter[] = [];
 const EMPTY_TASKS: Task[] = [];
-const EMPTY_LISTS: TaskList[] = [];
-const EMPTY_FOLDERS: Folder[] = [];
-
 const ACTIVE_VIEW_STORAGE_KEY = 'tempo_active_view';
 
 function readInitialView(): AppView {
   try {
     const raw = localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
-    if (!raw || raw === 'search' || raw === 'board-status' || raw === 'board-list') return 'calendar-month';
-    const fixed = new Set([
-      'today',
-      'tomorrow',
-      'next7',
-      'inbox',
-      'all',
-      'completed',
-      'calendar-month',
-      'calendar-agenda',
-    ]);
-    if (fixed.has(raw) || raw.startsWith('list:') || raw.startsWith('filter:')) {
-      return raw as AppView;
-    }
+    if (raw === 'calendar-agenda') return 'calendar-agenda';
   } catch {
     /* ignore storage access errors */
   }
@@ -155,30 +75,19 @@ function readInitialView(): AppView {
 
 export function App() {
   const [activeView, setActiveView] = useState<AppView>(readInitialView);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTaskDate, setSelectedTaskDate] = useState<string | null>(null);
 
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
-  const [isPlanDayOpen, setIsPlanDayOpen] = useState(false);
-  const closePlanDay = useCallback(() => setIsPlanDayOpen(false), []);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [quickCaptureText, setQuickCaptureText] = useState('');
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [editingFilter, setEditingFilter] = useState<SavedFilter | null>(null);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [detailOpenMobile, setDetailOpenMobile] = useState(false);
-
-  const [newListName, setNewListName] = useState('');
-  const [showNewListInput, setShowNewListInput] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [newListFolderId, setNewListFolderId] = useState('');
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -187,13 +96,13 @@ export function App() {
   const [calExpanded, setCalExpanded] = useState(false);
 
   useEffect(() => {
-    if (activeView === 'search') return;
     try {
       localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView);
     } catch {
       /* ignore storage errors */
     }
   }, [activeView]);
+
   const [calDragProgress, setCalDragProgress] = useState<number | null>(null);
   const calAreaRef = useRef<HTMLDivElement>(null);
   const calScrollRef = useRef<HTMLDivElement>(null);
@@ -205,57 +114,41 @@ export function App() {
     mode: 'pending' | 'drag' | 'scroll';
   } | null>(null);
 
-  const searchRef = useRef<HTMLInputElement>(null);
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
   const [isGroupSortOpen, setIsGroupSortOpen] = useState(false);
-  const [isManageListsOpen, setIsManageListsOpen] = useState(false);
-  const [isAddListOpen, setIsAddListOpen] = useState(false);
-  const [itemAction, setItemAction] = useState<
-    { kind: 'list'; list: TaskList } | { kind: 'folder'; folder: Folder } | null
-  >(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
   const [changeDateTask, setChangeDateTask] = useState<Task | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
     setSelectedIds(new Set());
   }, []);
+
   const openSettings = useCallback((page: SettingsPageId = 'root') => {
     setSettingsPage(page);
     setIsSettingsModalOpen(true);
-    setSidebarOpen(false);
   }, []);
 
   const [initialTasks, setInitialTasks] = useState<Task[] | null>(null);
-  const [reorderOverride, setReorderOverride] = useState<Map<string, number> | null>(null);
+  const [reorderOverride] = useState<Map<string, number> | null>(null);
 
   useEffect(() => {
     initDiagnostics();
     void (async () => {
       try {
         await initDatabase();
-        const [idbTasks, idbLists] = await Promise.all([
-          db.tasks.toArray(),
-          db.lists.toArray(),
-        ]);
+        const idbTasks = await db.tasks.toArray();
         setInitialTasks(idbTasks);
-        const listSummary = idbLists
-          .map((l) => `${l.name}${l.deletedAt ? '(del)' : ''}`)
-          .join(',');
-        recordDiagEvent(
-          'db_init',
-          `idbTasks=${idbTasks.length} idbLists=${idbLists.length} [${listSummary}]`
-        );
+        recordDiagEvent('db_init', `idbTasks=${idbTasks.length}`);
       } catch (err) {
-        recordDiagEvent(
-          'db_init_error',
-          err instanceof Error ? err.message : String(err)
-        );
+        recordDiagEvent('db_init_error', err instanceof Error ? err.message : String(err));
       }
     })();
   }, []);
@@ -270,7 +163,6 @@ export function App() {
       setQuickCaptureText(combined);
       setIsQuickCaptureOpen(true);
     }
-    // Clean share params without reload
     const url = new URL(window.location.href);
     ['share', 'text', 'title', 'url'].forEach((k) => url.searchParams.delete(k));
     window.history.replaceState({}, '', url.pathname + url.search);
@@ -285,135 +177,34 @@ export function App() {
       return order !== undefined ? { ...t, sortOrder: order } : t;
     });
   }, [liveTasks, initialTasks, reorderOverride]);
-  const allLists = useLiveQuery(() => db.lists.toArray(), []) ?? EMPTY_LISTS;
-  const allFolders = useLiveQuery(() => db.folders.toArray(), []) ?? EMPTY_FOLDERS;
-  const allSavedFilters = useLiveQuery(() => db.savedFilters.toArray(), []) ?? EMPTY_SAVED_FILTERS;
 
   useDueNotifications(allTasks);
 
-  const { status: syncStatus, syncNow, scheduleSync, refreshStatus: refreshSyncStatus } = useAutoSync();
-  const activeLists = [...allLists]
-    .filter((l) => !l.deletedAt)
-    .sort((a, b) => {
-      if (a.id === INBOX_LIST_ID) return -1;
-      if (b.id === INBOX_LIST_ID) return 1;
-      return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name);
-    });
-
-  const listNameById = new Map(activeLists.map((l) => [l.id, l.name]));
-  const userLists = activeLists.filter((l) => l.id !== INBOX_LIST_ID);
-  const activeFolders = [...allFolders]
-    .filter((f) => !f.deletedAt)
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-  const unfiledLists = userLists.filter((l) => !l.folderId);
-  const activeSavedFilters = [...allSavedFilters]
-    .filter((f) => !f.deletedAt)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
+  const { status: syncStatus, refreshStatus: refreshSyncStatus, scheduleSync } = useAutoSync();
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
-  const open = useMemo(() => openTasks(activeTasks), [activeTasks]);
-  const completedOneOffs = useMemo(() => activeTasks.filter((t) => isCompleted(t)), [activeTasks]);
 
-  const todayCount = useMemo(() => filterToday(activeTasks).length, [activeTasks]);
-  const tomorrowCount = useMemo(() => filterTomorrow(activeTasks).length, [activeTasks]);
-  const next7Count = useMemo(() => filterNext7Days(activeTasks).length, [activeTasks]);
-  const inboxCount = useMemo(() => filterInbox(activeTasks).length, [activeTasks]);
-  /**
-   * TickTick new-install empty Inbox (mobile): title row + illustration + FAB + tabs only.
-   * Layout only — colors always come from the theme variables.
-   */
-  const emptyInbox = activeView === 'inbox' && inboxCount === 0;
-
-  const allTags = Array.from(new Set(open.flatMap((t) => t.tags || []))).filter(Boolean);
-
-  const isCalendar =
-    activeView === 'calendar-month' || activeView === 'calendar-agenda';
-
-  const baseForView = useMemo((): Task[] => {
-    const withTodayCompleted = (openList: Task[], listId?: string): Task[] => {
-      if (prefs.hideCompleted) return openList;
-      const todayStr = formatDate(new Date());
-      const doneToday = completedTasksOnDate(activeTasks, todayStr).filter(
-        (t) => !listId || t.listId === listId,
-      );
-      const seen = new Set(openList.map((t) => `${t.id}:${t.dueAt ?? ''}`));
-      return [...openList, ...doneToday.filter((t) => !seen.has(`${t.id}:${t.dueAt ?? ''}`))];
-    };
-
-    switch (activeView) {
-      case 'today':
-        return withTodayCompleted(filterToday(activeTasks));
-      case 'tomorrow':
-        return filterTomorrow(activeTasks);
-      case 'next7':
-        return filterNext7Days(activeTasks);
-      case 'inbox':
-        return withTodayCompleted(filterInbox(activeTasks), INBOX_LIST_ID);
-      case 'all':
-        return withTodayCompleted(open);
-      case 'completed':
-        return [...completedOneOffs].sort(
-          (a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)
-        );
-      case 'calendar-month':
-      case 'calendar-agenda':
-        return open;
-      case 'search':
-        return activeTasks;
-      default:
-        if (activeView.startsWith('list:')) {
-          const listId = activeView.slice(5);
-          return withTodayCompleted(filterByListId(activeTasks, listId), listId);
-        }
-        if (activeView.startsWith('filter:')) {
-          const fid = activeView.slice(7);
-          const sf = allSavedFilters.find((f) => f.id === fid && !f.deletedAt);
-          if (!sf) return open;
-          return applySavedFilter(activeTasks, sf);
-        }
-        return open;
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of activeTasks) {
+      if (t.tags) for (const tag of t.tags) set.add(tag);
     }
-  }, [activeView, activeTasks, open, completedOneOffs, allSavedFilters, prefs.hideCompleted]);
+    return Array.from(set).sort();
+  }, [activeTasks]);
 
   const displayedTasks = useMemo(() => {
-    if (isCalendar && activeView === 'calendar-month' && calSelectedDate) {
-      let list = tasksDueOnDate(activeTasks, calSelectedDate);
-      list = list.filter((t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag));
-      return sortTasksForDailyView(list);
+    if (activeView === 'calendar-month' && calSelectedDate) {
+      return sortTasksForDailyView(tasksDueOnDate(activeTasks, calSelectedDate));
     }
-
-    if (activeView === 'search' && !searchQuery.trim()) return [];
-    let list = baseForView.filter(
-      (t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag)
-    );
-    if (activeView !== 'completed' && !isCalendar) {
-      list = sortTasks(list, prefs.sortBy);
-    }
-    if (activeView === 'calendar-agenda') {
-      return sortTasksForDailyView(list);
-    }
-    return list;
-  }, [
-    baseForView,
-    searchQuery,
-    selectedTag,
-    activeView,
-    isCalendar,
-    calSelectedDate,
-    activeTasks,
-    prefs.sortBy,
-  ]);
+    return [];
+  }, [activeView, calSelectedDate, activeTasks]);
 
   const calCompletedTasks = useMemo(() => {
-    if (!isCalendar || activeView !== 'calendar-month' || !calSelectedDate) return [];
-    const list = completedTasksOnDate(activeTasks, calSelectedDate).filter(
-      (t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag)
-    );
-    return sortTasksForDailyView(list);
-  }, [isCalendar, activeView, calSelectedDate, activeTasks, searchQuery, selectedTag]);
+    if (activeView !== 'calendar-month' || !calSelectedDate) return [];
+    return sortTasksForDailyView(completedTasksOnDate(activeTasks, calSelectedDate));
+  }, [activeView, calSelectedDate, activeTasks]);
 
   const calOverdueTasks = useMemo(() => {
-    if (!isCalendar || activeView !== 'calendar-month' || !prefs.showOverdue) return [];
+    if (activeView !== 'calendar-month' || !prefs.showOverdue) return [];
     const todayStr = formatDate(new Date());
     const overdue: Task[] = [];
     for (const t of activeTasks) {
@@ -428,11 +219,8 @@ export function App() {
       }
     }
     const displayedIds = new Set(displayedTasks.map((t) => t.id));
-    const filtered = overdue
-      .filter((t) => !displayedIds.has(t.id))
-      .filter((t) => matchesSearch(t, searchQuery) && matchesTag(t, selectedTag));
-    return sortTasksForDailyView(filtered);
-  }, [isCalendar, activeView, prefs.showOverdue, activeTasks, displayedTasks, searchQuery, selectedTag]);
+    return sortTasksForDailyView(overdue.filter((t) => !displayedIds.has(t.id)));
+  }, [activeView, prefs.showOverdue, activeTasks, displayedTasks]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
     const todayStr = formatDate(new Date());
@@ -629,41 +417,6 @@ export function App() {
     await handleDelete(taskId);
   };
 
-  const handleCreateList = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = newListName.trim();
-    if (!name) return;
-    const list = await saveList({ name, folderId: newListFolderId || null });
-    setNewListName('');
-    setNewListFolderId('');
-    setShowNewListInput(false);
-    setActiveView(`list:${list.id}`);
-    setSidebarOpen(false);
-    scheduleSync();
-  };
-
-  const handleCreateFolder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const name = newFolderName.trim();
-    if (!name) return;
-    await saveFolder({ name });
-    setNewFolderName('');
-    setShowNewFolderInput(false);
-    scheduleSync();
-  };
-
-  const handleDeleteList = async (list: TaskList) => {
-    if (list.id === INBOX_LIST_ID) return;
-    await softDeleteList(list.id);
-    if (activeView === `list:${list.id}`) setActiveView('today');
-    scheduleSync();
-  };
-
-  const handleDeleteFolder = async (folder: Folder) => {
-    await softDeleteFolder(folder.id);
-    scheduleSync();
-  };
-
   const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
     await toggleSubtask(taskId, subtaskId);
     scheduleSync();
@@ -675,31 +428,13 @@ export function App() {
     match: 'and' | 'or';
     criteria: SavedFilter['criteria'];
   }) => {
-    const saved = await saveSavedFilter(filter);
-    setActiveView(`filter:${saved.id}`);
-    scheduleSync();
-  };
-
-  const handleDeleteFilter = async (filter: SavedFilter) => {
-    await softDeleteSavedFilter(filter.id);
-    if (activeView === `filter:${filter.id}`) setActiveView('today');
+    await saveSavedFilter(filter);
     scheduleSync();
   };
 
   const goView = useCallback((view: AppView) => {
-    setActiveView((prev) => {
-      // Mobile has no search field outside the Search view — don't leave a hidden filter on.
-      if (prev === 'search' && view !== 'search') setSearchQuery('');
-      return view;
-    });
-    setSidebarOpen(false);
+    setActiveView(view);
     setOverflowAnchor(null);
-  }, []);
-
-  const openSearch = useCallback(() => {
-    setSearchQuery('');
-    setActiveView('search');
-    setSidebarOpen(false);
   }, []);
 
   const selectableIds = () => displayedTasks.map((t) => t.id);
@@ -712,12 +447,13 @@ export function App() {
   };
   const batchComplete = () =>
     runBatch((ids) =>
-      completeTasks(ids.filter((id) => {
-        const t = activeTasks.find((x) => x.id === id);
-        return t && !isCompleted(t);
-      }))
+      completeTasks(
+        ids.filter((id) => {
+          const t = activeTasks.find((x) => x.id === id);
+          return t && !isCompleted(t);
+        })
+      )
     );
-  const batchMove = (listId: string) => runBatch((ids) => applyBatchOp(ids, { type: 'move', listId }));
   const batchSetDate = (date: string | null) => runBatch((ids) => applyBatchOp(ids, { type: 'setDate', date }));
   const batchDelete = () =>
     runBatch(async (ids) => {
@@ -728,19 +464,8 @@ export function App() {
       }
     });
 
-  const createListFromSheet = async (name: string, folderId: string | null) => {
-    const list = await saveList({ name, folderId });
-    goView(`list:${list.id}`);
-    scheduleSync();
-  };
-  const createFolderFromSheet = async (name: string) => {
-    await saveFolder({ name });
-    scheduleSync();
-  };
-
   useKeyboardShortcuts({
     onCapture: openCapture,
-    onSearchFocus: () => searchRef.current?.focus(),
     onEscape: () => {
       if (showShortcutsHelp) {
         setShowShortcutsHelp(false);
@@ -770,19 +495,10 @@ export function App() {
         setDetailOpenMobile(false);
         return;
       }
-      if (sidebarOpen) {
-        setSidebarOpen(false);
-        return;
-      }
       setSelectedTaskId(null);
     },
-    onGoToday: () => goView('today'),
-    onGoTomorrow: () => goView('tomorrow'),
-    onGoNext7: () => goView('next7'),
-    onGoInbox: () => goView('inbox'),
     onGoCalendarMonth: () => goView('calendar-month'),
     onGoCalendarAgenda: () => goView('calendar-agenda'),
-    onToggleSidebar: () => setSidebarOpen((v) => !v),
     onNextTask: () => {
       if (displayedTasks.length === 0) return;
       const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
@@ -792,8 +508,7 @@ export function App() {
     onPrevTask: () => {
       if (displayedTasks.length === 0) return;
       const idx = displayedTasks.findIndex((t) => t.id === selectedTaskId);
-      const prev =
-        displayedTasks[Math.max(idx - 1, 0)] ?? displayedTasks[displayedTasks.length - 1];
+      const prev = displayedTasks[Math.max(idx - 1, 0)] ?? displayedTasks[displayedTasks.length - 1];
       selectTask(prev);
     },
     onCompleteSelected: () => {
@@ -812,53 +527,6 @@ export function App() {
     onOpenHelp: () => setShowShortcutsHelp(true),
   });
 
-
-
-  // Settings › General › Default list (falls back to Inbox if that list is gone).
-  const prefDefaultList = activeLists.some((l) => l.id === prefs.defaultListId)
-    ? prefs.defaultListId
-    : INBOX_LIST_ID;
-  const defaultListForNew =
-    activeView === 'inbox'
-      ? INBOX_LIST_ID
-      : activeView.startsWith('list:')
-        ? activeView.slice(5)
-        : prefDefaultList;
-
-  const showListNameOnCards =
-    activeView === 'today' ||
-    activeView === 'tomorrow' ||
-    activeView === 'next7' ||
-    activeView === 'all' ||
-    activeView === 'completed' ||
-    isCalendar ||
-    activeView === 'search' ||
-    activeView.startsWith('filter:');
-
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const listColorIndex = new Map(userLists.map((l, i) => [l.id, i]));
-  const listColor = (id: string) =>
-    id === INBOX_LIST_ID ? 'var(--tt-smart-orange)' : listDotColor(listColorIndex.get(id) ?? 0);
-  // ⋮ › Group & Sort + Hide Completed
-  const taskGroups = useMemo(() => {
-    if (isCalendar || activeView === 'completed') return [];
-    const completedCapable =
-      activeView === 'today' ||
-      activeView === 'inbox' ||
-      activeView === 'all' ||
-      activeView === 'search' ||
-      activeView.startsWith('list:');
-    return groupAndSortTasks(displayedTasks, {
-      groupBy: prefs.groupBy,
-      sortBy: prefs.sortBy,
-      includeCompleted: completedCapable && !prefs.hideCompleted,
-      lists: activeLists,
-      listColor,
-    });
-    // listColor / activeLists derive from allLists each render
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayedTasks, isCalendar, activeView, prefs.groupBy, prefs.sortBy, prefs.hideCompleted, allLists]);
-
   const toggleGroup = (id: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -867,66 +535,11 @@ export function App() {
     month: 'long',
     ...(calYear !== now.getFullYear() ? { year: 'numeric' } : {}),
   });
-  const viewTitleText = isCalendar
-    ? calHeaderTitle
-    : resolveViewTitle(activeView, activeLists, activeSavedFilters);
+  const viewTitleText = activeView === 'calendar-month' ? calHeaderTitle : 'Agenda';
 
-
-  /** TickTick empty Today: same bare chrome as empty Inbox, plus tip banner + lightbulb. */
-  const emptyToday = activeView === 'today' && todayCount === 0;
-  const emptyState = emptyInbox || emptyToday;
-
-  const moveTaskToToday = (task: Task) =>
-    void handlePatchTask(task.id, { dueAt: dueAtMovedToToday(task.dueAt) });
-
-  const sidebar = (
-    <SidebarNav
-      activeView={activeView}
-      todayCount={todayCount}
-      tomorrowCount={tomorrowCount}
-      next7Count={next7Count}
-      inboxCount={inboxCount}
-      openCount={open.length}
-      completedCount={completedOneOffs.length}
-      activeFolders={activeFolders}
-      unfiledLists={unfiledLists}
-      userLists={userLists}
-      activeSavedFilters={activeSavedFilters}
-      allTags={allTags}
-      selectedTag={selectedTag}
-      showNewListInput={showNewListInput}
-      showNewFolderInput={showNewFolderInput}
-      newListName={newListName}
-      newFolderName={newFolderName}
-      newListFolderId={newListFolderId}
-      onGo={goView}
-      onSelectTag={setSelectedTag}
-      onNewList={handleCreateList}
-      onNewFolder={handleCreateFolder}
-      onDeleteList={handleDeleteList}
-      onDeleteFolder={handleDeleteFolder}
-      onDeleteFilter={handleDeleteFilter}
-      setShowNewListInput={setShowNewListInput}
-      setShowNewFolderInput={setShowNewFolderInput}
-      setNewListName={setNewListName}
-      setNewFolderName={setNewFolderName}
-      setNewListFolderId={setNewListFolderId}
-      onOpenFilterModal={() => {
-        setEditingFilter(null);
-        setIsFilterModalOpen(true);
-      }}
-      onEditFilter={(f) => {
-        setEditingFilter(f);
-        setIsFilterModalOpen(true);
-      }}
-      smartLists={prefs.smartLists}
-      onManageSmartLists={() => setIsManageListsOpen(true)}
-    />
-  );
-
-  const accountSummary = summarizeAccount(syncStatus.account, syncStatus, !!getStoredClientId());
-  const openOverflow = (e: React.MouseEvent<HTMLElement>) =>
+  const openOverflow = (e: React.MouseEvent<HTMLButtonElement>) => {
     setOverflowAnchor(e.currentTarget.getBoundingClientRect());
+  };
 
   const renderTaskRows = (tasks: Task[], dense: boolean, reorderEnabled = false) => {
     const canReorder = reorderEnabled && !selectMode;
@@ -934,48 +547,30 @@ export function App() {
       <ReorderableTaskList
         tasks={tasks}
         enabled={canReorder}
-        onReorder={(ids) => {
-          const orderMap = new Map(ids.map((id, idx) => [id, (idx + 1) * 1000]));
-          setReorderOverride(orderMap);
-          void reorderTasks(ids)
-            .then(() => {
-              setReorderOverride(null);
-              scheduleSync(3000);
-            })
-            .catch(() => {
-              setReorderOverride(null);
-            });
+        onReorder={(taskIds) => {
+          void reorderTasks(taskIds);
+          scheduleSync();
         }}
-        onDragActiveChange={(active) => {
-          if (active) calGestureRef.current = null;
-        }}
-        renderRow={(task, dragProps) => (
+        renderRow={(t, dragProps) => (
           <TaskCard
-            key={task.dueAt ? `${task.id}:${task.dueAt}` : task.id}
-            task={task}
-            listName={showListNameOnCards ? listNameById.get(task.listId) : undefined}
-            showListName={showListNameOnCards}
-            selected={selectedTaskId === task.id}
+            key={`${t.id}-${t.dueAt ?? ''}`}
+            task={t}
+            selected={t.id === selectedTaskId}
             dense={dense}
             showDetails={prefs.showDetails}
             selectMode={selectMode}
-            checked={selectedIds.has(task.id)}
-            onToggleCheck={(id) => setSelectedIds((prev) => toggleSelected(prev, id))}
-            onComplete={handleComplete}
-            onUncomplete={handleUncomplete}
-            onSelect={selectTask}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onTogglePin={handleTogglePin}
-            onToggleSubtask={handleToggleSubtask}
-            onRequestChangeDate={(t) => setChangeDateTask(t)}
-            onRequestSkipOccurrence={(t) => setSkipOccurrenceTask(t)}
-            onRequestDelete={(t) => setDeleteConfirmTask(t)}
-            isSwipedOpen={swipedTaskId === task.id}
-            onSwipeChange={(id, open) => {
-              setSwipedTaskId(open ? id : null);
-            }}
-            reorderEnabled={canReorder}
+            checked={selectedIds.has(t.id)}
+            onToggleCheck={() => setSelectedIds((prev) => toggleSelected(prev, t.id))}
+            onSelect={() => selectTask(t)}
+            onComplete={() => handleComplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
+            onUncomplete={() => handleUncomplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
+            onEdit={() => handleEdit(t)}
+            onDelete={() => handleDelete(t.id)}
+            onRequestChangeDate={() => setChangeDateTask(t)}
+            onRequestSkipOccurrence={() => setSkipOccurrenceTask(t)}
+            onRequestDelete={() => setDeleteConfirmTask(t)}
+            isSwipedOpen={swipedTaskId === t.id}
+            onSwipeChange={(open) => setSwipedTaskId(open ? t.id : null)}
             {...dragProps}
           />
         )}
@@ -984,548 +579,291 @@ export function App() {
   };
 
   return (
-    <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex overflow-hidden">
-      <IconRail
-        activeView={activeView}
-        syncPhase={syncStatus.phase}
-        onTasks={() => goView('today')}
-        onCalendar={() => goView('calendar-month')}
-        onSearch={() => searchRef.current?.focus()}
-        onSync={() => void syncNow(true)}
-        onSettings={() => openSettings('root')}
-      />
-
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-[232px] shrink-0 flex-col border-r border-tt-border">
-        {sidebar}
-      </aside>
-
-      {/* Mobile drawer (TickTick navy) */}
-      <MobileDrawer
-        open={sidebarOpen}
-        activeView={activeView}
-        account={syncStatus.account}
-        summary={accountSummary}
-        smartLists={prefs.smartLists}
-        counts={{
-          today: todayCount,
-          tomorrow: tomorrowCount,
-          next7: next7Count,
-          inbox: inboxCount,
-          all: open.length,
-          completed: completedOneOffs.length,
-        }}
-        folders={activeFolders}
-        userLists={userLists}
-        filters={activeSavedFilters}
-        tags={allTags}
-        selectedTag={selectedTag}
-        onClose={() => setSidebarOpen(false)}
-        onGo={goView}
-        onSelectTag={(tag) => {
-          setSelectedTag(tag);
-          setSidebarOpen(false);
-        }}
-        onSearch={openSearch}
-        onSettings={() => openSettings('root')}
-        onAccount={() => openSettings('account')}
-        onAdd={() => setIsAddListOpen(true)}
-        onManage={() => setIsManageListsOpen(true)}
-        onListMenu={(list) => setItemAction({ kind: 'list', list })}
-        onFolderMenu={(folder) => setItemAction({ kind: 'folder', folder })}
-        onEditFilter={(f) => {
-          setEditingFilter(f);
-          setIsFilterModalOpen(true);
-        }}
-      />
-
-      <div
-        className="flex-1 flex flex-col min-w-0 min-h-0 bg-tt-bg xl:bg-tt-surface"
-        data-tempo-empty-inbox-view={emptyInbox ? '1' : '0'}
-        data-tempo-empty-today-view={emptyToday ? '1' : '0'}
-      >
-        {/* Mobile top bar — TickTick: hamburger | title | (Today: lightbulb) | ⋮ */}
-        {selectMode ? (
-          <div className="xl:hidden shrink-0 bg-tt-bg">
-            <SelectionHeader
-              count={selectedIds.size}
-              total={displayedTasks.length}
-              onExit={exitSelectMode}
-              onSelectAll={() =>
-                setSelectedIds((prev) =>
-                  prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
-                )
-              }
-            />
+    <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex flex-col overflow-hidden">
+      {/* Header */}
+      {selectMode ? (
+        <div className="shrink-0">
+          <SelectionHeader
+            count={selectedIds.size}
+            total={displayedTasks.length}
+            onExit={exitSelectMode}
+            onSelectAll={() =>
+              setSelectedIds((prev) =>
+                prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
+              )
+            }
+          />
+        </div>
+      ) : (
+        <header className="shrink-0 flex items-center justify-between h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (activeView === 'calendar-month') setCalExpanded((prev) => !prev);
+              }}
+              className="text-left text-[22px] sm:text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
+              title={activeView === 'calendar-month' ? 'Click to expand/collapse month' : undefined}
+            >
+              {viewTitleText}
+            </button>
           </div>
-        ) : activeView === 'search' ? (
-          <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-3 h-16 bg-tt-bg text-tt-text">
+
+          <div className="flex items-center gap-1 sm:gap-2">
+            {/* Toggle Month / Agenda View */}
             <button
               type="button"
-              className="w-11 h-11 flex items-center justify-center text-tt-text"
-              onClick={() => goView(emptyInbox ? 'inbox' : 'today')}
-              aria-label="Close search"
+              className="w-10 h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors"
+              onClick={() =>
+                goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
+              }
+              title={activeView === 'calendar-month' ? 'Switch to Agenda view' : 'Switch to Month view'}
+              aria-label={activeView === 'calendar-month' ? 'Switch to Agenda view' : 'Switch to Month view'}
             >
-              <ArrowLeft className="w-6 h-6" strokeWidth={1.9} />
+              {activeView === 'calendar-month' ? (
+                <CalendarRange className="w-5 h-5 text-tt-secondary" strokeWidth={1.9} />
+              ) : (
+                <LayoutList className="w-5 h-5 text-tt-secondary" strokeWidth={1.9} />
+              )}
             </button>
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
-              <input
-                autoFocus
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search tasks"
-                aria-label="Search tasks"
-                className="w-full h-10 pl-9 pr-3 rounded-xl bg-tt-input text-[15px] outline-none focus:ring-1 focus:ring-tt-blue placeholder:text-tt-muted"
-              />
-            </div>
-          </header>
-        ) : (
-          <header className="xl:hidden shrink-0 flex items-center gap-1 pl-[6px] pr-1 h-16 bg-tt-bg text-tt-text">
+
+            {/* More / Overflow */}
             <button
               type="button"
-              className="w-11 h-11 flex items-center justify-center text-tt-text"
-              onClick={() => setSidebarOpen(true)}
-              title="Menu"
-              aria-label="Menu"
-            >
-              <Menu className="w-6 h-6" strokeWidth={1.75} />
-            </button>
-            {isCalendar ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeView === 'calendar-month') setCalExpanded((prev) => !prev);
-                }}
-                className="flex-1 min-w-0 pl-3 text-left text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text"
-              >
-                {viewTitleText}
-              </button>
-            ) : (
-              <h1 className="flex-1 min-w-0 ml-[2px] text-[21px] font-bold tracking-[-0.01em] truncate text-tt-text">
-                {viewTitleText}
-              </h1>
-            )}
-            {isCalendar && (
-              <button
-                type="button"
-                className="w-11 h-11 flex items-center justify-center text-tt-text"
-                onClick={() =>
-                  goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
-                }
-                title={activeView === 'calendar-month' ? 'Agenda view' : 'List view'}
-                aria-label={activeView === 'calendar-month' ? 'Switch to agenda view' : 'Switch to list view'}
-              >
-                {activeView === 'calendar-month' ? (
-                  <CalendarRange className="w-5 h-5" strokeWidth={1.9} />
-                ) : (
-                  <LayoutList className="w-5 h-5" strokeWidth={1.9} />
-                )}
-              </button>
-            )}
-            {activeView === 'today' && (
-              <button
-                type="button"
-                className="w-11 h-11 flex items-center justify-center text-tt-text"
-                onClick={() => setIsPlanDayOpen(true)}
-                title="Plan your day"
-                aria-label="Plan your day"
-              >
-                <LightbulbIcon />
-              </button>
-            )}
-            <button
-              type="button"
-              className="w-11 h-11 flex items-center justify-center text-tt-text"
+              className="w-10 h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors"
               onClick={openOverflow}
-              title="More"
-              aria-label="More"
+              title="More options"
+              aria-label="More options"
               aria-haspopup="menu"
               aria-expanded={!!overflowAnchor}
             >
-              <MoreVertical className="w-5 h-5" strokeWidth={2.25} />
+              <MoreVertical className="w-5 h-5 text-tt-secondary" strokeWidth={2} />
             </button>
-          </header>
-        )}
+          </div>
+        </header>
+      )}
 
-        <div className="flex-1 flex min-h-0">
-          {/* Center pane */}
-          <section className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
-            {/* Desktop list header */}
-            {selectMode && (
-              <div className="hidden xl:block shrink-0">
-                <SelectionHeader
-                  count={selectedIds.size}
-                  total={displayedTasks.length}
-                  onExit={exitSelectMode}
-                  onSelectAll={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
-                    )
-                  }
-                />
-              </div>
-            )}
-            <div className={`hidden ${selectMode ? '' : 'xl:flex'} shrink-0 items-center justify-between gap-3 px-5 pt-4 pb-2`}>
-              <h1 className={`${isCalendar ? 'text-[24px]' : 'text-[22px]'} font-bold tracking-tight`}>{viewTitleText}</h1>
-              <div className="flex items-center gap-1">
-                {isCalendar && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
-                    }
-                    className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
-                    title={activeView === 'calendar-month' ? 'Agenda view' : 'List view'}
-                    aria-label={activeView === 'calendar-month' ? 'Switch to agenda view' : 'Switch to list view'}
-                  >
-                    {activeView === 'calendar-month' ? (
-                      <CalendarRange className="w-4 h-4" />
-                    ) : (
-                      <LayoutList className="w-4 h-4" />
-                    )}
-                  </button>
-                )}
-                {activeView === 'today' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsPlanDayOpen(true)}
-                    className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
-                    title="Plan your day"
-                    aria-label="Plan your day"
-                  >
-                    <LightbulbIcon className="w-[18px] h-[18px]" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowShortcutsHelp(true)}
-                  className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
-                  title="Shortcuts"
-                >
-                  <Keyboard className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  className="p-2 text-tt-secondary hover:bg-tt-sidebar rounded-lg"
-                  title="More"
-                  aria-label="More options"
-                  aria-haspopup="menu"
-                  onClick={openOverflow}
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex min-h-0 relative">
+        <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
+          <div
+            ref={calAreaRef}
+            onPointerDown={(e) => {
+              if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
+              const startProgress = calExpanded ? 1 : 0;
+              calGestureRef.current = {
+                startY: e.clientY,
+                startX: e.clientX,
+                startProgress,
+                latestProgress: startProgress,
+                mode: 'pending',
+              };
+            }}
+            onPointerMove={(e) => {
+              if (e.pointerType === 'touch') return;
+              const g = calGestureRef.current;
+              if (!g) return;
 
-            {emptyToday && !selectMode && <TodayTipBanner />}
+              const dy = e.clientY - g.startY;
+              const dx = e.clientX - g.startX;
 
-            {/* Search (desktop + when focused on mobile via tab) */}
-            <div
-              className="shrink-0 px-3 sm:px-5 pb-2 hidden xl:block"
-            >
-              <div className="relative hidden xl:block mb-2">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-tt-muted" />
-                <input
-                  ref={searchRef}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search"
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-tt-input border border-transparent focus:border-tt-blue focus:bg-tt-elevated text-sm outline-none placeholder:text-tt-muted"
-                />
-              </div>
-              {!isCalendar && activeView !== 'completed' && (
-                <div className="hidden xl:block">
-                  <QuickAddBar onClick={openCapture} />
-                </div>
-              )}
-            </div>
-
-            <div
-              ref={calAreaRef}
-              onPointerDown={(e) => {
-                if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
-                const startProgress = calExpanded ? 1 : 0;
-                calGestureRef.current = {
-                  startY: e.clientY,
-                  startX: e.clientX,
-                  startProgress,
-                  latestProgress: startProgress,
-                  mode: 'pending',
-                };
-              }}
-              onPointerMove={(e) => {
-                if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
-                const g = calGestureRef.current;
-                if (!g) return;
-                if ((e.buttons & 1) === 0) {
+              if (g.mode === 'pending') {
+                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
                   calGestureRef.current = null;
-                  setCalDragProgress(null);
                   return;
                 }
-                const dy = e.clientY - g.startY;
-                const dx = e.clientX - g.startX;
-                if (g.mode === 'pending') {
-                  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
-                    g.mode = 'scroll';
-                    return;
-                  }
-                  if (Math.abs(dy) < 6) return;
-                  const scroller = calScrollRef.current;
-                  const atTop = !scroller || scroller.scrollTop <= 1;
-                  const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
-                  if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
-                    g.mode = 'drag';
-                  } else {
-                    g.mode = 'scroll';
-                    return;
-                  }
+                if (Math.abs(dy) < 6) return;
+                const scroller = calScrollRef.current;
+                const atTop = !scroller || scroller.scrollTop <= 1;
+                const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
+                if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
+                  g.mode = 'drag';
+                } else {
+                  calGestureRef.current = null;
+                  return;
                 }
-                if (g.mode === 'drag') {
-                  const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
-                  g.latestProgress = next;
-                  setCalDragProgress(next);
-                }
-              }}
-              onPointerUp={(e) => {
-                if (e.pointerType === 'touch') return;
-                const g = calGestureRef.current;
-                calGestureRef.current = null;
-                if (!g || g.mode !== 'drag') return;
-                const shouldExpand =
-                  g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
-                setCalExpanded(shouldExpand);
-                setCalDragProgress(null);
-              }}
+              }
+
+              if (g.mode === 'drag') {
+                const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
+                g.latestProgress = next;
+                setCalDragProgress(next);
+              }
+            }}
+            onPointerUp={(e) => {
+              if (e.pointerType === 'touch') return;
+              const g = calGestureRef.current;
+              calGestureRef.current = null;
+              if (!g || g.mode !== 'drag') return;
+              const shouldExpand =
+                g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
+              setCalExpanded(shouldExpand);
+              setCalDragProgress(null);
+            }}
+            className="flex-1 flex flex-col min-h-0 overflow-hidden"
+          >
+            <div
               className={
                 activeView === 'calendar-month'
                   ? 'flex-1 flex flex-col min-h-0 overflow-hidden'
-                  : `flex-1 overflow-y-auto min-h-0 xl:pb-4 ${emptyState ? 'flex flex-col xl:block' : 'pb-20'}`
+                  : 'px-3 sm:px-5 space-y-3 flex-1 overflow-y-auto'
               }
             >
-              {emptyToday ? (
-                <>
-                  <div className="xl:hidden flex-1 flex flex-col">
-                    <EmptyTodayState />
-                  </div>
-                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
-                    No tasks today — enjoy a wonderful day
-                  </p>
-                </>
-              ) : emptyInbox ? (
-                <>
-                  <div className="xl:hidden flex-1 flex flex-col">
-                    <EmptyInboxState />
-                  </div>
-                  <p className="hidden xl:block text-sm text-tt-muted px-4 py-10 text-center">
-                    No tasks here — add one
-                  </p>
-                </>
-              ) : isCalendar ? (
+              <div className={activeView === 'calendar-month' ? 'shrink-0 px-3 sm:px-5' : 'space-y-3'}>
+                {activeView === 'calendar-month' ? (
+                  <CalendarMonthView
+                    year={calYear}
+                    monthIndex={calMonth}
+                    selectedDateStr={calSelectedDate}
+                    tasks={activeTasks}
+                    expanded={calExpanded}
+                    dragProgress={calDragProgress}
+                    onToggleExpanded={(next) =>
+                      setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
+                    }
+                    onSelectDate={setCalSelectedDate}
+                    onMonthChange={(y, m) => {
+                      setCalYear(y);
+                      setCalMonth(m);
+                    }}
+                  />
+                ) : (
+                  <CalendarAgendaView
+                    tasks={activeTasks}
+                    onSelectTask={selectTask}
+                    selectedTaskId={selectedTaskId}
+                    selectedDateStr={calSelectedDate}
+                    onSelectDate={setCalSelectedDate}
+                    onMonthChange={(y, m) => {
+                      setCalYear(y);
+                      setCalMonth(m);
+                    }}
+                  />
+                )}
+              </div>
+              {activeView === 'calendar-month' && calSelectedDate && (
                 <div
-                  className={
-                    activeView === 'calendar-month'
-                      ? 'flex-1 flex flex-col min-h-0 overflow-hidden'
-                      : 'px-3 sm:px-5 space-y-3'
-                  }
+                  ref={calScrollRef}
+                  className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
                 >
-                  <div className={activeView === 'calendar-month' ? 'shrink-0 px-3 sm:px-5' : 'space-y-3'}>
-                    {activeView === 'calendar-month' ? (
-                      <CalendarMonthView
-                        year={calYear}
-                        monthIndex={calMonth}
-                        selectedDateStr={calSelectedDate}
-                        tasks={activeTasks}
-                        expanded={calExpanded}
-                        dragProgress={calDragProgress}
-                        onToggleExpanded={(next) =>
-                          setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
-                        }
-                        onSelectDate={setCalSelectedDate}
-                        onMonthChange={(y, m) => {
-                          setCalYear(y);
-                          setCalMonth(m);
-                        }}
-                      />
-                    ) : (
-                      <CalendarAgendaView
-                        tasks={activeTasks}
-                        onSelectTask={selectTask}
-                        selectedTaskId={selectedTaskId}
-                        selectedDateStr={calSelectedDate}
-                        onSelectDate={setCalSelectedDate}
-                        onMonthChange={(y, m) => {
-                          setCalYear(y);
-                          setCalMonth(m);
-                        }}
-                      />
-                    )}
-                  </div>
-                  {activeView === 'calendar-month' && calSelectedDate && (
-                    <div
-                      ref={calScrollRef}
-                      className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
-                    >
-                      {displayedTasks.length === 0 && calCompletedTasks.length === 0 && calOverdueTasks.length === 0 ? (
-                        <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
-                      ) : (
-                        <>
-                          {calOverdueTasks.length > 0 && (
-                            <div>
-                              <TaskGroupHeader
-                                label="Overdue"
-                                count={calOverdueTasks.length}
-                                tone="overdue"
-                                collapsed={!!collapsedGroups['cal-overdue']}
-                                onToggle={() => toggleGroup('cal-overdue')}
-                                sticky={false}
-                              />
-                              {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks, false)}
-                            </div>
-                          )}
-                          {displayedTasks.length > 0 && (
-                            <div>
-                              <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
-                                <span className="text-[20px] font-bold text-tt-text">
-                                  {formatCalendarDayHeading(calSelectedDate)}
-                                </span>
-                                <span className="text-[13px] text-tt-muted tabular-nums">
-                                  {displayedTasks.length}
-                                </span>
-                              </div>
-                              {renderTaskRows(displayedTasks, false, true)}
-                            </div>
-                          )}
-                          {calCompletedTasks.length > 0 && (
-                            <div>
-                              <TaskGroupHeader
-                                label="Completed"
-                                count={calCompletedTasks.length}
-                                collapsed={!!collapsedGroups['cal-completed']}
-                                onToggle={() => toggleGroup('cal-completed')}
-                                sticky={false}
-                              />
-                              {!collapsedGroups['cal-completed'] && renderTaskRows(calCompletedTasks, false)}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : activeView === 'completed' ? (
-                <div>
-                  {displayedTasks.length === 0 ? (
-                    <p className="text-sm text-tt-muted px-4 py-10 text-center">No completed tasks</p>
+                  {displayedTasks.length === 0 &&
+                  calCompletedTasks.length === 0 &&
+                  calOverdueTasks.length === 0 ? (
+                    <p className="text-sm text-tt-muted px-4 py-6 text-center">No tasks this day</p>
                   ) : (
-                    renderTaskRows(displayedTasks, false)
+                    <>
+                      {calOverdueTasks.length > 0 && (
+                        <div>
+                          <TaskGroupHeader
+                            label="Overdue"
+                            count={calOverdueTasks.length}
+                            tone="overdue"
+                            collapsed={!!collapsedGroups['cal-overdue']}
+                            onToggle={() => toggleGroup('cal-overdue')}
+                            sticky={false}
+                          />
+                          {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks, false)}
+                        </div>
+                      )}
+                      {displayedTasks.length > 0 && (
+                        <div>
+                          <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
+                            <span className="text-[20px] font-bold text-tt-text">
+                              {formatCalendarDayHeading(calSelectedDate)}
+                            </span>
+                            <span className="text-[13px] text-tt-muted tabular-nums">
+                              {displayedTasks.length}
+                            </span>
+                          </div>
+                          {renderTaskRows(displayedTasks, false, true)}
+                        </div>
+                      )}
+                      {calCompletedTasks.length > 0 && (
+                        <div>
+                          <TaskGroupHeader
+                            label="Completed"
+                            count={calCompletedTasks.length}
+                            collapsed={!!collapsedGroups['cal-completed']}
+                            onToggle={() => toggleGroup('cal-completed')}
+                            sticky={false}
+                          />
+                          {!collapsedGroups['cal-completed'] && renderTaskRows(calCompletedTasks, false)}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-              ) : taskGroups.length === 0 ? (
-                <p className="text-sm text-tt-muted px-4 py-10 text-center">
-                  {activeView === 'search'
-                    ? searchQuery.trim()
-                      ? 'No matching tasks'
-                      : 'Search titles, notes and tags'
-                    : 'No tasks here — add one'}
-                </p>
-              ) : (
-                taskGroups.map((g) => {
-                  const groupKey = `${activeView}:${g.id}`;
-                  const collapsed = !!collapsedGroups[groupKey];
-                  return (
-                    <div key={g.id}>
-                      {g.label && (
-                        <TaskGroupHeader
-                          label={g.label}
-                          count={g.tasks.length}
-                          collapsed={collapsed}
-                          onToggle={() => toggleGroup(groupKey)}
-                          tone={g.id === 'overdue' ? 'overdue' : 'default'}
-                        />
-                      )}
-                      {(!collapsed || !g.label) &&
-                        renderTaskRows(g.tasks, true, g.id !== 'completed' && prefs.sortBy === 'due')}
-                    </div>
-                  );
-                })
               )}
             </div>
-          </section>
+          </div>
+        </main>
 
-          {/* Desktop detail */}
-          <aside className="hidden xl:flex w-[340px] shrink-0 flex-col border-l border-tt-border">
+        {/* Desktop Task Detail Pane */}
+        {selectedTask && (
+          <aside className="hidden xl:block w-[380px] shrink-0 border-l border-tt-border bg-tt-surface overflow-y-auto">
             <TaskDetailPane
               task={selectedTask}
-              listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
-              onClose={() => {
-                setSelectedTaskId(null);
-                setSelectedTaskDate(null);
-              }}
-              onComplete={handleComplete}
-              onUncomplete={handleUncomplete}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onTogglePin={handleTogglePin}
+              onClose={() => setSelectedTaskId(null)}
+              onComplete={(id) => handleComplete(id, selectedTaskDate ?? undefined)}
+              onUncomplete={(id) => handleUncomplete(id, selectedTaskDate ?? undefined)}
+              onEdit={() => handleEdit(selectedTask)}
+              onDelete={() => handleDelete(selectedTask.id)}
+              onTogglePin={() => handleTogglePin(selectedTask.id)}
               onToggleSubtask={handleToggleSubtask}
               onPatch={handlePatchTask}
             />
           </aside>
-        </div>
+        )}
+      </div>
 
-        {/* Mobile FAB */}
-        {!selectMode && (
+      {/* Mobile Detail Modal */}
+      {selectedTask && detailOpenMobile && (
+        <div className="xl:hidden fixed inset-0 z-50 flex flex-col bg-tt-bg">
+          <TaskDetailPane
+            task={selectedTask}
+            onClose={() => {
+              setDetailOpenMobile(false);
+              setSelectedTaskId(null);
+            }}
+            onComplete={(id) => handleComplete(id, selectedTaskDate ?? undefined)}
+            onUncomplete={(id) => handleUncomplete(id, selectedTaskDate ?? undefined)}
+            onEdit={() => handleEdit(selectedTask)}
+            onDelete={() => handleDelete(selectedTask.id)}
+            onTogglePin={() => handleTogglePin(selectedTask.id)}
+            onToggleSubtask={handleToggleSubtask}
+            onPatch={handlePatchTask}
+          />
+        </div>
+      )}
+
+      {/* FAB */}
+      {!selectMode && (
         <button
           type="button"
           onClick={openCapture}
-          className="xl:hidden fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)]"
+          className="fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)] cursor-pointer hover:scale-105 active:scale-95 transition-all"
           style={{ bottom: 'calc(16px + env(safe-area-inset-bottom))' }}
           title="Add task"
           aria-label="Add task"
         >
           <Plus className="w-7 h-7" strokeWidth={2.25} />
         </button>
-        )}
-
-        {selectMode && (
-          <SelectionBar
-            count={selectedIds.size}
-            lists={activeLists}
-            onComplete={() => void batchComplete()}
-            onMove={(id) => void batchMove(id)}
-            onSetDate={(d) => void batchSetDate(d)}
-            onDelete={() => void batchDelete()}
-          />
-        )}
-      </div>
-
-      {/* Mobile detail drawer */}
-      {detailOpenMobile && (
-        <div className="xl:hidden fixed inset-0 z-50 flex justify-end">
-          <div className="flex-1 bg-black/40" onClick={() => setDetailOpenMobile(false)} />
-          <div className="w-full max-w-md bg-tt-elevated shadow-2xl">
-            <TaskDetailPane
-              task={selectedTask}
-              listName={selectedTask ? listNameById.get(selectedTask.listId) : undefined}
-              onClose={() => setDetailOpenMobile(false)}
-              onComplete={handleComplete}
-              onUncomplete={handleUncomplete}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onTogglePin={handleTogglePin}
-              onToggleSubtask={handleToggleSubtask}
-              onPatch={handlePatchTask}
-            />
-          </div>
-        </div>
       )}
 
+      {selectMode && (
+        <SelectionBar
+          count={selectedIds.size}
+          onComplete={() => void batchComplete()}
+          onSetDate={(d) => void batchSetDate(d)}
+          onDelete={() => void batchDelete()}
+        />
+      )}
 
       <QuickCaptureModal
         isOpen={isQuickCaptureOpen}
         onClose={() => setIsQuickCaptureOpen(false)}
         onSave={handleSave}
-        defaultDueAt={isCalendar ? calSelectedDate : undefined}
+        defaultDueAt={calSelectedDate ?? undefined}
         initialTitle={quickCaptureText}
       />
 
@@ -1536,7 +874,6 @@ export function App() {
           setEditingFilter(null);
         }}
         onSave={handleSaveFilter}
-        lists={activeLists}
         availableTags={allTags}
         initial={editingFilter}
       />
@@ -1549,17 +886,6 @@ export function App() {
         }}
         onSave={handleSave}
         initialTask={editingTask}
-        lists={activeLists}
-        defaultListId={defaultListForNew}
-      />
-
-      <PlanDaySheet
-        isOpen={isPlanDayOpen}
-        tasks={activeTasks}
-        listNameById={listNameById}
-        onClose={closePlanDay}
-        onMoveToToday={moveTaskToToday}
-        onAddTask={openCapture}
       />
 
       <SettingsPage
@@ -1568,7 +894,6 @@ export function App() {
         initialPage={settingsPage}
         onClose={() => setIsSettingsModalOpen(false)}
         tasks={allTasks}
-        lists={activeLists}
         syncStatus={syncStatus}
         onSyncStatusChange={() => refreshSyncStatus()}
         onShowShortcuts={() => setShowShortcutsHelp(true)}
@@ -1609,41 +934,6 @@ export function App() {
         onClose={() => setIsGroupSortOpen(false)}
       />
 
-      <ManageSmartListsSheet
-        open={isManageListsOpen}
-        value={prefs.smartLists}
-        onChange={(smartLists) => updatePrefs({ smartLists })}
-        onClose={() => setIsManageListsOpen(false)}
-      />
-
-      <AddListSheet
-        open={isAddListOpen}
-        folders={activeFolders}
-        onClose={() => setIsAddListOpen(false)}
-        onCreateList={(name, folderId) => void createListFromSheet(name, folderId)}
-        onCreateFolder={(name) => void createFolderFromSheet(name)}
-        onNewFilter={() => {
-          setEditingFilter(null);
-          setIsFilterModalOpen(true);
-        }}
-      />
-
-      <ItemActionSheet
-        target={
-          itemAction
-            ? itemAction.kind === 'list'
-              ? { kind: 'list', name: itemAction.list.name }
-              : { kind: 'folder', name: itemAction.folder.name }
-            : null
-        }
-        onClose={() => setItemAction(null)}
-        onDelete={() => {
-          if (!itemAction) return;
-          if (itemAction.kind === 'list') void handleDeleteList(itemAction.list);
-          else void handleDeleteFolder(itemAction.folder);
-        }}
-      />
-
       <InstallPrompt />
 
       {showShortcutsHelp && (
@@ -1665,13 +955,10 @@ export function App() {
             <ul className="space-y-2 text-xs text-tt-text">
               {[
                 ['n / c', 'New task (capture)'],
-                ['/', 'Focus search'],
-                ['1–4', 'Today / Tomorrow / Next 7 / Inbox'],
                 ['m / a', 'Calendar month / Agenda'],
                 ['j / k', 'Next / previous task'],
                 ['x', 'Complete selected'],
                 ['e', 'Edit selected'],
-                ['\\', 'Toggle sidebar (mobile)'],
                 ['Esc', 'Close panels / deselect'],
                 ['?', 'This help'],
               ].map(([key, desc]) => (
@@ -1686,6 +973,7 @@ export function App() {
           </div>
         </div>
       )}
+
       {/* Swipe Action Dialogs */}
       <ChangeDateDialog
         isOpen={!!changeDateTask}
