@@ -11,8 +11,7 @@ export function isSampleId(id: string): boolean {
 
 /**
  * Demo folder / lists / tasks, dated relative to `nowDate`.
- * Not seeded automatically (fresh installs start empty, like TickTick);
- * loaded on demand from Settings → "Load sample tasks".
+ * Loaded on demand from Settings → "Load sample tasks".
  */
 export function buildSampleData(nowDate: Date = new Date()): {
   folders: Folder[];
@@ -58,9 +57,7 @@ export function buildSampleData(nowDate: Date = new Date()): {
       title: 'Water indoor plants',
       notes: 'Check soil moisture for the ferns and monstera',
       listId: homeList.id,
-      dueAt: `${today}T09:00`,
-      priority: 'medium',
-      pinned: true,
+      dueAt: today,
       recurrence: {
         type: 'after_completion',
         intervalValue: 3,
@@ -69,11 +66,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       createdAt: now - 86400000 * 3,
       updatedAt: now,
       completionHistory: [now - 86400000 * 3],
-      tags: ['Plants'],
-      subtasks: [
-        { id: 'st-1a', title: 'Check fern', completed: false },
-        { id: 'st-1b', title: 'Check monstera', completed: true },
-      ],
     },
     {
       id: 'demo-2',
@@ -81,7 +73,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       notes: 'Run Time Machine / backup script',
       listId: INBOX_LIST_ID,
       dueAt: today,
-      priority: 'high',
       recurrence: {
         type: 'fixed_interval',
         intervalValue: 1,
@@ -90,25 +81,17 @@ export function buildSampleData(nowDate: Date = new Date()): {
       createdAt: now - 86400000 * 7,
       updatedAt: now,
       completionHistory: [now - 86400000 * 7],
-      tags: ['Tech'],
     },
     {
       id: 'demo-3',
       title: 'Buy groceries for the week',
       notes: 'Milk, eggs, greens',
       listId: INBOX_LIST_ID,
-      dueAt: `${today}T17:30`,
-      priority: 'high',
+      dueAt: today,
       recurrence: null,
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
-      tags: ['Errands'],
-      subtasks: [
-        { id: 'st-3a', title: 'Milk', completed: false },
-        { id: 'st-3b', title: 'Eggs', completed: false },
-        { id: 'st-3c', title: 'Greens', completed: false },
-      ],
     },
     {
       id: 'demo-4',
@@ -116,7 +99,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       notes: 'Run vinegar or descaler cycle',
       listId: homeList.id,
       dueAt: formatDate(new Date(now - 86400000 * 1)),
-      priority: 'low',
       recurrence: {
         type: 'after_completion',
         intervalValue: 2,
@@ -125,40 +107,33 @@ export function buildSampleData(nowDate: Date = new Date()): {
       createdAt: now - 86400000 * 15,
       updatedAt: now,
       completionHistory: [now - 86400000 * 15],
-      tags: ['Home'],
     },
     {
       id: 'demo-5',
       title: 'Call dentist to schedule checkup',
       listId: INBOX_LIST_ID,
       dueAt: null,
-      priority: 'medium',
       recurrence: null,
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
-      tags: ['Health'],
     },
     {
       id: 'demo-6',
       title: 'Team standup notes',
       notes: 'Prep talking points',
       listId: workList.id,
-      dueAt: `${tomorrow}T10:00`,
-      priority: 'none',
+      dueAt: tomorrow,
       recurrence: null,
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
-      tags: ['Work'],
     },
     {
       id: 'demo-7',
       title: 'Pay rent',
       listId: INBOX_LIST_ID,
       dueAt: inThree,
-      priority: 'high',
-      pinned: true,
       recurrence: {
         type: 'fixed_interval',
         intervalValue: 1,
@@ -168,14 +143,12 @@ export function buildSampleData(nowDate: Date = new Date()): {
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
-      tags: ['Finance'],
     },
     {
       id: 'demo-8',
       title: 'Morning stretch',
       listId: homeList.id,
       dueAt: today,
-      priority: 'low',
       recurrence: {
         type: 'fixed_interval',
         intervalValue: 1,
@@ -185,7 +158,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
-      tags: ['Health'],
     },
   ];
 

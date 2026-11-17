@@ -3,11 +3,8 @@ import {
   DEFAULT_PREFS,
   PREFS_STORAGE_KEY,
   loadPrefs,
-  moveTab,
-  normalizeTabs,
   sanitizePrefs,
   savePrefs,
-  toggleTab,
 } from '../prefs';
 
 function memoryStorage() {
@@ -30,7 +27,6 @@ describe('prefs persistence', () => {
     expect(p).toEqual(DEFAULT_PREFS);
     expect(p.theme).toBe('system');
     expect(p.showOverdue).toBe(true);
-    expect(p.tabs).toEqual(['tasks', 'calendar', 'settings']);
     expect(p.smartLists.today && p.smartLists.inbox).toBe(true);
     expect(p.smartLists.tomorrow || p.smartLists.next7 || p.smartLists.all || p.smartLists.completed).toBe(false);
   });
@@ -47,12 +43,11 @@ describe('prefs persistence', () => {
       timeFormat: '24h' as const,
       defaultReminderTime: '08:30',
       defaultListId: 'work',
-      tabs: ['tasks', 'board', 'search'] as const,
       smartLists: { ...DEFAULT_PREFS.smartLists, next7: true },
     };
-    savePrefs({ ...next, tabs: [...next.tabs] }, storage);
+    savePrefs(next, storage);
     expect(storage.map.has(PREFS_STORAGE_KEY)).toBe(true);
-    expect(loadPrefs(storage)).toEqual({ ...next, tabs: [...next.tabs] });
+    expect(loadPrefs(storage)).toEqual(next);
   });
 
   it('survives corrupt JSON and drops invalid values', () => {
@@ -76,28 +71,5 @@ describe('prefs persistence', () => {
     expect(p.smartLists.tomorrow).toBe(true);
     expect(p.smartLists.inbox).toBe(true);
     expect('bogus' in p.smartLists).toBe(false);
-  });
-});
-
-describe('tab bar config', () => {
-  it('normalizes: unique, valid, Tasks required, 2..5 tabs', () => {
-    expect(normalizeTabs(['calendar', 'calendar', 'nope', 'settings'])).toEqual(['tasks', 'calendar', 'settings']);
-    expect(normalizeTabs([])).toEqual(['tasks', 'calendar']);
-    expect(normalizeTabs('x')).toEqual(DEFAULT_PREFS.tabs);
-    expect(normalizeTabs(['tasks', 'calendar', 'board', 'search', 'settings', 'tasks'])).toHaveLength(5);
-  });
-
-  it('toggles within limits and never removes Tasks', () => {
-    expect(toggleTab(['tasks', 'calendar', 'settings'], 'board')).toEqual(['tasks', 'calendar', 'settings', 'board']);
-    expect(toggleTab(['tasks', 'calendar', 'settings'], 'calendar')).toEqual(['tasks', 'settings']);
-    expect(toggleTab(['tasks', 'settings'], 'settings')).toEqual(['tasks', 'settings']);
-    expect(toggleTab(['tasks', 'calendar', 'settings'], 'tasks')).toEqual(['tasks', 'calendar', 'settings']);
-    const full = ['tasks', 'calendar', 'board', 'search', 'settings'] as const;
-    expect(toggleTab([...full], 'board')).toHaveLength(4);
-  });
-
-  it('reorders tabs', () => {
-    expect(moveTab(['tasks', 'calendar', 'settings'], 'settings', -1)).toEqual(['tasks', 'settings', 'calendar']);
-    expect(moveTab(['tasks', 'calendar'], 'tasks', -1)).toEqual(['tasks', 'calendar']);
   });
 });

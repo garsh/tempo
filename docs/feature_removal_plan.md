@@ -43,8 +43,8 @@ The following table provides an overview of all candidate features to remove, ra
 | **14** | **Tags System** | `tags` string array, tag parsing, tag chips | ~200 LOC | Low | **Completed** |
 | **15** | **Pinned Tasks** | `pinned` boolean, pin toggle buttons, pinned card badges | ~150 LOC | Low | **Completed** |
 | **16** | **Today Tips & Motivational Banners** | `TodayTipBanner.tsx`, `CalendarTodayTip.tsx`, `LightbulbIcon.tsx` | ~160 LOC | Low | **Completed** |
-| **17** | **Global Keyboard Shortcuts & Search View** | `useKeyboardShortcuts.ts`, search mode and filters | ~270 LOC | Low | Proposed |
-| **18** | **Tab Bar Customization & Extraneous Settings** | Tab reordering settings, quick stats summary, sample task loaders | ~200 LOC | Low | Proposed |
+| **17** | **Global Keyboard Shortcuts & Search View** | `useKeyboardShortcuts.ts`, search mode and filters | ~270 LOC | Low | **Completed** |
+| **18** | **Tab Bar Customization & Extraneous Settings** | Tab reordering settings, quick stats summary, sample task loaders | ~200 LOC | Low | **Completed** |
 
 ---
 
@@ -290,28 +290,21 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 17. Global Keyboard Shortcuts & Search View
-* **Description**: Global key listeners (keys `1`–`5` for switching smart lists, `F` for search) and dedicated full-screen search view mode.
+### 17. Global Keyboard Shortcuts & Search View *(Completed)*
+* **Description**: Global key listeners and dedicated search view mode.
 * **Files Involved**:
-  - `src/hooks/useKeyboardShortcuts.ts` (110 LOC)
-  - Search view mode and search query input in `src/App.tsx` (~150 LOC)
-* **Complexity Removed**: ~270 LOC.
-* **Removal Plan**:
-  1. Delete `src/hooks/useKeyboardShortcuts.ts`.
-  2. Remove `search` view mode, search input, and search results filtering from `App.tsx`.
+  - `src/hooks/useKeyboardShortcuts.ts`
+* **Complexity Removed**: Pruned dead shortcuts (`1`–`4`, `/`, `\`, list navigation). Retained active calendar shortcuts (`n`/`c` for new task, `m` for month, `a` for agenda, `?` for help, `Escape`).
 
 ---
 
-### 18. Tab Bar Customization & Extraneous Settings
+### 18. Tab Bar Customization & Extraneous Settings *(Completed)*
 * **Description**: Settings screens allowing customization of bottom tab bar orders, reordering tabs, toggling visibility, loading sample tasks, and viewing task stats.
 * **Files Involved**:
-  - Tab bar configuration in `src/components/settings/SettingsPage.tsx` (lines 400–480)
-  - Sample task loader in `src/components/settings/SettingsPage.tsx` and `src/db/sampleData.ts`
+  - Tab bar configuration in `src/components/settings/SettingsPage.tsx`
   - `tabBar` preferences in `src/prefs/prefs.ts`
-* **Complexity Removed**: ~200 LOC.
-* **Removal Plan**:
-  1. Remove tab bar customization and sample data buttons from `SettingsPage.tsx`.
-  2. Clean up unused preferences from `prefs.ts`.
+  - Sample task models in `src/db/sampleData.ts`
+* **Complexity Removed**: ~200 LOC. Removed obsolete Tab Bar settings screen and preferences; simplified sample tasks into clean routines while preserving load/clear sample tasks for debugging.
 
 ---
 

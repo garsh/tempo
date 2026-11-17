@@ -1,8 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   AlertCircle,
-  ArrowDown,
-  ArrowUp,
   CheckCircle2,
   Copy,
   ExternalLink,
@@ -37,16 +35,7 @@ import {
 } from '../../sync/autoSync';
 import { setGoogleAccount } from '../../sync/googleAccount';
 import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
-import {
-  ALL_TABS,
-  MAX_TABS,
-  MIN_TABS,
-  TAB_LABELS,
-  moveTab,
-  toggleTab,
-  usePrefs,
-  type TabId,
-} from '../../prefs/prefs';
+import { usePrefs } from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
 import { summarizeAccount } from '../../sync/accountSummary';
 import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
@@ -67,7 +56,6 @@ import {
 export type SettingsPageId =
   | 'root'
   | 'account'
-  | 'tabbar'
   | 'appearance'
   | 'datetime'
   | 'general'
@@ -78,7 +66,6 @@ export const FEEDBACK_URL = 'https://github.com/garsh/tempo/issues';
 const TITLES: Record<SettingsPageId, string> = {
   root: 'Settings',
   account: 'Account & Sync',
-  tabbar: 'Tab Bar',
   appearance: 'Appearance',
   datetime: 'Date & Time',
   general: 'General',
@@ -138,9 +125,6 @@ export function SettingsPage(props: SettingsPageProps) {
       break;
     case 'account':
       body = <AccountPage {...props} setStatus={setStatus} />;
-      break;
-    case 'tabbar':
-      body = <TabBarPage />;
       break;
     case 'appearance':
       body = <AppearancePage />;
@@ -475,73 +459,6 @@ function AccountPage({
           </details>
         </Card>
       </details>
-    </>
-  );
-}
-
-/* ───────────────────────────── Tab Bar ───────────────────────────── */
-
-function TabBarPage() {
-  const [prefs, update] = usePrefs();
-  const tabs = prefs.tabs;
-  const hidden = ALL_TABS.filter((t) => !tabs.includes(t));
-  const row = (tab: TabId, on: boolean, idx: number) => (
-    <div key={tab} className="min-h-[50px] flex items-center pl-4 pr-[18px] gap-2" data-tab-row={tab}>
-      <span className="flex-1 text-[17px] text-tt-text">
-        {TAB_LABELS[tab]}
-        {tab === 'tasks' && <span className="ml-2 text-[12px] text-tt-secondary">Required</span>}
-      </span>
-      {on && (
-        <>
-          <button
-            type="button"
-            aria-label={`Move ${TAB_LABELS[tab]} left`}
-            disabled={idx === 0}
-            onClick={() => update({ tabs: moveTab(tabs, tab, -1) })}
-            className="w-9 h-9 flex items-center justify-center text-tt-secondary disabled:opacity-25"
-          >
-            <ArrowUp className="w-[18px] h-[18px]" />
-          </button>
-          <button
-            type="button"
-            aria-label={`Move ${TAB_LABELS[tab]} right`}
-            disabled={idx === tabs.length - 1}
-            onClick={() => update({ tabs: moveTab(tabs, tab, 1) })}
-            className="w-9 h-9 flex items-center justify-center text-tt-secondary disabled:opacity-25"
-          >
-            <ArrowDown className="w-[18px] h-[18px]" />
-          </button>
-        </>
-      )}
-      <Switch
-        checked={on}
-        label={`Show ${TAB_LABELS[tab]} tab`}
-        disabled={tab === 'tasks' || (on && tabs.length <= MIN_TABS) || (!on && tabs.length >= MAX_TABS)}
-        onChange={() => update({ tabs: toggleTab(tabs, tab) })}
-      />
-    </div>
-  );
-  return (
-    <>
-      <SectionLabel>Shown (in order)</SectionLabel>
-      <Card>{tabs.map((t, i) => row(t, true, i))}</Card>
-      {hidden.length > 0 && (
-        <>
-          <SectionLabel>Hidden</SectionLabel>
-          <Card>{hidden.map((t, i) => row(t, false, i))}</Card>
-        </>
-      )}
-      <Note>
-        Choose {MIN_TABS}–{MAX_TABS} tabs for the bottom bar on phones. Tasks is always shown. Default: Tasks, Calendar,
-        Settings.
-      </Note>
-      <Card>
-        <NavRow
-          label="Reset to default"
-          chevron={false}
-          onClick={() => update({ tabs: ['tasks', 'calendar', 'settings'] })}
-        />
-      </Card>
     </>
   );
 }

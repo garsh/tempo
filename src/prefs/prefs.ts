@@ -10,7 +10,6 @@ export type ThemePref = 'system' | 'light' | 'dark';
 export type TimeFormat = '12h' | '24h';
 /** 0 = Sunday, 1 = Monday, 6 = Saturday (Date#getDay numbering). */
 export type WeekStart = 0 | 1 | 6;
-export type TabId = 'tasks' | 'calendar' | 'board' | 'search' | 'settings';
 export type GroupBy = 'none' | 'date' | 'list' | 'priority' | 'tag';
 export type SortBy = 'due' | 'priority' | 'title' | 'created';
 export type ViewMode = 'list' | 'board';
@@ -39,22 +38,9 @@ export interface Prefs {
   groupBy: GroupBy;
   sortBy: SortBy;
   viewMode: ViewMode;
-  /** Mobile bottom tabs, in order. */
-  tabs: TabId[];
   /** Which smart lists / sections the drawer + sidebar show. */
   smartLists: Record<SmartListId, boolean>;
 }
-
-export const ALL_TABS: TabId[] = ['tasks', 'calendar', 'board', 'search', 'settings'];
-export const TAB_LABELS: Record<TabId, string> = {
-  tasks: 'Tasks',
-  calendar: 'Calendar',
-  board: 'Board',
-  search: 'Search',
-  settings: 'Settings',
-};
-export const MIN_TABS = 2;
-export const MAX_TABS = 5;
 
 export const SMART_LIST_IDS: SmartListId[] = [
   'today',
@@ -85,7 +71,6 @@ export const DEFAULT_PREFS: Prefs = {
   groupBy: 'date',
   sortBy: 'due',
   viewMode: 'list',
-  tabs: ['tasks', 'calendar', 'settings'],
   smartLists: {
     today: true,
     inbox: true,
@@ -100,40 +85,6 @@ export const PREFS_STORAGE_KEY = 'tempo_prefs_v1';
 
 const oneOf = <T extends string | number>(v: unknown, allowed: readonly T[], fallback: T): T =>
   allowed.includes(v as T) ? (v as T) : fallback;
-
-/** Valid, de-duplicated tab list that always contains Tasks and has 2–5 entries. */
-export function normalizeTabs(tabs: unknown): TabId[] {
-  if (!Array.isArray(tabs)) return [...DEFAULT_PREFS.tabs];
-  const out: TabId[] = [];
-  for (const t of tabs) {
-    if (ALL_TABS.includes(t as TabId) && !out.includes(t as TabId)) out.push(t as TabId);
-  }
-  if (!out.includes('tasks')) out.unshift('tasks');
-  if (out.length < MIN_TABS) {
-    for (const t of DEFAULT_PREFS.tabs) if (!out.includes(t) && out.length < MIN_TABS) out.push(t);
-  }
-  return out.slice(0, MAX_TABS);
-}
-
-/** Toggle a tab on/off, respecting the Tasks-required and 2..5 rules. */
-export function toggleTab(tabs: TabId[], id: TabId): TabId[] {
-  if (tabs.includes(id)) {
-    if (id === 'tasks' || tabs.length <= MIN_TABS) return tabs;
-    return tabs.filter((t) => t !== id);
-  }
-  if (tabs.length >= MAX_TABS) return tabs;
-  return [...tabs, id];
-}
-
-/** Move a tab one slot left (-1) or right (+1). */
-export function moveTab(tabs: TabId[], id: TabId, delta: -1 | 1): TabId[] {
-  const i = tabs.indexOf(id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= tabs.length) return tabs;
-  const next = [...tabs];
-  [next[i], next[j]] = [next[j], next[i]];
-  return next;
-}
 
 export function sanitizePrefs(raw: unknown): Prefs {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof Prefs, unknown>>;
@@ -161,7 +112,6 @@ export function sanitizePrefs(raw: unknown): Prefs {
     groupBy: oneOf(r.groupBy, ['none', 'date'] as const, DEFAULT_PREFS.groupBy),
     sortBy: oneOf(r.sortBy, ['due', 'title', 'created'] as const, DEFAULT_PREFS.sortBy),
     viewMode: oneOf(r.viewMode, ['list', 'board'] as const, DEFAULT_PREFS.viewMode),
-    tabs: r.tabs === undefined ? [...DEFAULT_PREFS.tabs] : normalizeTabs(r.tabs),
     smartLists,
   };
 }

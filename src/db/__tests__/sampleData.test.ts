@@ -18,7 +18,7 @@ describe('buildSampleData', () => {
     const todayStr = formatDate(now);
     const demo3 = data.tasks.find((t) => t.id === 'demo-3');
     expect(demo3?.dueAt?.startsWith(todayStr)).toBe(true);
-    expect(demo3?.dueAt).toBe('2026-10-06T17:30');
+    expect(demo3?.dueAt).toBe('2026-10-06');
   });
 
   it('references only sample lists or the Inbox', () => {
