@@ -27,7 +27,7 @@ import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
 import { ReorderableTaskList } from './components/ReorderableTaskList';
-import { TaskModal } from './components/TaskModal';
+import { QuickAddSheet } from './components/QuickAddSheet';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
@@ -634,7 +634,7 @@ export function App() {
         <Plus className="w-7 h-7" strokeWidth={2.25} />
       </button>
 
-      <TaskModal
+      <QuickAddSheet
         isOpen={isTaskModalOpen}
         onClose={() => {
           setIsTaskModalOpen(false);
