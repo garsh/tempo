@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
@@ -54,6 +54,7 @@ export function QuickAddSheet({
   const [fullScreen, setFullScreen] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -92,6 +93,26 @@ export function QuickAddSheet({
     };
   }, [isOpen]);
 
+  const resetForm = useCallback(() => {
+    setTitle('');
+    setNotes('');
+    setDueAt(dueAtForSelectedDay(defaultDueAt, todayStr));
+    setIsRecurring(false);
+    setRecurrenceType('after_completion');
+    setIntervalValue(3);
+    setIntervalUnit('days');
+    setWeekdays([]);
+    setUseMonthDay(false);
+    setMonthDay(1);
+    setEndOnDate('');
+    setEndAfterCount('');
+    setPanel('none');
+    titleRef.current?.focus();
+    window.requestAnimationFrame(() => {
+      titleRef.current?.focus();
+    });
+  }, [defaultDueAt, todayStr]);
+
   // Reset or populate state when opened or initialTask changes
   useEffect(() => {
     if (!isOpen) return;
@@ -123,25 +144,14 @@ export function QuickAddSheet({
         setEndAfterCount('');
       }
     } else {
-      setTitle('');
-      setNotes('');
-      setDueAt(dueAtForSelectedDay(defaultDueAt, todayStr));
-      setIsRecurring(false);
-      setRecurrenceType('after_completion');
-      setIntervalValue(3);
-      setIntervalUnit('days');
-      setWeekdays([]);
-      setUseMonthDay(false);
-      setMonthDay(1);
-      setEndOnDate('');
-      setEndAfterCount('');
+      resetForm();
     }
 
     setPanel('none');
     setFullScreen(false);
     const t = window.setTimeout(() => titleRef.current?.focus(), 60);
     return () => clearTimeout(t);
-  }, [isOpen, initialTask, defaultDueAt, todayStr]);
+  }, [isOpen, initialTask, resetForm]);
 
   if (!isOpen) return null;
 
@@ -179,33 +189,42 @@ export function QuickAddSheet({
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || isSubmitting) return;
 
-    let recurrence: RecurrenceRule | null = null;
-    if (isRecurring) {
-      const countNum = endAfterCount.trim() ? parseInt(endAfterCount, 10) : null;
-      recurrence = {
-        type: recurrenceType,
-        intervalValue: Math.max(1, intervalValue),
-        intervalUnit,
-        weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
-        monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
-        endOnDate: endOnDate.trim() ? endOnDate.trim() : null,
-        endAfterCount:
-          countNum != null && !Number.isNaN(countNum) && countNum > 0 ? countNum : null,
-      };
+    setIsSubmitting(true);
+    try {
+      let recurrence: RecurrenceRule | null = null;
+      if (isRecurring) {
+        const countNum = endAfterCount.trim() ? parseInt(endAfterCount, 10) : null;
+        recurrence = {
+          type: recurrenceType,
+          intervalValue: Math.max(1, intervalValue),
+          intervalUnit,
+          weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
+          monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
+          endOnDate: endOnDate.trim() ? endOnDate.trim() : null,
+          endAfterCount:
+            countNum != null && !Number.isNaN(countNum) && countNum > 0 ? countNum : null,
+        };
+      }
+
+      await onSave({
+        id: initialTask?.id,
+        title: title.trim(),
+        notes: notes.trim() || undefined,
+        listId: initialTask?.listId || INBOX_LIST_ID,
+        dueAt: dueAt || null,
+        recurrence,
+      });
+
+      if (initialTask) {
+        onClose();
+      } else {
+        resetForm();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    await onSave({
-      id: initialTask?.id,
-      title: title.trim(),
-      notes: notes.trim() || undefined,
-      listId: initialTask?.listId || INBOX_LIST_ID,
-      dueAt: dueAt || null,
-      recurrence,
-    });
-
-    onClose();
   };
 
   const onTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -287,24 +306,25 @@ export function QuickAddSheet({
             </span>
             <button
               type="button"
-              disabled={!canSubmit}
+              disabled={!canSubmit || isSubmitting}
               onClick={() => void handleSubmit()}
               className="px-3 py-1.5 text-[15px] font-semibold text-tt-blue disabled:opacity-40"
             >
-              Done
+              {initialTask ? 'Done' : 'Create'}
             </button>
           </div>
         )}
 
-        {initialTask && !fullScreen && (
+        {!fullScreen && (
           <div className="flex items-center justify-between px-4 sm:px-5 pt-1.5 pb-0.5">
             <span className="text-xs font-bold uppercase tracking-wider text-tt-secondary">
-              Edit Routine
+              {initialTask ? 'Edit Routine' : 'New Routine'}
             </span>
             <button
               type="button"
               onClick={onClose}
-              className="p-1 text-tt-secondary hover:text-tt-text"
+              aria-label="Close"
+              className="p-1 text-tt-secondary hover:text-tt-text rounded-md cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -376,10 +396,10 @@ export function QuickAddSheet({
           <button
             type="button"
             aria-label={initialTask ? 'Save routine' : 'Create routine'}
-            disabled={!canSubmit}
+            disabled={!canSubmit || isSubmitting}
             onClick={() => void handleSubmit()}
             className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] sm:text-[15px] font-bold tracking-wide transition-all ${
-              canSubmit
+              canSubmit && !isSubmitting
                 ? 'bg-tt-blue hover:bg-tt-blue-hover active:scale-95 text-white shadow-md shadow-tt-blue/25 cursor-pointer'
                 : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
             }`}
