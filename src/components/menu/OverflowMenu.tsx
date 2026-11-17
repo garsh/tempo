@@ -41,15 +41,6 @@ function OverdueIcon() {
   );
 }
 
-function SelectIcon() {
-  return (
-    <svg {...ICON}>
-      <path d="M2.8 4.6l1.4 1.4 2.3-2.6M2.8 10.4l1.4 1.4 2.3-2.6M3.2 16h.01" />
-      <path d="M9.5 4.8h7.5M9.5 10.6h7.5M5.5 16h11.5" />
-    </svg>
-  );
-}
-
 function UpdateAppIcon() {
   return (
     <svg {...ICON}>
@@ -72,7 +63,6 @@ interface OverflowMenuProps {
   onToggleDetails: () => void;
   onToggleHideCompleted: () => void;
   onToggleShowOverdue: () => void;
-  onSelect: () => void;
   onSettings: () => void;
   onUpdateApp?: () => void;
 }
@@ -135,11 +125,6 @@ export function OverflowMenu(props: OverflowMenuProps) {
         <button type="button" role="menuitem" className={row} onClick={act(props.onToggleShowOverdue)}>
           <OverdueIcon />
           {props.showOverdue ? 'Hide Overdue' : 'Show Overdue'}
-        </button>
-        <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
-        <button type="button" role="menuitem" className={row} onClick={act(props.onSelect)}>
-          <SelectIcon />
-          Select
         </button>
         <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
         <button type="button" role="menuitem" className={row} onClick={act(props.onUpdateApp)}>

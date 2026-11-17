@@ -36,7 +36,6 @@ import {
   type SyncStatusSnapshot,
 } from '../../sync/autoSync';
 import { setGoogleAccount } from '../../sync/googleAccount';
-import { computeTempoStats } from '../../domain/stats';
 import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
 import {
   ALL_TABS,
@@ -604,7 +603,6 @@ function GeneralPage({
   setStatus,
 }: SettingsPageProps & { setStatus: (s: Status) => void }) {
   const [prefs, update] = usePrefs();
-  const stats = computeTempoStats(tasks);
   const hasSampleTasks = tasks.some((t) => isSampleId(t.id) && !t.deletedAt);
   const defaultListValid = lists.some((l) => l.id === prefs.defaultListId);
 
@@ -656,24 +654,6 @@ function GeneralPage({
         </div>
       </Card>
       <Note>New installs start empty. Sample lists and tasks help you explore; clearing removes only sample items.</Note>
-
-      <SectionLabel>Quick stats</SectionLabel>
-      <Card className="p-3">
-        <div className="grid grid-cols-5 gap-1.5 text-center">
-          {([
-            ['Open', stats.openCount],
-            ['Overdue', stats.overdueCount],
-            ['Today', stats.dueTodayCount],
-            ['Done/wk', stats.completedThisWeek],
-            ['Streak', stats.completionStreakDays],
-          ] as const).map(([label, value]) => (
-            <div key={label} className="rounded-xl bg-tt-input py-2">
-              <div className="text-[15px] font-bold text-tt-text tabular-nums">{value}</div>
-              <div className="text-[10px] text-tt-secondary">{label}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
 
       <Card>
         <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={onShowShortcuts} />

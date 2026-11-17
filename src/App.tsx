@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
-  applyBatchOp,
   completeTask,
-  completeTasks,
   db,
   initDatabase,
   reorderTasks,
@@ -22,7 +20,6 @@ import {
   projectTaskForDate,
 } from './domain/recurrence';
 import { sortTasksForDailyView } from './domain/sorting';
-import { toggleSelected } from './domain/batch';
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
@@ -42,7 +39,6 @@ import { InstallPrompt } from './components/InstallPrompt';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
-import { SelectionBar, SelectionHeader } from './components/menu/SelectionBar';
 import {
   CalendarRange,
   Keyboard,
@@ -101,18 +97,11 @@ export function App() {
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
   const [changeDateTask, setChangeDateTask] = useState<Task | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-
-  const exitSelectMode = useCallback(() => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  }, []);
 
   const openSettings = useCallback((page: SettingsPageId = 'root') => {
     setSettingsPage(page);
@@ -367,29 +356,6 @@ export function App() {
     setOverflowAnchor(null);
   }, []);
 
-  const selectableIds = () => displayedTasks.map((t) => t.id);
-  const runBatch = async (fn: (ids: string[]) => Promise<unknown>) => {
-    const ids = [...selectedIds];
-    if (ids.length === 0) return;
-    await fn(ids);
-    exitSelectMode();
-    scheduleSync();
-  };
-  const batchComplete = () =>
-    runBatch((ids) =>
-      completeTasks(
-        ids.filter((id) => {
-          const t = activeTasks.find((x) => x.id === id);
-          return t && !isCompleted(t);
-        })
-      )
-    );
-  const batchSetDate = (date: string | null) => runBatch((ids) => applyBatchOp(ids, { type: 'setDate', date }));
-  const batchDelete = () =>
-    runBatch(async (ids) => {
-      await applyBatchOp(ids, { type: 'delete' });
-    });
-
   useKeyboardShortcuts({
     onCapture: openCapture,
     onEscape: () => {
@@ -403,10 +369,6 @@ export function App() {
       }
       if (isSettingsModalOpen) {
         setIsSettingsModalOpen(false);
-        return;
-      }
-      if (selectMode) {
-        exitSelectMode();
         return;
       }
     },
@@ -430,11 +392,10 @@ export function App() {
   };
 
   const renderTaskRows = (tasks: Task[], dense: boolean, reorderEnabled = false) => {
-    const canReorder = reorderEnabled && !selectMode;
     return (
       <ReorderableTaskList
         tasks={tasks}
-        enabled={canReorder}
+        enabled={reorderEnabled}
         onReorder={(taskIds) => {
           void reorderTasks(taskIds);
           scheduleSync();
@@ -445,9 +406,6 @@ export function App() {
             task={t}
             dense={dense}
             showDetails={prefs.showDetails}
-            selectMode={selectMode}
-            checked={selectedIds.has(t.id)}
-            onToggleCheck={() => setSelectedIds((prev) => toggleSelected(prev, t.id))}
             onSelect={() => handleEdit(t)}
             onComplete={() => handleComplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
             onUncomplete={() => handleUncomplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
@@ -468,21 +426,7 @@ export function App() {
   return (
     <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex flex-col overflow-hidden">
       {/* Header */}
-      {selectMode ? (
-        <div className="shrink-0">
-          <SelectionHeader
-            count={selectedIds.size}
-            total={displayedTasks.length}
-            onExit={exitSelectMode}
-            onSelectAll={() =>
-              setSelectedIds((prev) =>
-                prev.size === displayedTasks.length ? new Set() : new Set(selectableIds())
-              )
-            }
-          />
-        </div>
-      ) : (
-        <header className="shrink-0 flex items-center justify-between h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+      <header className="shrink-0 flex items-center justify-between h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -528,7 +472,6 @@ export function App() {
             </button>
           </div>
         </header>
-      )}
 
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 relative">
@@ -686,27 +629,16 @@ export function App() {
       </div>
 
       {/* FAB */}
-      {!selectMode && (
-        <button
-          type="button"
-          onClick={openCapture}
-          className="fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)] cursor-pointer hover:scale-105 active:scale-95 transition-all"
-          style={{ bottom: 'calc(16px + env(safe-area-inset-bottom))' }}
-          title="Add task"
-          aria-label="Add task"
-        >
-          <Plus className="w-7 h-7" strokeWidth={2.25} />
-        </button>
-      )}
-
-      {selectMode && (
-        <SelectionBar
-          count={selectedIds.size}
-          onComplete={() => void batchComplete()}
-          onSetDate={(d) => void batchSetDate(d)}
-          onDelete={() => void batchDelete()}
-        />
-      )}
+      <button
+        type="button"
+        onClick={openCapture}
+        className="fixed right-5 z-40 w-14 h-14 rounded-full bg-tt-blue hover:bg-tt-blue-hover text-white flex items-center justify-center shadow-[0_6px_18px_rgba(71,114,250,0.35)] cursor-pointer hover:scale-105 active:scale-95 transition-all"
+        style={{ bottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+        title="Add task"
+        aria-label="Add task"
+      >
+        <Plus className="w-7 h-7" strokeWidth={2.25} />
+      </button>
 
       <TaskModal
         isOpen={isTaskModalOpen}
@@ -748,10 +680,6 @@ export function App() {
         onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
         onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
         onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
-        onSelect={() => {
-          setSelectedIds(new Set());
-          setSelectMode(true);
-        }}
         onSettings={() => openSettings('root')}
         onUpdateApp={triggerAppUpdate}
       />

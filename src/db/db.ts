@@ -16,7 +16,6 @@ import {
   isCompletedOnDate,
   isRecurring,
 } from '../domain/recurrence';
-import { planBatch, type BatchOp } from '../domain/batch';
 import { newId } from '../domain/id';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { getStoredClientId } from '../sync/googleAuth';
@@ -500,23 +499,6 @@ export async function softDeleteFolder(id: string): Promise<void> {
       });
     }
   });
-}
-
-/** Select-mode batch write (move / set date / delete) in one transaction. Returns count changed. */
-export async function applyBatchOp(ids: string[], op: BatchOp): Promise<number> {
-  const count = await db.transaction('rw', db.tasks, async () => {
-    const tasks = (await db.tasks.bulkGet(ids)).filter((t): t is Task => !!t);
-    const updated = planBatch(tasks, ids, op);
-    if (updated.length) await db.tasks.bulkPut(updated);
-    return updated.length;
-  });
-  recordDiagEvent('batch_op', `type=${op.type} count=${ids.length}`);
-  return count;
-}
-
-/** Select-mode batch complete; recurring tasks advance to their next occurrence. */
-export async function completeTasks(ids: string[]): Promise<void> {
-  for (const id of ids) await completeTask(id);
 }
 
 function hasGoogleSyncConfigured(): boolean {

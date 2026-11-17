@@ -36,9 +36,9 @@ The following table provides an overview of all candidate features to remove, ra
 | **7** | **Custom Saved Filters & Query Builder** | `filters.ts`, `SavedFilterModal.tsx`, `savedFilters` table, query evaluator | ~550 LOC | Moderate | **Completed** |
 | **8** | **Swipe Actions & Manual Drag-and-Drop Reordering in Lists** | `SwipeActionButton.tsx`, `ReorderableTaskList.tsx`, `reorder.ts` | ~550 LOC | Moderate | **Kept (retained)** |
 | **9** | **Task Grouping & Multi-Criteria Sorting Engine** | `groupSort.ts`, `sorting.ts`, `taskGroups.ts`, `GroupSortSheet.tsx` | ~450 LOC | Moderate | **Completed** |
-| **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate | Proposed |
-| **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit | Proposed |
-| **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate | Proposed |
+| **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate | **Completed** |
+| **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit | **Completed** |
+| **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate | **Completed** |
 | **13** | **Global Keyboard Shortcuts for List Navigation** | `useKeyboardShortcuts.ts`, hotkeys 1–5, modal triggers | ~120 LOC | Low | Proposed |
 | **14** | **Search View & Search Mode** | Dedicated search view, query filters across titles/notes/tags | ~150 LOC | Low | Proposed |
 | **15** | **Priority Levels & Urgency Flagging** | `priority` field (`high`, `medium`, `low`), flags, urgency logic | ~250 LOC | Low | Proposed |
@@ -197,7 +197,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 10. Batch Selection & Bulk Operations Mode
+### 10. Batch Selection & Bulk Operations Mode [COMPLETED]
 * **Description**: TickTick's batch editing mode: selecting multiple tasks via checkboxes, with a bottom toolbar (`SelectionBar.tsx`) allowing bulk completion, rescheduling, moving to lists, or deletion.
 * **Files Involved**:
   - `src/components/menu/SelectionBar.tsx` (159 LOC)
@@ -211,7 +211,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 11. Dead / Orphaned Code Removal (Low-Hanging Fruit)
+### 11. Dead / Orphaned Code Removal (Low-Hanging Fruit) [COMPLETED]
 * **Description**: Code components and modules created during earlier iterations that are currently not imported or rendered anywhere in the application.
 * **Files Involved**:
   - `src/components/KanbanBoard.tsx` (145 LOC) — completely unreferenced component
@@ -225,7 +225,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 12. "Plan My Day" Daily Planning Workflow
+### 12. "Plan My Day" Daily Planning Workflow [COMPLETED]
 * **Description**: A morning review wizard modal inspired by TickTick / Microsoft To Do that prompts users to review overdue tasks and reschedule them into today.
 * **Files Involved**:
   - `src/components/PlanDaySheet.tsx` (140 LOC)

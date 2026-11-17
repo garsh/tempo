@@ -31,10 +31,6 @@ interface TaskCardProps {
   onTogglePin?: (id: string) => void;
   /** ⋮ › Show Details: notes preview under the title. */
   showDetails?: boolean;
-  /** ⋮ › Select: rows toggle selection instead of opening / completing. */
-  selectMode?: boolean;
-  checked?: boolean;
-  onToggleCheck?: (id: string) => void;
   /** Long-press drag-to-reorder support. */
   reorderEnabled?: boolean;
   isDragging?: boolean;
@@ -80,9 +76,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onEdit,
   onDelete,
   showDetails = false,
-  selectMode = false,
-  checked = false,
-  onToggleCheck,
   reorderEnabled = false,
   isDragging = false,
   isSettling = false,
@@ -134,7 +127,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
   const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
   const notesPreview = showDetails ? task.notes?.trim().split('\n').find((l) => l.trim()) : undefined;
-  const activate = () => (selectMode ? onToggleCheck?.(task.id) : onSelect?.(task));
+  const activate = () => onSelect?.(task);
 
   // --- Swipe-to-reveal gesture logic ---
   const DRAWER_WIDTH = 160;
@@ -167,7 +160,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
   useEffect(() => {
     const el = slidingRef.current;
-    if (!el || selectMode || isDragging) return;
+    if (!el || isDragging) return;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
@@ -237,11 +230,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [selectMode, isDragging, isOpen, swipeOffset, task.id, onSwipeChange]);
+  }, [isDragging, isOpen, swipeOffset, task.id, onSwipeChange]);
 
   const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     onRowPointerDown?.(e);
-    if (e.pointerType === 'mouse' && e.button === 0 && !selectMode && !isDragging) {
+    if (e.pointerType === 'mouse' && e.button === 0 && !isDragging) {
       if ((e.target as HTMLElement).closest('button, input, a')) return;
       mouseStartRef.current = {
         x: e.clientX,
@@ -291,7 +284,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       ref={rowRef}
       role="button"
       tabIndex={0}
-      aria-pressed={selectMode ? checked : undefined}
       data-dragging={isDragging ? 'true' : undefined}
       onPointerDown={handleRowPointerDown}
       onPointerMove={handleRowPointerMove}
@@ -310,7 +302,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         }
         activate();
       }}
-      onDoubleClick={() => !selectMode && !isOpen && onEdit?.(task)}
+      onDoubleClick={() => !isOpen && onEdit?.(task)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -401,39 +393,27 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           transition: isGesturing ? 'none' : 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
         className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
-          selected || (selectMode && checked)
+          selected
             ? 'bg-tt-blue-soft'
             : 'bg-tt-surface hover:bg-tt-hover'
         } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
       >
-      {selectMode ? (
-        <span
-          aria-hidden
-          data-testid="select-check"
-          className={`flex-shrink-0 w-[20px] h-[20px] rounded-full border-[1.5px] flex items-center justify-center ${
-            checked ? 'bg-tt-blue border-tt-blue text-white' : 'border-tt-pri-none'
-          }`}
+        <button
+          type="button"
+          onClick={handleCheck}
+          onPointerDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          disabled={completed && !onUncomplete}
+          title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
+          className="relative flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
+          style={{
+            borderColor: completed || justCompleted ? '#34C759' : borderColor,
+            backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
+            color: '#fff',
+          }}
         >
-          {checked && <Check className="w-3 h-3 stroke-[3]" />}
-        </span>
-      ) : (
-      <button
-        type="button"
-        onClick={handleCheck}
-        onPointerDown={(e) => e.stopPropagation()}
-        onTouchStart={(e) => e.stopPropagation()}
-        disabled={completed && !onUncomplete}
-        title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-        className="relative flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
-        style={{
-          borderColor: completed || justCompleted ? '#34C759' : borderColor,
-          backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
-          color: '#fff',
-        }}
-      >
-        {(completed || justCompleted) && <Check className="w-3 h-3 stroke-[3]" />}
-      </button>
-      )}
+          {(completed || justCompleted) && <Check className="w-3 h-3 stroke-[3]" />}
+        </button>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
