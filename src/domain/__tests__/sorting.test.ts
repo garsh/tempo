@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesSearch, matchesTag, sortTasksForDailyView } from '../sorting';
+import { sortTasksForDailyView } from '../sorting';
 import type { Task } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
@@ -57,20 +57,5 @@ describe('Sorting & search', () => {
       'pinned-after',
       'morning',
     ]);
-  });
-
-  it('matches search across title notes tags', () => {
-    const t = task({
-      id: '1',
-      title: 'Buy milk',
-      notes: 'Whole milk',
-      tags: ['Groceries'],
-    });
-    expect(matchesSearch(t, 'milk')).toBe(true);
-    expect(matchesSearch(t, 'groc')).toBe(true);
-    expect(matchesSearch(t, 'xyz')).toBe(false);
-    expect(matchesTag(t, 'Groceries')).toBe(true);
-    expect(matchesTag(t, 'Work')).toBe(false);
-    expect(matchesTag(t, null)).toBe(true);
   });
 });

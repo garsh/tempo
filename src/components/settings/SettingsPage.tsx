@@ -315,7 +315,7 @@ function AccountPage({
       if (result?.success) {
         setStatus({
           type: 'success',
-          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders, ${result.filtersCount} filters!`,
+          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders!`,
         });
       }
     } catch (err: unknown) {
@@ -891,7 +891,7 @@ function IntegrationsPage({
       <ConfirmDialog
         open={confirmClear}
         title="Clear all current data?"
-        message="This will remove all tasks, lists, folders, and saved filters from Tempo (keeping Inbox). If Google Drive sync is enabled, this removal will also sync to Drive."
+        message="This will remove all tasks, lists, and folders from Tempo (keeping Inbox). If Google Drive sync is enabled, this removal will also sync to Drive."
         confirmLabel="Clear all data"
         onCancel={() => setConfirmClear(false)}
         onConfirm={() => {

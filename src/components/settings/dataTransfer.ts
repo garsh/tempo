@@ -1,8 +1,8 @@
 import { db, ensureInboxList } from '../../db/db';
 import { SYNC_VERSION } from '../../sync/googleDrive';
-import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../../types/task';
+import type { Folder, SyncData, Task, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
-import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../../domain/merge';
+import { mergeFolders, mergeLists, mergeTasks } from '../../domain/merge';
 import { isCompleted, isRecurring } from '../../domain/recurrence';
 import { importTasksFromCsv } from '../../domain/ticktickImport';
 import { recordDiagEvent } from '../../domain/diagnostics';
@@ -17,7 +17,6 @@ export async function exportJsonBackup(): Promise<string> {
     tasks: await db.tasks.toArray(),
     lists: await db.lists.toArray(),
     folders: await db.folders.toArray(),
-    savedFilters: await db.savedFilters.toArray(),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -35,23 +34,20 @@ export async function importJsonBackup(content: string): Promise<string> {
   const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
   const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
   const incomingFolders: Folder[] = Array.isArray(parsed) ? [] : parsed.folders || [];
-  const incomingFilters: SavedFilter[] = Array.isArray(parsed) ? [] : parsed.savedFilters || [];
   if (!Array.isArray(incomingTasks)) throw new Error('Invalid format: tasks array missing.');
 
   const mergedTasks = mergeTasks(await db.tasks.toArray(), incomingTasks);
   const mergedLists = mergeLists(await db.lists.toArray(), incomingLists);
   const mergedFolders = mergeFolders(await db.folders.toArray(), incomingFolders);
-  const mergedFilters = mergeSavedFilters(await db.savedFilters.toArray(), incomingFilters);
 
-  await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
+  await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
     await db.tasks.bulkPut(mergedTasks);
     if (mergedLists.length > 0) await db.lists.bulkPut(mergedLists);
     if (mergedFolders.length > 0) await db.folders.bulkPut(mergedFolders);
-    if (mergedFilters.length > 0) await db.savedFilters.bulkPut(mergedFilters);
   });
   await ensureInboxList();
   recordDiagEvent('json_import', `incoming=${incomingTasks.length} merged=${mergedTasks.length}`);
-  return `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders, ${incomingFilters.length} filters!`;
+  return `Imported ${incomingTasks.length} tasks, ${incomingLists.length} lists, ${incomingFolders.length} folders!`;
 }
 
 function mergeHistories(sources: number[][]): number[] {

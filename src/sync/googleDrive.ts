@@ -1,7 +1,7 @@
 import { db, ensureInboxList } from '../db/db';
 import { recordDiagEvent } from '../domain/diagnostics';
-import { mergeFolders, mergeLists, mergeSavedFilters, mergeTasks } from '../domain/merge';
-import type { Folder, SavedFilter, SyncData, Task, TaskList } from '../types/task';
+import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
+import type { Folder, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
@@ -139,33 +139,27 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
   tasks: Task[];
   lists: TaskList[];
   folders: Folder[];
-  filters: SavedFilter[];
 }> {
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
   const remoteFolders: Folder[] = remoteData?.folders || [];
-  const remoteFilters: SavedFilter[] = remoteData?.savedFilters || [];
 
-  return await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
+  return await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
     const localTasks = await db.tasks.toArray();
     const localLists = await db.lists.toArray();
     const localFolders = await db.folders.toArray();
-    const localFilters = await db.savedFilters.toArray();
 
     const mergedTasks = mergeTasks(localTasks, remoteTasks);
     const mergedLists = mergeLists(localLists, remoteLists);
     const mergedFolders = mergeFolders(localFolders, remoteFolders);
-    const mergedFilters = mergeSavedFilters(localFilters, remoteFilters);
 
     const tasksToPut = getChangedEntities(localTasks, mergedTasks);
     const listsToPut = getChangedEntities(localLists, mergedLists);
     const foldersToPut = getChangedEntities(localFolders, mergedFolders);
-    const filtersToPut = getChangedEntities(localFilters, mergedFilters);
 
     if (tasksToPut.length > 0) await db.tasks.bulkPut(tasksToPut);
     if (listsToPut.length > 0) await db.lists.bulkPut(listsToPut);
     if (foldersToPut.length > 0) await db.folders.bulkPut(foldersToPut);
-    if (filtersToPut.length > 0) await db.savedFilters.bulkPut(filtersToPut);
 
     await ensureInboxList();
     recordDiagEvent(
@@ -177,7 +171,6 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
       tasks: mergedTasks,
       lists: await db.lists.toArray(),
       folders: await db.folders.toArray(),
-      filters: await db.savedFilters.toArray(),
     };
   });
 }
@@ -201,7 +194,6 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
       tasks: merged.tasks,
       lists: merged.lists,
       folders: merged.folders,
-      savedFilters: merged.filters,
     };
 
     await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
@@ -211,7 +203,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
       tasksCount: merged.tasks.length,
       listsCount: merged.lists.length,
       foldersCount: merged.folders.length,
-      filtersCount: merged.filters.length,
+      filtersCount: 0,
       syncedAt: now,
     };
   };

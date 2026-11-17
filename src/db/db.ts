@@ -2,9 +2,6 @@ import Dexie, { type Table } from 'dexie';
 import type {
   Folder,
   FolderInput,
-  SavedFilter,
-  SavedFilterInput,
-  Subtask,
   Task,
   TaskInput,
   TaskList,
@@ -31,7 +28,6 @@ export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
   lists!: Table<TaskList, string>;
   folders!: Table<Folder, string>;
-  savedFilters!: Table<SavedFilter, string>;
 
   constructor() {
     super('TempoDatabase');
@@ -62,6 +58,11 @@ export class TempoDatabase extends Dexie {
       lists: 'id, folderId, sortOrder, updatedAt, deletedAt',
       folders: 'id, sortOrder, updatedAt, deletedAt',
       savedFilters: 'id, updatedAt, deletedAt',
+    });
+
+    // v5: Drop savedFilters (Item 7)
+    this.version(5).stores({
+      savedFilters: null,
     });
   }
 }
@@ -135,7 +136,7 @@ export async function clearAllData(): Promise<number> {
     items.filter((x) => !x.deletedAt).map((x) => ({ ...x, deletedAt: now, updatedAt: now }));
 
   let removedTasks = 0;
-  await db.transaction('rw', db.folders, db.lists, db.tasks, db.savedFilters, async () => {
+  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
     const tasks = markDeleted(await db.tasks.toArray());
     removedTasks = tasks.length;
     if (tasks.length) await db.tasks.bulkPut(tasks);
@@ -145,9 +146,6 @@ export async function clearAllData(): Promise<number> {
 
     const folders = markDeleted(await db.folders.toArray());
     if (folders.length) await db.folders.bulkPut(folders);
-
-    const filters = markDeleted(await db.savedFilters.toArray());
-    if (filters.length) await db.savedFilters.bulkPut(filters);
   });
   await ensureInboxList();
   recordDiagEvent('clear_all_data', `removedTasks=${removedTasks}`);
@@ -360,33 +358,6 @@ export async function togglePinTask(id: string): Promise<Task | null> {
   return updated;
 }
 
-export async function toggleSubtask(
-  taskId: string,
-  subtaskId: string
-): Promise<Task | null> {
-  const task = await db.tasks.get(taskId);
-  if (!task) return null;
-  const now = Date.now();
-  const subtasks = (task.subtasks || []).map((s) =>
-    s.id === subtaskId ? { ...s, completed: !s.completed } : s
-  );
-  const updated: Task = { ...task, subtasks, updatedAt: now };
-  await db.tasks.put(updated);
-  return updated;
-}
-
-export async function setTaskSubtasks(
-  taskId: string,
-  subtasks: Subtask[]
-): Promise<Task | null> {
-  const task = await db.tasks.get(taskId);
-  if (!task) return null;
-  const now = Date.now();
-  const updated: Task = { ...task, subtasks, updatedAt: now };
-  await db.tasks.put(updated);
-  return updated;
-}
-
 export async function softDeleteTask(id: string): Promise<void> {
   const task = await db.tasks.get(id);
   if (!task) return;
@@ -531,49 +502,6 @@ export async function softDeleteFolder(id: string): Promise<void> {
   });
 }
 
-export async function saveSavedFilter(filter: SavedFilterInput): Promise<SavedFilter> {
-  const now = Date.now();
-  if (filter.id) {
-    const existing = await db.savedFilters.get(filter.id);
-    const full: SavedFilter = {
-      ...(existing || {}),
-      ...filter,
-      id: filter.id,
-      name: filter.name,
-      match: filter.match,
-      criteria: filter.criteria,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      deletedAt: existing?.deletedAt ?? null,
-    };
-    await db.savedFilters.put(full);
-    return full;
-  }
-
-  const full: SavedFilter = {
-    id: newId(),
-    name: filter.name,
-    match: filter.match,
-    criteria: filter.criteria,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.savedFilters.put(full);
-  return full;
-}
-
-export async function softDeleteSavedFilter(id: string): Promise<void> {
-  const filter = await db.savedFilters.get(id);
-  if (!filter) return;
-  const now = Date.now();
-  await db.savedFilters.put({
-    ...filter,
-    deletedAt: now,
-    updatedAt: now,
-  });
-}
-
 /** Select-mode batch write (move / set date / delete) in one transaction. Returns count changed. */
 export async function applyBatchOp(ids: string[], op: BatchOp): Promise<number> {
   const count = await db.transaction('rw', db.tasks, async () => {
@@ -657,13 +585,12 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 
   const result = await db.transaction(
     'rw',
-    [db.tasks, db.lists, db.folders, db.savedFilters],
+    [db.tasks, db.lists, db.folders],
     async () => {
-      const [allLists, allTasks, allFolders, allFilters] = await Promise.all([
+      const [allLists, allTasks, allFolders] = await Promise.all([
         db.lists.toArray(),
         db.tasks.toArray(),
         db.folders.toArray(),
-        db.savedFilters.toArray(),
       ]);
 
       // 1. Merge duplicate active lists sharing the same case-insensitive name.
@@ -767,7 +694,6 @@ export async function repairAndDeduplicateDatabase(): Promise<{
           .filter((l) => !!l.deletedAt)
           .map((l) => l.id);
         const deletedFolderIds = allFolders.filter((f) => !!f.deletedAt).map((f) => f.id);
-        const deletedFilterIds = allFilters.filter((f) => !!f.deletedAt).map((f) => f.id);
 
         const deletedTaskIdSet = new Set(deletedTaskIds);
         const tasksToPut = Array.from(dirtyTaskIds)
@@ -778,13 +704,11 @@ export async function repairAndDeduplicateDatabase(): Promise<{
         if (deletedTaskIds.length) await db.tasks.bulkDelete(deletedTaskIds);
         if (deletedListIds.length) await db.lists.bulkDelete(deletedListIds);
         if (deletedFolderIds.length) await db.folders.bulkDelete(deletedFolderIds);
-        if (deletedFilterIds.length) await db.savedFilters.bulkDelete(deletedFilterIds);
 
         purgedTombstones =
           deletedTaskIds.length +
           deletedListIds.length +
-          deletedFolderIds.length +
-          deletedFilterIds.length;
+          deletedFolderIds.length;
       } else {
         const tasksToPut = Array.from(dirtyTaskIds)
           .map((id) => taskMap.get(id)!)

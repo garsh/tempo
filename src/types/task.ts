@@ -84,46 +84,13 @@ export interface Folder {
   deletedAt?: number | null;
 }
 
-/** Due bucket used by saved filters (Phase 4). */
-export type DueFilterBucket = 'overdue' | 'today' | 'tomorrow' | 'next7' | 'later' | 'none';
-
-/**
- * Criteria for a saved filter. Empty arrays / undefined mean "any".
- * Combined with `match` (AND = every set criterion must match; OR = any set criterion).
- */
-export interface FilterCriteria {
-  tags?: string[];
-  priorities?: TaskPriority[];
-  dueBuckets?: DueFilterBucket[];
-  listIds?: string[];
-  /** Free-text substring (title / notes / tags). */
-  query?: string;
-  /** When true, only pinned tasks. */
-  pinnedOnly?: boolean;
-}
-
-/** User-saved smart filter (Phase 4). */
-export interface SavedFilter {
-  id: string;
-  name: string;
-  match: 'and' | 'or';
-  criteria: FilterCriteria;
-  createdAt: number;
-  updatedAt: number;
-  deletedAt?: number | null;
-}
-
-export type SavedFilterInput = Omit<SavedFilter, 'id' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-};
-
 export interface SyncData {
   version: number;
   exportedAt: number;
   tasks: Task[];
   lists: TaskList[];
   folders?: Folder[];
-  savedFilters?: SavedFilter[];
+  savedFilters?: unknown[];
 }
 
 export type TaskInput = Omit<

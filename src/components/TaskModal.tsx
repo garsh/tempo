@@ -73,7 +73,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
         setEndOnDate('');
         setEndAfterCount('');
       }
-      setDueDate(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : '');
+      setDueDate(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : defaultDueAt ? getDueDatePart(defaultDueAt) : '');
       setPinned(!!initialTask.pinned);
     } else {
       setTitle('');

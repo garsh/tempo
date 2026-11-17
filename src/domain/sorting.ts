@@ -57,23 +57,3 @@ export function sortTasksForDailyView(tasks: Task[], now: Date = new Date()): Ta
     return a.title.localeCompare(b.title);
   });
 }
-
-/**
- * Filter by search query (title, notes, tags) — case-insensitive.
- */
-export function matchesSearch(task: Task, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  if (task.title.toLowerCase().includes(q)) return true;
-  if (task.notes?.toLowerCase().includes(q)) return true;
-  if (task.tags?.some((tag) => tag.toLowerCase().includes(q))) return true;
-  return false;
-}
-
-/**
- * Filter by tag pill (exact match on a tag).
- */
-export function matchesTag(task: Task, tag: string | null): boolean {
-  if (!tag) return true;
-  return !!task.tags?.includes(tag);
-}

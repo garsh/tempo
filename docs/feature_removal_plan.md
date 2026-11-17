@@ -32,10 +32,10 @@ The following table provides an overview of all candidate features to remove, ra
 | **3** | **TickTick CSV & Backup Import Subsystem** | `ticktickImport.ts`, `csvParse.ts`, repeat/timezone parsing, import UI | ~950 LOC | High | **Kept (deferred)** |
 | **4** | **Task Detail Pane & Subtasks / Checklists** | `TaskDetailPane.tsx`, subtask models, subtask CRUD, card previews | ~800 LOC | High | **Completed** |
 | **5** | **Time-of-Day, Due Time Pickers & Push Notifications** | `notifications.ts`, Web Notification API, time pickers, 12h/24h time formatting | ~650 LOC | Moderate-High | **Completed** |
-| **6** | **Natural Language Quick Add & Quick Capture** | `quickCapture.ts`, `QuickAddSheet.tsx`, token regex parsers (`#tag`, `!priority`) | ~580 LOC | Moderate | Proposed |
-| **7** | **Custom Saved Filters & Query Builder** | `filters.ts`, `SavedFilterModal.tsx`, `savedFilters` table, query evaluator | ~550 LOC | Moderate | Proposed |
-| **8** | **Swipe Actions & Manual Drag-and-Drop Reordering in Lists** | `SwipeActionButton.tsx`, `ReorderableTaskList.tsx`, `reorder.ts` | ~550 LOC | Moderate | Proposed |
-| **9** | **Task Grouping & Multi-Criteria Sorting Engine** | `groupSort.ts`, `sorting.ts`, `taskGroups.ts`, `GroupSortSheet.tsx` | ~450 LOC | Moderate | Proposed |
+| **6** | **Natural Language Quick Add & Quick Capture** | `quickCapture.ts`, `QuickAddSheet.tsx`, token regex parsers (`#tag`, `!priority`) | ~580 LOC | Moderate | **Completed** |
+| **7** | **Custom Saved Filters & Query Builder** | `filters.ts`, `SavedFilterModal.tsx`, `savedFilters` table, query evaluator | ~550 LOC | Moderate | **Completed** |
+| **8** | **Swipe Actions & Manual Drag-and-Drop Reordering in Lists** | `SwipeActionButton.tsx`, `ReorderableTaskList.tsx`, `reorder.ts` | ~550 LOC | Moderate | **Kept (retained)** |
+| **9** | **Task Grouping & Multi-Criteria Sorting Engine** | `groupSort.ts`, `sorting.ts`, `taskGroups.ts`, `GroupSortSheet.tsx` | ~450 LOC | Moderate | **Completed** |
 | **10** | **Batch Selection & Bulk Operations Mode** | `SelectionBar.tsx`, `batch.ts`, multi-select state in `App.tsx` | ~450 LOC | Moderate | Proposed |
 | **11** | **Dead / Orphaned Code Removal** | `KanbanBoard.tsx`, `StatsStrip.tsx`, uncalled `parseQuickCapture` | ~450 LOC | Low-Hanging Fruit | Proposed |
 | **12** | **"Plan My Day" Daily Planning Workflow** | `PlanDaySheet.tsx`, `planDay.ts`, morning review wizard | ~280 LOC | Low-Moderate | Proposed |
@@ -136,7 +136,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 6. Natural Language Quick Add & Quick Capture
+### 6. Natural Language Quick Add & Quick Capture [COMPLETED]
 * **Description**: A multi-field quick add sheet and natural language token extractor designed to parse input strings like `"Buy milk tomorrow #errands !high 3pm"`. Much of this is already disconnected dead code.
 * **Files Involved**:
   - `src/domain/quickCapture.ts` (152 LOC) & `src/domain/__tests__/quickCapture.test.ts` (45 LOC)
@@ -151,7 +151,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 7. Custom Saved Filters & Query Builder
+### 7. Custom Saved Filters & Query Builder [COMPLETED]
 * **Description**: TickTick's custom filter feature allowing complex compound queries based on priorities, due date buckets, lists, and tags, with persistence in a `savedFilters` database table.
 * **Files Involved**:
   - `src/components/SavedFilterModal.tsx` (293 LOC)
@@ -182,7 +182,7 @@ The following table provides an overview of all candidate features to remove, ra
 
 ---
 
-### 9. Task Grouping & Multi-Criteria Sorting Engine
+### 9. Task Grouping & Multi-Criteria Sorting Engine [COMPLETED]
 * **Description**: A multi-field grouping (by list, due date, priority, title, none) and sorting system (by sortOrder, due date, priority, title) accessed via a dedicated bottom sheet (`GroupSortSheet.tsx`).
 * **Files Involved**:
   - `src/domain/groupSort.ts` (127 LOC) & `src/domain/__tests__/groupSort.test.ts` (110 LOC)

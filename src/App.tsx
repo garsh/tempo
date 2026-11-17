@@ -7,12 +7,11 @@ import {
   db,
   initDatabase,
   reorderTasks,
-  saveSavedFilter,
   saveTask,
   softDeleteTask,
   uncompleteTask,
 } from './db/db';
-import type { AppView, SavedFilter, Task, TaskInput } from './types/task';
+import type { AppView, Task, TaskInput } from './types/task';
 import {
   addDays,
   formatDate,
@@ -35,8 +34,6 @@ import { TaskModal } from './components/TaskModal';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
-import { QuickCaptureModal } from './components/QuickCaptureModal';
-import { SavedFilterModal } from './components/SavedFilterModal';
 import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
@@ -45,7 +42,6 @@ import { InstallPrompt } from './components/InstallPrompt';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
-import { GroupSortSheet } from './components/menu/GroupSortSheet';
 import { SelectionBar, SelectionHeader } from './components/menu/SelectionBar';
 import {
   CalendarRange,
@@ -76,10 +72,6 @@ export function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
-  const [quickCaptureText, setQuickCaptureText] = useState('');
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-  const [editingFilter, setEditingFilter] = useState<SavedFilter | null>(null);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -109,7 +101,6 @@ export function App() {
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
-  const [isGroupSortOpen, setIsGroupSortOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
@@ -152,8 +143,8 @@ export function App() {
     const parts = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean);
     const combined = parts.join(' — ').trim();
     if (combined) {
-      setQuickCaptureText(combined);
-      setIsQuickCaptureOpen(true);
+      setEditingTask({ title: combined } as Task);
+      setIsTaskModalOpen(true);
     }
     const url = new URL(window.location.href);
     ['share', 'text', 'title', 'url'].forEach((k) => url.searchParams.delete(k));
@@ -172,14 +163,6 @@ export function App() {
 
   const { status: syncStatus, refreshStatus: refreshSyncStatus, scheduleSync } = useAutoSync();
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
-
-  const allTags = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of activeTasks) {
-      if (t.tags) for (const tag of t.tags) set.add(tag);
-    }
-    return Array.from(set).sort();
-  }, [activeTasks]);
 
   const displayedTasks = useMemo(() => {
     if (activeView === 'calendar-month' && calSelectedDate) {
@@ -298,8 +281,8 @@ export function App() {
   }, [activeView, calExpanded]);
 
   const openCapture = useCallback(() => {
-    setQuickCaptureText('');
-    setIsQuickCaptureOpen(true);
+    setEditingTask(null);
+    setIsTaskModalOpen(true);
   }, []);
 
   const handleComplete = async (id: string, dateStr?: string) => {
@@ -379,16 +362,6 @@ export function App() {
     await handleDelete(taskId);
   };
 
-  const handleSaveFilter = async (filter: {
-    id?: string;
-    name: string;
-    match: 'and' | 'or';
-    criteria: SavedFilter['criteria'];
-  }) => {
-    await saveSavedFilter(filter);
-    scheduleSync();
-  };
-
   const goView = useCallback((view: AppView) => {
     setActiveView(view);
     setOverflowAnchor(null);
@@ -422,14 +395,6 @@ export function App() {
     onEscape: () => {
       if (showShortcutsHelp) {
         setShowShortcutsHelp(false);
-        return;
-      }
-      if (isQuickCaptureOpen) {
-        setIsQuickCaptureOpen(false);
-        return;
-      }
-      if (isFilterModalOpen) {
-        setIsFilterModalOpen(false);
         return;
       }
       if (isTaskModalOpen) {
@@ -743,25 +708,6 @@ export function App() {
         />
       )}
 
-      <QuickCaptureModal
-        isOpen={isQuickCaptureOpen}
-        onClose={() => setIsQuickCaptureOpen(false)}
-        onSave={handleSave}
-        defaultDueAt={calSelectedDate ?? undefined}
-        initialTitle={quickCaptureText}
-      />
-
-      <SavedFilterModal
-        isOpen={isFilterModalOpen}
-        onClose={() => {
-          setIsFilterModalOpen(false);
-          setEditingFilter(null);
-        }}
-        onSave={handleSaveFilter}
-        availableTags={allTags}
-        initial={editingFilter}
-      />
-
       <TaskModal
         isOpen={isTaskModalOpen}
         onClose={() => {
@@ -770,6 +716,7 @@ export function App() {
         }}
         onSave={handleSave}
         initialTask={editingTask}
+        defaultDueAt={calSelectedDate ?? undefined}
       />
 
       <SettingsPage
@@ -801,21 +748,12 @@ export function App() {
         onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
         onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
         onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
-        onGroupSort={() => setIsGroupSortOpen(true)}
         onSelect={() => {
           setSelectedIds(new Set());
           setSelectMode(true);
         }}
         onSettings={() => openSettings('root')}
         onUpdateApp={triggerAppUpdate}
-      />
-
-      <GroupSortSheet
-        open={isGroupSortOpen}
-        groupBy={prefs.groupBy}
-        sortBy={prefs.sortBy}
-        onChange={(patch) => updatePrefs(patch)}
-        onClose={() => setIsGroupSortOpen(false)}
       />
 
       <InstallPrompt />

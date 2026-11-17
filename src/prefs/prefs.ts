@@ -21,8 +21,7 @@ export type SmartListId =
   | 'inbox'
   | 'all'
   | 'completed'
-  | 'tags'
-  | 'filters';
+  | 'tags';
 
 export interface Prefs {
   theme: ThemePref;
@@ -65,7 +64,6 @@ export const SMART_LIST_IDS: SmartListId[] = [
   'inbox',
   'all',
   'completed',
-  'filters',
 ];
 export const SMART_LIST_LABELS: Record<SmartListId, string> = {
   today: 'Today',
@@ -75,7 +73,6 @@ export const SMART_LIST_LABELS: Record<SmartListId, string> = {
   all: 'All Open',
   completed: 'Completed',
   tags: 'Tags',
-  filters: 'Filters',
 };
 
 export const DEFAULT_PREFS: Prefs = {
@@ -99,7 +96,6 @@ export const DEFAULT_PREFS: Prefs = {
     all: false,
     completed: false,
     tags: false,
-    filters: true,
   },
 };
 

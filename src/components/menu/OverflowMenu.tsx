@@ -41,14 +41,6 @@ function OverdueIcon() {
   );
 }
 
-function GroupSortIcon() {
-  return (
-    <svg {...ICON}>
-      <path d="M6 3v14M6 3 3.5 5.6M14 17V3M14 17l2.5-2.6" />
-    </svg>
-  );
-}
-
 function SelectIcon() {
   return (
     <svg {...ICON}>
@@ -80,7 +72,6 @@ interface OverflowMenuProps {
   onToggleDetails: () => void;
   onToggleHideCompleted: () => void;
   onToggleShowOverdue: () => void;
-  onGroupSort: () => void;
   onSelect: () => void;
   onSettings: () => void;
   onUpdateApp?: () => void;
@@ -146,10 +137,6 @@ export function OverflowMenu(props: OverflowMenuProps) {
           {props.showOverdue ? 'Hide Overdue' : 'Show Overdue'}
         </button>
         <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
-        <button type="button" role="menuitem" className={row} onClick={act(props.onGroupSort)}>
-          <GroupSortIcon />
-          Group &amp; Sort
-        </button>
         <button type="button" role="menuitem" className={row} onClick={act(props.onSelect)}>
           <SelectIcon />
           Select
