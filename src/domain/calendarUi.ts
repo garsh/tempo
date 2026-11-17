@@ -154,4 +154,38 @@ export function buildWeekCells(
   return cells;
 }
 
+export const CALENDAR_EXPANDED_STORAGE_KEY = 'tempo_calendar_expanded';
+
+/**
+ * Reads whether the calendar should start expanded (month view) or collapsed (week view).
+ * Accepts 'month' | 'week', or boolean string representations ('true' | 'false', '1' | '0').
+ * Defaults to false (week view) if not set or invalid.
+ */
+export function readStoredCalendarExpanded(storage?: Pick<Storage, 'getItem'>): boolean {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    const raw = s?.getItem(CALENDAR_EXPANDED_STORAGE_KEY);
+    if (raw === 'month' || raw === 'true' || raw === '1') return true;
+    if (raw === 'week' || raw === 'false' || raw === '0') return false;
+  } catch {
+    /* ignore storage access errors */
+  }
+  return false;
+}
+
+/**
+ * Saves whether the calendar is showing month view (expanded) or week view (collapsed).
+ */
+export function saveStoredCalendarExpanded(
+  expanded: boolean,
+  storage?: Pick<Storage, 'setItem'>
+): void {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    s?.setItem(CALENDAR_EXPANDED_STORAGE_KEY, expanded ? 'month' : 'week');
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 export { shiftMonth };

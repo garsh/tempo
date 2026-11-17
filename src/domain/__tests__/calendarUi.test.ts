@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CALENDAR_EXPANDED_STORAGE_KEY,
   buildWeekCells,
   calendarRowDueLabel,
   dayCardTitle,
@@ -8,6 +9,8 @@ import {
   jumpToToday,
   monthContains,
   monthName,
+  readStoredCalendarExpanded,
+  saveStoredCalendarExpanded,
   shiftMonthView,
   shiftWeek,
 } from '../calendarUi';
@@ -161,6 +164,70 @@ describe('calendar swiping (week and month shifting)', () => {
 
       const prevYear = shiftMonthView(2026, 0, '2026-01-01', -1, mockToday);
       expect(prevYear).toEqual({ dateStr: '2025-12-01', year: 2025, monthIndex: 11 });
+    });
+  });
+
+  describe('calendar view persistence (week vs month)', () => {
+    function createMockStorage() {
+      const map = new Map<string, string>();
+      return {
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => void map.set(k, v),
+        map,
+      };
+    }
+
+    it('defaults to false (week view) when storage is empty', () => {
+      const storage = createMockStorage();
+      expect(readStoredCalendarExpanded(storage)).toBe(false);
+    });
+
+    it('returns true when storage has month or boolean true', () => {
+      const storage = createMockStorage();
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, 'month');
+      expect(readStoredCalendarExpanded(storage)).toBe(true);
+
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, 'true');
+      expect(readStoredCalendarExpanded(storage)).toBe(true);
+
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, '1');
+      expect(readStoredCalendarExpanded(storage)).toBe(true);
+    });
+
+    it('returns false when storage has week or boolean false', () => {
+      const storage = createMockStorage();
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, 'week');
+      expect(readStoredCalendarExpanded(storage)).toBe(false);
+
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, 'false');
+      expect(readStoredCalendarExpanded(storage)).toBe(false);
+
+      storage.setItem(CALENDAR_EXPANDED_STORAGE_KEY, '0');
+      expect(readStoredCalendarExpanded(storage)).toBe(false);
+    });
+
+    it('saves month and week representations correctly', () => {
+      const storage = createMockStorage();
+      saveStoredCalendarExpanded(true, storage);
+      expect(storage.getItem(CALENDAR_EXPANDED_STORAGE_KEY)).toBe('month');
+      expect(readStoredCalendarExpanded(storage)).toBe(true);
+
+      saveStoredCalendarExpanded(false, storage);
+      expect(storage.getItem(CALENDAR_EXPANDED_STORAGE_KEY)).toBe('week');
+      expect(readStoredCalendarExpanded(storage)).toBe(false);
+    });
+
+    it('handles storage errors gracefully', () => {
+      const faultyStorage = {
+        getItem: () => {
+          throw new Error('Access denied');
+        },
+        setItem: () => {
+          throw new Error('Quota exceeded');
+        },
+      };
+      expect(readStoredCalendarExpanded(faultyStorage)).toBe(false);
+      expect(() => saveStoredCalendarExpanded(true, faultyStorage)).not.toThrow();
     });
   });
 });

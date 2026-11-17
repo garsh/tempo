@@ -22,6 +22,10 @@ import {
 import { sortTasksForDailyView } from './domain/sorting';
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
+import {
+  readStoredCalendarExpanded,
+  saveStoredCalendarExpanded,
+} from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -73,7 +77,7 @@ export function App() {
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
-  const [calExpanded, setCalExpanded] = useState(false);
+  const [calExpanded, setCalExpanded] = useState<boolean>(readStoredCalendarExpanded);
 
   useEffect(() => {
     try {
@@ -82,6 +86,10 @@ export function App() {
       /* ignore storage errors */
     }
   }, [activeView]);
+
+  useEffect(() => {
+    saveStoredCalendarExpanded(calExpanded);
+  }, [calExpanded]);
 
   const [calDragProgress, setCalDragProgress] = useState<number | null>(null);
   const calAreaRef = useRef<HTMLDivElement>(null);
