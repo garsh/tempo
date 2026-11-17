@@ -72,11 +72,25 @@ export async function refreshGoogleAccount(accessToken: string): Promise<void> {
 }
 
 let inflight: Promise<DriveSyncResult | null> | null = null;
+let queuedSync = false;
+let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Schedule a background Drive sync after a brief debounce period (e.g. after local edits).
+ */
+export function triggerDebouncedSync(delayMs = 2000): void {
+  if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
+  if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => {
+    syncDebounceTimer = null;
+    void runDriveSync();
+  }, delayMs);
+}
 
 /**
  * Run a Drive sync if a client ID is configured.
  * Silent by default (no OAuth popup). Interactive when allowInteractive.
- * Dedupes concurrent calls.
+ * Dedupes concurrent calls and queues follow-up if called while in-flight.
  */
 export async function runDriveSync(opts: {
   allowInteractive?: boolean;
@@ -86,7 +100,10 @@ export async function runDriveSync(opts: {
   if (!clientId) return null;
   if (!opts.force && !isAutoSyncEnabled() && !opts.allowInteractive) return null;
 
-  if (inflight) return inflight;
+  if (inflight) {
+    queuedSync = true;
+    return inflight;
+  }
 
   inflight = (async () => {
     try {
@@ -114,6 +131,10 @@ export async function runDriveSync(opts: {
       throw err;
     } finally {
       inflight = null;
+      if (queuedSync) {
+        queuedSync = false;
+        triggerDebouncedSync(1000);
+      }
     }
   })();
 

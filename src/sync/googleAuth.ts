@@ -78,6 +78,10 @@ export function getCachedAccessToken(): string | null {
 
 export function loadGoogleScript(): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
     if (window.google?.accounts?.oauth2) {
       resolve();
       return;
@@ -116,7 +120,7 @@ export function requestGoogleAccessToken(
   if (cached) return Promise.resolve(cached);
 
   return new Promise((resolve, reject) => {
-    if (!window.google?.accounts?.oauth2) {
+    if (typeof window === 'undefined' || !window.google?.accounts?.oauth2) {
       reject(new Error('Google Identity Services script not loaded.'));
       return;
     }

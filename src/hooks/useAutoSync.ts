@@ -4,6 +4,7 @@ import {
   isAutoSyncEnabled,
   readSyncStatusSnapshot,
   runDriveSync,
+  triggerDebouncedSync,
   type SyncPhase,
   type SyncStatusSnapshot,
 } from '../sync/autoSync';
@@ -13,6 +14,7 @@ import { getGoogleAccount } from '../sync/googleAccount';
 export function useAutoSync(onSynced?: () => void): {
   status: SyncStatusSnapshot;
   syncNow: (interactive?: boolean) => Promise<void>;
+  scheduleSync: (delayMs?: number) => void;
   refreshStatus: () => void;
 } {
   const [status, setStatus] = useState<SyncStatusSnapshot>(() => readSyncStatusSnapshot());
@@ -20,6 +22,10 @@ export function useAutoSync(onSynced?: () => void): {
   useEffect(() => {
     onSyncedRef.current = onSynced;
   }, [onSynced]);
+
+  const scheduleSync = useCallback((delayMs = 2000) => {
+    triggerDebouncedSync(delayMs);
+  }, []);
 
   const refreshStatus = useCallback((phase?: SyncPhase) => {
     setStatus(readSyncStatusSnapshot(phase ?? 'idle'));
@@ -94,5 +100,5 @@ export function useAutoSync(onSynced?: () => void): {
     };
   }, [syncNow]);
 
-  return { status, syncNow, refreshStatus };
+  return { status, syncNow, scheduleSync, refreshStatus };
 }

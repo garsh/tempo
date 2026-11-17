@@ -126,45 +126,60 @@ export async function uploadDriveBackup(
   return res.headers.get('ETag');
 }
 
+function getChangedEntities<T extends { id: string }>(local: T[], merged: T[]): T[] {
+  const localMap = new Map(local.map((item) => [item.id, item]));
+  return merged.filter((item) => {
+    const existing = localMap.get(item.id);
+    if (!existing) return true;
+    return JSON.stringify(existing) !== JSON.stringify(item);
+  });
+}
+
 async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
   tasks: Task[];
   lists: TaskList[];
   folders: Folder[];
   filters: SavedFilter[];
 }> {
-  const localTasks = await db.tasks.toArray();
-  const localLists = await db.lists.toArray();
-  const localFolders = await db.folders.toArray();
-  const localFilters = await db.savedFilters.toArray();
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
   const remoteFolders: Folder[] = remoteData?.folders || [];
   const remoteFilters: SavedFilter[] = remoteData?.savedFilters || [];
 
-  const mergedTasks = mergeTasks(localTasks, remoteTasks);
-  const mergedLists = mergeLists(localLists, remoteLists);
-  const mergedFolders = mergeFolders(localFolders, remoteFolders);
-  const mergedFilters = mergeSavedFilters(localFilters, remoteFilters);
+  return await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
+    const localTasks = await db.tasks.toArray();
+    const localLists = await db.lists.toArray();
+    const localFolders = await db.folders.toArray();
+    const localFilters = await db.savedFilters.toArray();
 
-  await db.transaction('rw', db.tasks, db.lists, db.folders, db.savedFilters, async () => {
-    await db.tasks.bulkPut(mergedTasks);
-    await db.lists.bulkPut(mergedLists);
-    await db.folders.bulkPut(mergedFolders);
-    await db.savedFilters.bulkPut(mergedFilters);
+    const mergedTasks = mergeTasks(localTasks, remoteTasks);
+    const mergedLists = mergeLists(localLists, remoteLists);
+    const mergedFolders = mergeFolders(localFolders, remoteFolders);
+    const mergedFilters = mergeSavedFilters(localFilters, remoteFilters);
+
+    const tasksToPut = getChangedEntities(localTasks, mergedTasks);
+    const listsToPut = getChangedEntities(localLists, mergedLists);
+    const foldersToPut = getChangedEntities(localFolders, mergedFolders);
+    const filtersToPut = getChangedEntities(localFilters, mergedFilters);
+
+    if (tasksToPut.length > 0) await db.tasks.bulkPut(tasksToPut);
+    if (listsToPut.length > 0) await db.lists.bulkPut(listsToPut);
+    if (foldersToPut.length > 0) await db.folders.bulkPut(foldersToPut);
+    if (filtersToPut.length > 0) await db.savedFilters.bulkPut(filtersToPut);
+
+    await ensureInboxList();
+    recordDiagEvent(
+      'drive_sync',
+      `local=${localTasks.length} remote=${remoteTasks.length} merged=${mergedTasks.length} updatedTasks=${tasksToPut.length}`
+    );
+
+    return {
+      tasks: mergedTasks,
+      lists: await db.lists.toArray(),
+      folders: await db.folders.toArray(),
+      filters: await db.savedFilters.toArray(),
+    };
   });
-
-  await ensureInboxList();
-  recordDiagEvent(
-    'drive_sync',
-    `local=${localTasks.length} remote=${remoteTasks.length} merged=${mergedTasks.length}`
-  );
-
-  return {
-    tasks: mergedTasks,
-    lists: await db.lists.toArray(),
-    folders: await db.folders.toArray(),
-    filters: await db.savedFilters.toArray(),
-  };
 }
 
 /**

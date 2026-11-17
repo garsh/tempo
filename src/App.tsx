@@ -231,8 +231,8 @@ export function App() {
     setSidebarOpen(false);
   }, []);
 
-  const [fallbackTasks, setFallbackTasks] = useState<Task[] | null>(null);
-  const [dbRevision, setDbRevision] = useState(0);
+  const [initialTasks, setInitialTasks] = useState<Task[] | null>(null);
+  const [reorderOverride, setReorderOverride] = useState<Map<string, number> | null>(null);
 
   useEffect(() => {
     initDiagnostics();
@@ -243,7 +243,7 @@ export function App() {
           db.tasks.toArray(),
           db.lists.toArray(),
         ]);
-        setFallbackTasks(idbTasks);
+        setInitialTasks(idbTasks);
         const listSummary = idbLists
           .map((l) => `${l.name}${l.deletedAt ? '(del)' : ''}`)
           .join(',');
@@ -276,28 +276,22 @@ export function App() {
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
-  const liveTasks = useLiveQuery(() => db.tasks.toArray(), [dbRevision]);
+  const liveTasks = useLiveQuery(() => db.tasks.toArray(), []);
   const allTasks = useMemo(() => {
-    if (!liveTasks && !fallbackTasks) return EMPTY_TASKS;
-    if (!liveTasks) return fallbackTasks!;
-    if (!fallbackTasks) return liveTasks;
-    let maxLive = 0;
-    for (const t of liveTasks) {
-      if (t.updatedAt > maxLive) maxLive = t.updatedAt;
-    }
-    let maxFallback = 0;
-    for (const t of fallbackTasks) {
-      if (t.updatedAt > maxFallback) maxFallback = t.updatedAt;
-    }
-    return maxFallback >= maxLive ? fallbackTasks : liveTasks;
-  }, [liveTasks, fallbackTasks]);
+    const base = liveTasks ?? initialTasks ?? EMPTY_TASKS;
+    if (!reorderOverride || reorderOverride.size === 0) return base;
+    return base.map((t) => {
+      const order = reorderOverride.get(t.id);
+      return order !== undefined ? { ...t, sortOrder: order } : t;
+    });
+  }, [liveTasks, initialTasks, reorderOverride]);
   const allLists = useLiveQuery(() => db.lists.toArray(), []) ?? EMPTY_LISTS;
   const allFolders = useLiveQuery(() => db.folders.toArray(), []) ?? EMPTY_FOLDERS;
   const allSavedFilters = useLiveQuery(() => db.savedFilters.toArray(), []) ?? EMPTY_SAVED_FILTERS;
 
   useDueNotifications(allTasks);
 
-  const { status: syncStatus, syncNow, refreshStatus: refreshSyncStatus } = useAutoSync();
+  const { status: syncStatus, syncNow, scheduleSync, refreshStatus: refreshSyncStatus } = useAutoSync();
   const activeLists = [...allLists]
     .filter((l) => !l.deletedAt)
     .sort((a, b) => {
@@ -548,10 +542,12 @@ export function App() {
 
   const handleComplete = async (id: string, dateStr?: string) => {
     await completeTask(id, dateStr);
+    scheduleSync();
   };
 
   const handleUncomplete = async (id: string, dateStr?: string) => {
     await uncompleteTask(id, dateStr);
+    scheduleSync();
   };
 
   const handleEdit = (task: Task) => {
@@ -567,10 +563,12 @@ export function App() {
       setSelectedTaskDate(null);
       setDetailOpenMobile(false);
     }
+    scheduleSync();
   };
 
   const handleTogglePin = async (id: string) => {
     await togglePinTask(id);
+    scheduleSync();
   };
 
   const handleSave = async (taskData: TaskInput) => {
@@ -578,6 +576,7 @@ export function App() {
     setEditingTask(null);
     setSelectedTaskId(saved.id);
     setSelectedTaskDate(saved.dueAt ? getDueDatePart(saved.dueAt) : null);
+    scheduleSync();
   };
 
   const handlePatchTask = async (
@@ -605,6 +604,7 @@ export function App() {
       subtasks: existing.subtasks,
       recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
     });
+    scheduleSync();
   };
 
   const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
@@ -639,6 +639,7 @@ export function App() {
     setShowNewListInput(false);
     setActiveView(`list:${list.id}`);
     setSidebarOpen(false);
+    scheduleSync();
   };
 
   const handleCreateFolder = async (e: React.FormEvent) => {
@@ -648,20 +649,24 @@ export function App() {
     await saveFolder({ name });
     setNewFolderName('');
     setShowNewFolderInput(false);
+    scheduleSync();
   };
 
   const handleDeleteList = async (list: TaskList) => {
     if (list.id === INBOX_LIST_ID) return;
     await softDeleteList(list.id);
     if (activeView === `list:${list.id}`) setActiveView('today');
+    scheduleSync();
   };
 
   const handleDeleteFolder = async (folder: Folder) => {
     await softDeleteFolder(folder.id);
+    scheduleSync();
   };
 
   const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
     await toggleSubtask(taskId, subtaskId);
+    scheduleSync();
   };
 
   const handleSaveFilter = async (filter: {
@@ -672,11 +677,13 @@ export function App() {
   }) => {
     const saved = await saveSavedFilter(filter);
     setActiveView(`filter:${saved.id}`);
+    scheduleSync();
   };
 
   const handleDeleteFilter = async (filter: SavedFilter) => {
     await softDeleteSavedFilter(filter.id);
     if (activeView === `filter:${filter.id}`) setActiveView('today');
+    scheduleSync();
   };
 
   const goView = useCallback((view: AppView) => {
@@ -701,6 +708,7 @@ export function App() {
     if (ids.length === 0) return;
     await fn(ids);
     exitSelectMode();
+    scheduleSync();
   };
   const batchComplete = () =>
     runBatch((ids) =>
@@ -723,9 +731,11 @@ export function App() {
   const createListFromSheet = async (name: string, folderId: string | null) => {
     const list = await saveList({ name, folderId });
     goView(`list:${list.id}`);
+    scheduleSync();
   };
   const createFolderFromSheet = async (name: string) => {
     await saveFolder({ name });
+    scheduleSync();
   };
 
   useKeyboardShortcuts({
@@ -925,25 +935,16 @@ export function App() {
         tasks={tasks}
         enabled={canReorder}
         onReorder={(ids) => {
-          const nowMs = Date.now();
           const orderMap = new Map(ids.map((id, idx) => [id, (idx + 1) * 1000]));
-          setFallbackTasks((prev) => {
-            const source = prev ?? allTasks;
-            return source.map((t) => {
-              const nextOrder = orderMap.get(t.id);
-              return nextOrder !== undefined
-                ? { ...t, sortOrder: nextOrder, updatedAt: nowMs }
-                : t;
+          setReorderOverride(orderMap);
+          void reorderTasks(ids)
+            .then(() => {
+              setReorderOverride(null);
+              scheduleSync(3000);
+            })
+            .catch(() => {
+              setReorderOverride(null);
             });
-          });
-          void reorderTasks(ids).then(async () => {
-            try {
-              setFallbackTasks(await db.tasks.toArray());
-              setDbRevision((r) => r + 1);
-            } catch {
-              /* ignore */
-            }
-          });
         }}
         onDragActiveChange={(active) => {
           if (active) calGestureRef.current = null;

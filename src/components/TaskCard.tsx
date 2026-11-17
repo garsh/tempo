@@ -112,23 +112,9 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onSwipeChange,
 }) => {
   const [{ timeFormat }] = usePrefs();
-  const [pendingSnapshot, setPendingSnapshot] = useState<{
-    id: string;
-    dueAt?: string | null;
-    completedAt?: number | null;
-    updatedAt: number;
-  } | null>(null);
-  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [justCompleted, setJustCompleted] = useState(false);
 
   const completed = isCompleted(task);
-  const taskChangedSinceClick =
-    pendingSnapshot !== null &&
-    (task.id !== pendingSnapshot.id ||
-      task.dueAt !== pendingSnapshot.dueAt ||
-      task.completedAt !== pendingSnapshot.completedAt ||
-      task.updatedAt !== pendingSnapshot.updatedAt);
-  const justCompleted = pendingSnapshot !== null && !taskChangedSinceClick;
   const recurring = isRecurring(task);
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
@@ -136,46 +122,29 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const sub = task.subtasks?.length ? subtaskProgress(task.subtasks) : null;
 
   useEffect(() => {
-    if (taskChangedSinceClick) {
-      if (fallbackTimerRef.current) {
-        clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
-      setPendingSnapshot(null);
+    if (completed && justCompleted) {
+      setJustCompleted(false);
     }
-  }, [taskChangedSinceClick]);
+  }, [completed, justCompleted]);
 
   useEffect(() => {
-    return () => {
-      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
-    };
-  }, []);
+    if (!justCompleted) return;
+    const timer = setTimeout(() => {
+      setJustCompleted(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [justCompleted]);
 
   const handleCheck = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (pendingSnapshot !== null && !taskChangedSinceClick) return;
+    if (justCompleted) return;
     const dateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
     if (completed) {
       onUncomplete?.(task.id, dateStr);
       return;
     }
-    setPendingSnapshot({
-      id: task.id,
-      dueAt: task.dueAt,
-      completedAt: task.completedAt,
-      updatedAt: task.updatedAt,
-    });
-    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-    if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
-    completeTimerRef.current = setTimeout(() => {
-      completeTimerRef.current = null;
-      onComplete(task.id, dateStr);
-    }, 120);
-    fallbackTimerRef.current = setTimeout(() => {
-      fallbackTimerRef.current = null;
-      setPendingSnapshot(null);
-    }, 2500);
+    setJustCompleted(true);
+    onComplete(task.id, dateStr);
   };
 
   const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
