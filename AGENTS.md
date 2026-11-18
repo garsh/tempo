@@ -23,6 +23,7 @@ You have access to the `local-gpu-subagent` MCP server backed by a local RTX 507
 ## Agent Guidelines & Boundaries
 - **Build & Test Verification**: Verify changes that affect the build or tests using `local_run_and_diagnose` from the `local-gpu-subagent` MCP server (e.g. `npm run build`, `npx vitest run`, or `npm run lint`). Do not run tests or builds if the only action taken was creating a commit (or other actions that do not alter the build output).
 - **Git Commits**: Do NOT create Git commits automatically. Wait for the user to explicitly request the creation of a commit.
+- **Handling Investigations**: If the user asks you to locate bugs or inefficiencies in the code, and you find several, then list them in an implementation plan (identified by capital letters). Include a description, example user scenarios to trigger it (understandable to an end-user, in addition to any more technical description), and the best fix. Also include a status for each item (planned, implemented, skipped). Estimate a complexity of each fix (how likely it is to introduce new bugs).
 
 ## Commands & Workflows
 - **Development Server**: `npm run dev`
