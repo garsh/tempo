@@ -7,6 +7,7 @@ import {
   isCompleted,
   isCompletedOnDate,
   isRecurring,
+  isSkippedOnDate,
   projectTaskForDate,
   startOfDay,
   taskOccursOnDate,
@@ -68,6 +69,7 @@ export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
     .filter((t) => {
       if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
       if (!t.recurrence && t.completedAt) return false;
+      if (isSkippedOnDate(t, dateStr)) return false;
       if (!taskOccursOnDate(t, dateStr)) return false;
       return !isCompletedOnDate(t, dateStr);
     })

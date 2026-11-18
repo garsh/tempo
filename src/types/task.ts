@@ -51,6 +51,8 @@ export interface Task {
   notes?: string;
   listId: string;
   dueAt?: string | null;
+  /** Inception/start date (YYYY-MM-DD) of the recurring schedule. Preserved across occurrence completions and skips. */
+  startDate?: string | null;
   /** @deprecated Priority UI has been removed. Field retained for sync schema compatibility. */
   priority?: TaskPriority;
   /** @deprecated Pinned UI has been removed. Field retained for sync schema compatibility. */
@@ -62,6 +64,8 @@ export interface Task {
   recurrence?: RecurrenceRule | null;
   completedAt?: number | null;
   completionHistory: number[];
+  /** Local calendar dates (YYYY-MM-DD) where scheduled occurrences were skipped. */
+  skippedDates?: string[];
   sortOrder?: number;
   createdAt: number;
   updatedAt: number;

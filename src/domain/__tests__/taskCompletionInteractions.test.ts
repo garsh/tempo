@@ -5,8 +5,12 @@ import {
   isCompletedOnDate,
   isCompleted,
   isRecurring,
+  isSkippedOnDate,
   completionTimestampForDate,
   formatDate,
+  getDueDatePart,
+  getRecurrenceAnchor,
+  getSkipOccurrenceDate,
 } from '../recurrence';
 
 /**
@@ -188,6 +192,89 @@ describe('Task Completion, Uncompletion & Tombstone Interaction Lifecycle', () =
 
       expect(filteredActive).toHaveLength(1);
       expect(filteredActive[0].id).toBe('chore-1');
+    });
+  });
+
+  describe('skipTaskOccurrence interactions (Items A, B, C)', () => {
+    function applySkipTaskOccurrence(task: Task, dateStr: string, now: number = Date.now()): Task {
+      const existingSkipped = task.skippedDates || [];
+      const updatedSkipped = existingSkipped.includes(dateStr)
+        ? existingSkipped
+        : [...existingSkipped, dateStr];
+
+      let updatedDueAt = task.dueAt;
+      const masterDueDate = task.dueAt ? getDueDatePart(task.dueAt) : null;
+
+      if (isRecurring(task)) {
+        if (masterDueDate && dateStr <= masterDueDate) {
+          const nextOccurrence = getSkipOccurrenceDate(
+            { ...task, skippedDates: updatedSkipped },
+            dateStr
+          );
+          if (nextOccurrence) {
+            updatedDueAt = nextOccurrence;
+          }
+        }
+      }
+
+      const startDate = task.startDate || getRecurrenceAnchor(task);
+
+      return {
+        ...task,
+        startDate,
+        dueAt: updatedDueAt,
+        skippedDates: updatedSkipped,
+        updatedAt: now,
+      };
+    }
+
+    it('Item C: does NOT advance master dueAt when skipping a future occurrence', () => {
+      const daily: Task = {
+        id: 'ab-ex',
+        title: 'Ab Exercises',
+        listId: INBOX_LIST_ID,
+        startDate: '2026-11-16',
+        dueAt: '2026-11-18', // Master is due today Nov 18
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        completionHistory: [completionTimestampForDate('2026-11-16')],
+        skippedDates: [],
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+
+      // User on Nov 18 clicks ahead to Sunday Nov 22 and skips it
+      const skippedFuture = applySkipTaskOccurrence(daily, '2026-11-22');
+
+      // Master dueAt remains Nov 18!
+      expect(skippedFuture.dueAt).toBe('2026-11-18');
+      expect(skippedFuture.startDate).toBe('2026-11-16');
+      expect(skippedFuture.skippedDates).toEqual(['2026-11-22']);
+      expect(isSkippedOnDate(skippedFuture, '2026-11-22')).toBe(true);
+      expect(isSkippedOnDate(skippedFuture, '2026-11-18')).toBe(false);
+    });
+
+    it('Item A & B: advances master dueAt by 1 day when skipping current occurrence and preserves startDate', () => {
+      const daily: Task = {
+        id: 'ab-ex',
+        title: 'Ab Exercises',
+        listId: INBOX_LIST_ID,
+        startDate: '2026-11-16',
+        dueAt: '2026-11-18',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        completionHistory: [completionTimestampForDate('2026-11-16')],
+        skippedDates: [],
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+
+      // User skips today's occurrence (Nov 18)
+      const skippedToday = applySkipTaskOccurrence(daily, '2026-11-18');
+
+      // Advances by exactly 1 day to Nov 19
+      expect(skippedToday.dueAt).toBe('2026-11-19');
+      // startDate is preserved, preventing earlier dates from being erased
+      expect(skippedToday.startDate).toBe('2026-11-16');
+      expect(skippedToday.skippedDates).toEqual(['2026-11-18']);
     });
   });
 });

@@ -9,12 +9,14 @@ import {
   getDaysDifference,
   getDueDeadline,
   getNextUncompletedOccurrenceDate,
+  getRecurrenceAnchor,
   getSkipOccurrenceDate,
   getTaskUrgency,
   hasDueTime,
   isCompleted,
   isCompletedOnDate,
   isRecurring,
+  isSkippedOnDate,
   parseDate,
   parseDueAt,
   projectTaskForDate,
@@ -371,6 +373,77 @@ describe('Per-day recurrence occurrences & completion', () => {
         },
       });
       expect(getSkipOccurrenceDate(ending, '2026-11-16')).toBeNull();
+    });
+
+    it('skips over dates present in skippedDates when finding next occurrence', () => {
+      const daily = recurringTask({
+        id: 'daily-skipped',
+        title: 'Daily Task',
+        dueAt: '2026-11-16',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        skippedDates: ['2026-11-17', '2026-11-18'],
+      });
+      // Skipping Nov 16 should skip over 17 and 18 and land on Nov 19
+      expect(getSkipOccurrenceDate(daily, '2026-11-16')).toBe('2026-11-19');
+    });
+  });
+
+  describe('Decoupling recurrence inception anchor from dueAt (Item B) and skippedDates (Item A)', () => {
+    it('preserves task occurrence for dates prior to dueAt when startDate is earlier', () => {
+      const task = recurringTask({
+        id: 'ab-ex',
+        title: 'Ab Exercises',
+        startDate: '2026-06-05',
+        dueAt: '2026-11-23', // Pushed into the future
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        completionHistory: [completionTimestampForDate('2026-11-16')],
+      });
+
+      // Recurrence anchor respects startDate
+      expect(getRecurrenceAnchor(task)).toBe('2026-06-05');
+
+      // Intermediate dates before dueAt (e.g. Nov 17, 18, 19, 20, 21, 22) must still occur
+      expect(taskOccursOnDate(task, '2026-11-17')).toBe(true);
+      expect(taskOccursOnDate(task, '2026-11-18')).toBe(true);
+      expect(taskOccursOnDate(task, '2026-11-22')).toBe(true);
+      expect(taskOccursOnDate(task, '2026-11-23')).toBe(true);
+
+      // Date before startDate does not occur
+      expect(taskOccursOnDate(task, '2026-06-04')).toBe(false);
+    });
+
+    it('derives recurrence anchor from earliest completionHistory when startDate is not set', () => {
+      const task = recurringTask({
+        id: 'ab-legacy',
+        title: 'Ab Exercises Legacy',
+        dueAt: '2026-11-23',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        completionHistory: [completionTimestampForDate('2026-11-16')],
+      });
+
+      expect(getRecurrenceAnchor(task)).toBe('2026-11-16');
+      expect(taskOccursOnDate(task, '2026-11-17')).toBe(true);
+      expect(taskOccursOnDate(task, '2026-11-18')).toBe(true);
+    });
+
+    it('suppresses occurrences on specific skippedDates while keeping earlier and later days active', () => {
+      const task = recurringTask({
+        id: 'daily-specific-skip',
+        title: 'Morning Routine',
+        startDate: '2026-11-01',
+        dueAt: '2026-11-17',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        skippedDates: ['2026-11-18', '2026-11-22'],
+      });
+
+      expect(isSkippedOnDate(task, '2026-11-17')).toBe(false);
+      expect(isSkippedOnDate(task, '2026-11-18')).toBe(true);
+      expect(isSkippedOnDate(task, '2026-11-19')).toBe(false);
+      expect(isSkippedOnDate(task, '2026-11-22')).toBe(true);
+
+      // getNextUncompletedOccurrenceDate skips Nov 18 if checking on Nov 18
+      const nextFrom18 = getNextUncompletedOccurrenceDate(task, new Date(2026, 10, 18, 9, 0));
+      expect(nextFrom18).toBe('2026-11-19');
     });
   });
 });

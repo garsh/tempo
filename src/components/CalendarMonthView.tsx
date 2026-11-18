@@ -3,7 +3,7 @@ import type { Task } from '../types/task';
 import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from '../domain/calendar';
 import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek } from '../domain/calendarUi';
 import { usePrefs } from '../prefs/prefs';
-import { formatDate, getDueDatePart, isCompleted, isCompletedOnDate, isRecurring, taskOccursOnDate } from '../domain/recurrence';
+import { formatDate, getDueDatePart, getRecurrenceAnchor, isCompleted, isCompletedOnDate, isRecurring, isSkippedOnDate, taskOccursOnDate } from '../domain/recurrence';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -129,14 +129,18 @@ export function CalendarMonthView({
       const maxDateStr = nextCells[nextCells.length - 1]?.dateStr;
 
       for (const t of recurringTasks) {
-        const anchor = t.dueAt ? getDueDatePart(t.dueAt) : formatDate(new Date(t.createdAt));
+        const anchor = getRecurrenceAnchor(t);
         if (maxDateStr && anchor > maxDateStr) continue;
 
         for (const grid of allGrids) {
           for (const cell of grid) {
             if (cell.dateStr < anchor) continue;
             if (set.has(cell.dateStr)) continue;
-            if (taskOccursOnDate(t, cell.dateStr) && !isCompletedOnDate(t, cell.dateStr)) {
+            if (
+              taskOccursOnDate(t, cell.dateStr) &&
+              !isCompletedOnDate(t, cell.dateStr) &&
+              !isSkippedOnDate(t, cell.dateStr)
+            ) {
               set.add(cell.dateStr);
             }
           }

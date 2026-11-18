@@ -141,4 +141,22 @@ describe('Calendar recurring tasks', () => {
       'daily',
     ]);
   });
+
+  it('omits skipped occurrences on specific dates without affecting surrounding occurrences', () => {
+    const tasks = [
+      task({
+        id: 'daily-skipped-cal',
+        title: 'Daily Exercises',
+        dueAt: '2026-10-05',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+        skippedDates: ['2026-10-06'],
+      }),
+    ];
+
+    expect(tasksDueOnDate(tasks, '2026-10-05').map((t) => t.id)).toEqual(['daily-skipped-cal']);
+    // Oct 6 is skipped
+    expect(tasksDueOnDate(tasks, '2026-10-06')).toEqual([]);
+    // Oct 7 is open again
+    expect(tasksDueOnDate(tasks, '2026-10-07').map((t) => t.id)).toEqual(['daily-skipped-cal']);
+  });
 });

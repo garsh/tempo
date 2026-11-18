@@ -12,6 +12,8 @@ import {
   completionTimestampForDate,
   formatDate,
   getDueDatePart,
+  getRecurrenceAnchor,
+  getSkipOccurrenceDate,
   isCompleted,
   isCompletedOnDate,
   isRecurring,
@@ -161,11 +163,25 @@ export async function saveTask(task: TaskInput): Promise<Task> {
     const nextDue = task.dueAt !== undefined ? task.dueAt : existing?.dueAt ?? null;
     const nextDate = nextDue ? getDueDatePart(nextDue) : null;
     const dateChanged = task.dueAt !== undefined && prevDate !== nextDate;
+    const existingStartDate = existing?.startDate ?? null;
+    let nextStartDate = task.startDate !== undefined ? task.startDate : existingStartDate;
+    const recurrenceRule = task.recurrence === undefined ? existing?.recurrence ?? null : task.recurrence;
+    if (recurrenceRule && !nextStartDate) {
+      nextStartDate = getRecurrenceAnchor({
+        startDate: undefined,
+        dueAt: nextDue,
+        createdAt: existing?.createdAt || now,
+        completionHistory: existing?.completionHistory || [],
+      });
+    }
+
     fullTask = {
       ...(existing || {}),
       ...task,
       id: task.id,
       listId: task.listId || existing?.listId || INBOX_LIST_ID,
+      dueAt: nextDue,
+      startDate: nextStartDate,
       sortOrder:
         task.sortOrder !== undefined
           ? task.sortOrder
@@ -175,25 +191,33 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       completionHistory: existing?.completionHistory || [],
+      skippedDates: task.skippedDates !== undefined ? task.skippedDates : existing?.skippedDates || [],
       completedAt: task.completedAt !== undefined ? task.completedAt : existing?.completedAt ?? null,
-      recurrence: task.recurrence === undefined ? existing?.recurrence ?? null : task.recurrence,
+      recurrence: recurrenceRule,
       subtasks: task.subtasks !== undefined ? task.subtasks : existing?.subtasks,
     };
   } else {
+    const recurrenceRule = task.recurrence ?? null;
+    let initialStartDate = task.startDate ?? null;
+    if (recurrenceRule && !initialStartDate) {
+      initialStartDate = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now));
+    }
     fullTask = {
       title: task.title,
       notes: task.notes,
       listId: task.listId || INBOX_LIST_ID,
       dueAt: task.dueAt ?? null,
+      startDate: initialStartDate,
       priority: task.priority,
       pinned: task.pinned,
       tags: task.tags,
       subtasks: task.subtasks,
-      recurrence: task.recurrence ?? null,
+      recurrence: recurrenceRule,
       id: newId(),
       createdAt: now,
       updatedAt: now,
       completionHistory: [],
+      skippedDates: task.skippedDates || [],
       completedAt: null,
       deletedAt: null,
     };
@@ -257,11 +281,17 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       ? [...(task.completionHistory || [])]
       : [...(task.completionHistory || []), ts];
 
+    // If this date was previously marked skipped, completing it removes it from skippedDates
+    const skipped = (task.skippedDates || []).filter((d) => d !== targetDateStr);
+    const startDate = task.startDate || getRecurrenceAnchor(task);
+
     updated = {
       ...task,
+      startDate,
       dueAt: task.dueAt ?? targetDateStr,
       completedAt: null,
       completionHistory: history,
+      skippedDates: skipped,
       updatedAt: now,
       // Reset check items for the next cycle
       subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
@@ -289,6 +319,84 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       `id=${id} title=${task.title.slice(0, 30)} due=${task.dueAt ?? ''}`
     );
   }
+
+  await db.tasks.put(updated);
+  return updated;
+}
+
+/**
+ * Skip a specific scheduled occurrence of a recurring task on `dateStr` (YYYY-MM-DD).
+ * Item A & C: Records `dateStr` in `skippedDates` so that date is suppressed without wiping out
+ * prior or intermediate days. Does NOT advance master dueAt if a future occurrence was skipped.
+ */
+export async function skipTaskOccurrence(id: string, dateStr: string): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) {
+    recordDiagEvent('skip_missing', `id=${id} date=${dateStr}`);
+    return null;
+  }
+
+  const now = Date.now();
+  const existingSkipped = task.skippedDates || [];
+  const updatedSkipped = existingSkipped.includes(dateStr)
+    ? existingSkipped
+    : [...existingSkipped, dateStr];
+
+  let updatedDueAt = task.dueAt;
+  const masterDueDate = task.dueAt ? getDueDatePart(task.dueAt) : null;
+
+  if (isRecurring(task)) {
+    // Only advance task.dueAt if the date being skipped was the master task's current dueAt (or earlier)
+    if (masterDueDate && dateStr <= masterDueDate) {
+      const nextOccurrence = getSkipOccurrenceDate(
+        { ...task, skippedDates: updatedSkipped },
+        dateStr
+      );
+      if (nextOccurrence) {
+        updatedDueAt = nextOccurrence;
+      }
+    }
+  }
+
+  const startDate = task.startDate || getRecurrenceAnchor(task);
+
+  const updated: Task = {
+    ...task,
+    startDate,
+    dueAt: updatedDueAt,
+    skippedDates: updatedSkipped,
+    updatedAt: now,
+  };
+
+  recordDiagEvent(
+    'skip_occurrence',
+    `id=${id} title=${task.title.slice(0, 30)} skipped=${dateStr} dueAt=${updated.dueAt ?? ''}`
+  );
+
+  await db.tasks.put(updated);
+  return updated;
+}
+
+/**
+ * Remove a skipped occurrence for `dateStr` (YYYY-MM-DD), restoring it to active recurrence.
+ */
+export async function unskipTaskOccurrence(id: string, dateStr: string): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) return null;
+
+  const now = Date.now();
+  const skipped = (task.skippedDates || []).filter((d) => d !== dateStr);
+
+  const updated: Task = {
+    ...task,
+    skippedDates: skipped,
+    updatedAt: now,
+  };
+
+  recordDiagEvent(
+    'unskip_occurrence',
+    `id=${id} title=${task.title.slice(0, 30)} unskipped=${dateStr}`
+  );
 
   await db.tasks.put(updated);
   return updated;

@@ -6,6 +6,7 @@ import {
   initDatabase,
   reorderTasks,
   saveTask,
+  skipTaskOccurrence,
   softDeleteTask,
   uncompleteTask,
 } from './db/db';
@@ -45,7 +46,6 @@ import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
-import { getSkipOccurrenceDate } from './domain/recurrence';
 import { InstallPrompt } from './components/InstallPrompt';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
@@ -339,12 +339,9 @@ export function App() {
     setChangeDateTask(null);
   };
 
-  const handleConfirmSkipOccurrence = async (task: Task) => {
-    const curDate = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
-    const nextDate = getSkipOccurrenceDate(task, curDate);
-    if (nextDate) {
-      await handlePatchTask(task.id, { dueAt: nextDate });
-    }
+  const handleConfirmSkipOccurrence = async (task: Task, dateToSkip: string) => {
+    await skipTaskOccurrence(task.id, dateToSkip);
+    scheduleSync();
     setSkipOccurrenceTask(null);
   };
 

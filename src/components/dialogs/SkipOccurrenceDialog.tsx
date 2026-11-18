@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { SkipForward, X, ArrowRight, AlertCircle } from 'lucide-react';
 import type { Task } from '../../types/task';
 import {
+  formatDate,
   formatDueLabel,
   getDueDatePart,
   getSkipOccurrenceDate,
@@ -13,7 +14,7 @@ interface SkipOccurrenceDialogProps {
   isOpen: boolean;
   task: Task | null;
   onClose: () => void;
-  onConfirm: (task: Task) => Promise<void> | void;
+  onConfirm: (task: Task, dateToSkip: string) => Promise<void> | void;
 }
 
 export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
@@ -39,14 +40,14 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
   if (!isOpen || !task) return null;
 
   const recurring = isRecurring(task);
-  const curDateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
+  const curDateStr = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date());
   const nextOccurrenceDueAt = recurring ? getSkipOccurrenceDate(task, curDateStr) : null;
 
-  const currentLabel = task.dueAt ? formatDueLabel(task.dueAt, timeFormat) : 'Current occurrence';
+  const currentLabel = task.dueAt ? formatDueLabel(task.dueAt, timeFormat) : formatDueLabel(curDateStr, timeFormat);
   const nextLabel = nextOccurrenceDueAt ? formatDueLabel(nextOccurrenceDueAt, timeFormat) : 'End of recurrence';
 
   const handleConfirm = async () => {
-    await onConfirm(task);
+    await onConfirm(task, curDateStr);
     onClose();
   };
 

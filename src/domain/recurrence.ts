@@ -503,6 +503,41 @@ export function isCompletedOnDate(
   return getCompletionTimestampOnDate(task, dateStr) !== null;
 }
 
+/** Whether `task` has had its occurrence skipped for `dateStr` (YYYY-MM-DD). */
+export function isSkippedOnDate(
+  task: Pick<Task, 'skippedDates'>,
+  dateStr: string
+): boolean {
+  return !!task.skippedDates?.includes(dateStr);
+}
+
+/**
+ * Inception/start date (YYYY-MM-DD) for a recurring task.
+ * Prioritizes task.startDate so that skipping occurrences or advancing dueAt does not
+ * retroactively wipe out earlier uncompleted occurrences from the calendar.
+ * Falls back to earliest completed date if earlier than current dueAt, or dueAt/createdAt.
+ */
+export function getRecurrenceAnchor(
+  task: Pick<Task, 'startDate' | 'dueAt' | 'createdAt' | 'completionHistory'>
+): string {
+  if (task.startDate) return task.startDate;
+  const duePart = task.dueAt ? getDueDatePart(task.dueAt) : null;
+  const createdPart = formatDate(new Date(task.createdAt));
+
+  if (task.completionHistory && task.completionHistory.length > 0) {
+    let earliestComp: string | null = null;
+    for (const ts of task.completionHistory) {
+      const d = formatDate(new Date(ts));
+      if (!earliestComp || d < earliestComp) earliestComp = d;
+    }
+    if (earliestComp && (!duePart || earliestComp < duePart)) {
+      return earliestComp;
+    }
+  }
+
+  return duePart || createdPart;
+}
+
 /**
  * Timestamp to record in `completionHistory` when completing an occurrence on `dateStr`.
  * Uses `now` when `dateStr` is today, otherwise local noon on `dateStr` so timezone roundtrips stay on the same day.
@@ -591,7 +626,7 @@ function scheduleMatchesDate(
  * Returns true for every scheduled repeat day as well as any day already in `completionHistory`.
  */
 export function taskOccursOnDate(
-  task: Pick<Task, 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'>,
+  task: Pick<Task, 'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'>,
   dateStr: string
 ): boolean {
   if (task.deletedAt) return false;
@@ -608,9 +643,7 @@ export function taskOccursOnDate(
     return false;
   }
 
-  const anchorStr = task.dueAt
-    ? getDueDatePart(task.dueAt)
-    : formatDate(new Date(task.createdAt));
+  const anchorStr = getRecurrenceAnchor(task);
   if (dateStr < anchorStr) return false;
 
   let baseStr = anchorStr;
@@ -686,27 +719,33 @@ export function getNextUncompletedOccurrenceDate(
   const today = startOfDay(fromDate);
   const todayStr = formatDate(today);
 
-  if (taskOccursOnDate(task, todayStr) && !isCompletedOnDate(task, todayStr)) {
+  if (
+    taskOccursOnDate(task, todayStr) &&
+    !isCompletedOnDate(task, todayStr) &&
+    !isSkippedOnDate(task, todayStr)
+  ) {
     return todayStr;
   }
 
-  const anchorStr = task.dueAt
-    ? getDueDatePart(task.dueAt)
-    : formatDate(new Date(task.createdAt));
+  const anchorStr = getRecurrenceAnchor(task);
   const completedDates = getCompletedDateSet(task);
   let latestCompletedStr: string | null = null;
   for (const c of completedDates) {
     if (!latestCompletedStr || c > latestCompletedStr) latestCompletedStr = c;
   }
 
-  if (!isCompletedOnDate(task, todayStr) && anchorStr < todayStr) {
+  if (!isCompletedOnDate(task, todayStr) && !isSkippedOnDate(task, todayStr) && anchorStr < todayStr) {
     const anchorDate = parseDate(anchorStr);
     const minLookback = addDays(today, -365);
     const earliest = anchorDate > minLookback ? anchorDate : minLookback;
     for (let cursor = addDays(today, -1); cursor >= earliest; cursor = addDays(cursor, -1)) {
       const dStr = formatDate(cursor);
       if (completedDates.has(dStr) || (latestCompletedStr && dStr <= latestCompletedStr)) break;
-      if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+      if (
+        taskOccursOnDate(task, dStr) &&
+        !isCompletedOnDate(task, dStr) &&
+        !isSkippedOnDate(task, dStr)
+      ) {
         return dStr;
       }
     }
@@ -716,7 +755,11 @@ export function getNextUncompletedOccurrenceDate(
   for (let i = 0; i <= 1100; i++) {
     const dStr = formatDate(addDays(startForward, i));
     if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) break;
-    if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+    if (
+      taskOccursOnDate(task, dStr) &&
+      !isCompletedOnDate(task, dStr) &&
+      !isSkippedOnDate(task, dStr)
+    ) {
       return dStr;
     }
   }
@@ -767,7 +810,11 @@ export function getSkipOccurrenceDate(
     const candidate = addDays(startForward, i);
     const dStr = formatDate(candidate);
     if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) return null;
-    if (taskOccursOnDate(task, dStr) && !isCompletedOnDate(task, dStr)) {
+    if (
+      taskOccursOnDate(task, dStr) &&
+      !isCompletedOnDate(task, dStr) &&
+      !isSkippedOnDate(task, dStr)
+    ) {
       return combineDueAt(dStr, time);
     }
   }

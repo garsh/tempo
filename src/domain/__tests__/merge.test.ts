@@ -70,6 +70,24 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(resolved.completionHistory).toEqual([500, 1500, 2500]);
   });
 
+  it('unions skippedDates and preserves startDate across conflicts', () => {
+    const phoneVersion: Task = {
+      ...baseTask,
+      startDate: '2026-09-01',
+      skippedDates: ['2026-09-10'],
+      updatedAt: 1500,
+    };
+    const laptopVersion: Task = {
+      ...baseTask,
+      skippedDates: ['2026-09-10', '2026-09-15'],
+      updatedAt: 2500,
+    };
+
+    const resolved = resolveTaskConflict(phoneVersion, laptopVersion);
+    expect(resolved.skippedDates).toEqual(['2026-09-10', '2026-09-15']);
+    expect(resolved.startDate).toBe('2026-09-01');
+  });
+
   it('respects soft-delete tombstones', () => {
     const activeLocal: Task = {
       ...baseTask,

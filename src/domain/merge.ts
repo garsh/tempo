@@ -91,9 +91,15 @@ export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
       new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])
     ).sort((a, b) => a - b);
 
+    const allSkipped = Array.from(
+      new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])
+    ).sort();
+
     return {
       ...winner,
+      startDate: winner.startDate || local.startDate || remote.startDate || null,
       completionHistory: allCompletions,
+      skippedDates: allSkipped,
     };
   });
 }
