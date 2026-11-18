@@ -16,10 +16,12 @@ import type {
 } from '../types/task';
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
 import {
+  addDays,
   formatDate,
   getDueDatePart,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
+import { DateChoiceMenu, type DatePreset } from './menu/DateChoiceMenu';
 
 export interface QuickAddSheetProps {
   isOpen: boolean;
@@ -107,7 +109,7 @@ export function computeQuickAddSheetBottom({
 
 /**
  * Sleek bottom sheet for creating and editing routines.
- * Supports quick title/notes, inline date picker, and repeat/recurrence rules.
+ * Supports quick title/notes, a date choice menu, and repeat/recurrence rules.
  */
 export function QuickAddSheet({
   isOpen,
@@ -117,10 +119,12 @@ export function QuickAddSheet({
   defaultDueAt = null,
 }: QuickAddSheetProps) {
   const titleRef = useRef<HTMLInputElement>(null);
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'none' | 'date' | 'repeat'>('none');
+  const [panel, setPanel] = useState<'none' | 'repeat'>('none');
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Preserve the last measured virtual keyboard height across focus shifts
@@ -133,6 +137,7 @@ export function QuickAddSheet({
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   if (isOpen && !prevIsOpen) {
     setPrevIsOpen(true);
+    setDateMenuOpen(false);
     if (isMobileKeyboardDevice()) {
       const initialHeight = lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
       if (initialHeight > 0 && keyboardInset !== initialHeight) {
@@ -158,6 +163,7 @@ export function QuickAddSheet({
   const [endAfterCount, setEndAfterCount] = useState('');
 
   const todayStr = formatDate(new Date());
+  const tomorrowStr = formatDate(addDays(new Date(), 1));
 
   // Visual viewport tracking for mobile virtual keyboard
   useEffect(() => {
@@ -178,7 +184,7 @@ export function QuickAddSheet({
           // Ignore localStorage errors
         }
       } else if (!isMobile || panel !== 'none') {
-        // When configuring Date or Repeat panels without an active virtual keyboard, allow full window expansion
+        // When configuring the Repeat panel without an active virtual keyboard, allow full window expansion
         setKeyboardInset(0);
       } else {
         // Mobile virtual keyboard dismissed on main form: remain above the keyboard
@@ -198,7 +204,7 @@ export function QuickAddSheet({
     };
   }, [isOpen, panel]);
 
-  // When opening a panel like Repeat or Date, dismiss any text-field keyboard focus so the window can expand fully
+  // When opening the Repeat panel, dismiss any text-field keyboard focus so the window can expand fully
   useEffect(() => {
     if (panel !== 'none') {
       titleRef.current?.blur();
@@ -227,6 +233,7 @@ export function QuickAddSheet({
     setEndOnDate('');
     setEndAfterCount('');
     setPanel('none');
+    setDateMenuOpen(false);
     titleRef.current?.focus({ preventScroll: true });
     window.requestAnimationFrame(() => {
       titleRef.current?.focus({ preventScroll: true });
@@ -280,6 +287,7 @@ export function QuickAddSheet({
     }
 
     setPanel('none');
+    setDateMenuOpen(false);
     const t = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 60);
     return () => clearTimeout(t);
   }, [isOpen, initialTask, resetForm]);
@@ -288,18 +296,24 @@ export function QuickAddSheet({
 
   const canSubmit = title.trim().length > 0;
   const datePart = dueAt ? dueAt.slice(0, 10) : '';
+  const datePreset: DatePreset = !dueAt
+    ? null
+    : datePart === todayStr
+      ? 'today'
+      : datePart === tomorrowStr
+        ? 'tomorrow'
+        : null;
   const dateChipLabel = !dueAt
     ? 'No date'
-    : datePart === todayStr
+    : datePreset === 'today'
       ? 'Today'
-      : (() => {
-          const tmrw = new Date();
-          tmrw.setDate(tmrw.getDate() + 1);
-          if (datePart === formatDate(tmrw)) return 'Tomorrow';
-          const [y, m, d] = datePart.split('-').map(Number);
-          const dt = new Date(y, m - 1, d);
-          return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        })();
+      : datePreset === 'tomorrow'
+        ? 'Tomorrow'
+        : (() => {
+            const [y, m, d] = datePart.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          })();
 
   const toggleWeekday = (d: Weekday) => {
     setWeekdays((prev) =>
@@ -372,13 +386,18 @@ export function QuickAddSheet({
     onClick: () => void,
     child: React.ReactNode,
     extraClass = '',
-    customStyles?: { active?: string; inactive?: string }
+    customStyles?: { active?: string; inactive?: string },
+    popup?: { expanded: boolean; buttonRef: React.Ref<HTMLButtonElement> },
   ) => (
     <button
+      ref={popup?.buttonRef}
       type="button"
       aria-label={label}
       title={label}
       aria-pressed={active}
+      aria-expanded={popup ? popup.expanded : undefined}
+      aria-haspopup={popup ? 'menu' : undefined}
+      aria-controls={popup ? 'date-choice-menu' : undefined}
       onClick={onClick}
       className={`h-10 min-w-10 px-2.5 flex items-center justify-center rounded-xl transition-all text-sm font-semibold cursor-pointer ${
         active
@@ -506,19 +525,22 @@ export function QuickAddSheet({
         <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 flex-nowrap min-w-0">
           {toolBtn(
             'Date',
-            panel === 'date' || !!dueAt,
-            () => setPanel((p) => (p === 'date' ? 'none' : 'date')),
+            dateMenuOpen || !!dueAt,
+            () => setDateMenuOpen((open) => !open),
             <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
               <Calendar className="w-4 h-4 stroke-[2.2]" />
               <span>{dateChipLabel}</span>
             </span>,
-            'shrink-0'
+            'shrink-0',
+            undefined,
+            { expanded: dateMenuOpen, buttonRef: dateButtonRef },
           )}
 
           {toolBtn(
             'Repeat',
             panel === 'repeat' || isRecurring,
             () => {
+              setDateMenuOpen(false);
               if (panel === 'repeat') {
                 setIsRecurring(false);
                 setPanel('none');
@@ -561,52 +583,6 @@ export function QuickAddSheet({
             <span>{initialTask ? 'Save' : 'Create'}</span>
           </button>
         </div>
-
-        {/* Date Panel */}
-        {panel === 'date' && (
-          <div className="px-4 pb-3.5 flex flex-wrap items-center gap-2 border-t border-tt-border/80 pt-3 animate-in fade-in duration-150">
-            {[
-              ['Today', todayStr],
-              [
-                'Tomorrow',
-                (() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() + 1);
-                  return formatDate(d);
-                })(),
-              ],
-              ['No date', ''],
-            ].map(([label, value]) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => {
-                  setDueAt(value || null);
-                  setPanel('none');
-                }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors ${
-                  (value ? dueAt === value : !dueAt)
-                    ? 'bg-tt-blue text-white shadow-sm'
-                    : 'bg-tt-sidebar text-tt-text hover:bg-tt-hover border border-tt-border'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-            <input
-              type="date"
-              aria-label="Pick a date"
-              value={dueAt && /^\d{4}-\d{2}-\d{2}$/.test(dueAt) ? dueAt : ''}
-              onChange={(e) => {
-                if (e.target.value) {
-                  setDueAt(e.target.value);
-                  setPanel('none');
-                }
-              }}
-              className="px-3 py-1.5 rounded-xl bg-tt-sidebar text-xs sm:text-sm font-medium text-tt-text outline-none border border-tt-border"
-            />
-          </div>
-        )}
 
         {/* Repeat Panel */}
         {panel === 'repeat' && (
@@ -819,6 +795,16 @@ export function QuickAddSheet({
           </div>
         )}
       </div>
+      <DateChoiceMenu
+        open={dateMenuOpen}
+        anchorRef={dateButtonRef}
+        active={datePreset}
+        dateValue={datePart}
+        onClose={() => setDateMenuOpen(false)}
+        onToday={() => setDueAt(todayStr)}
+        onTomorrow={() => setDueAt(tomorrowStr)}
+        onDatePicked={setDueAt}
+      />
     </div>
   );
 }
