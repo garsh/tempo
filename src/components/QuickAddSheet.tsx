@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
-  Maximize2,
-  Minimize2,
   Plus,
   RefreshCw,
   X,
@@ -64,6 +62,18 @@ export function getStoredOrEstimatedKeyboardHeight(): number {
   return Math.min(330, Math.max(260, Math.round(window.innerHeight * 0.36)));
 }
 
+/**
+ * A description this long no longer fits comfortably in the one-line field,
+ * so the create/edit dialog switches to the expanded layout.
+ */
+export const LONG_DESCRIPTION_MIN_LENGTH = 100;
+
+/** True when notes contain a line break or are long enough to need the expanded dialog. */
+export function descriptionExpandsDialog(notes: string): boolean {
+  if (notes.includes('\n')) return true;
+  return notes.trim().length >= LONG_DESCRIPTION_MIN_LENGTH;
+}
+
 export function computeQuickAddSheetMaxHeight({
   keyboardInset,
 }: {
@@ -111,7 +121,6 @@ export function QuickAddSheet({
   const [notes, setNotes] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'date' | 'repeat'>('none');
-  const [fullScreen, setFullScreen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Preserve the last measured virtual keyboard height across focus shifts
@@ -271,7 +280,6 @@ export function QuickAddSheet({
     }
 
     setPanel('none');
-    setFullScreen(false);
     const t = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 60);
     return () => clearTimeout(t);
   }, [isOpen, initialTask, resetForm]);
@@ -382,11 +390,13 @@ export function QuickAddSheet({
     </button>
   );
 
-  const shellClass = fullScreen
+  const expanded = descriptionExpandsDialog(notes);
+
+  const shellClass = expanded
     ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto'
     : 'relative w-full max-w-xl sm:max-w-2xl flex flex-col bg-tt-elevated rounded-2xl sm:rounded-3xl border border-tt-border/80 shadow-2xl overflow-y-auto';
 
-  const dialogStyle: React.CSSProperties = fullScreen
+  const dialogStyle: React.CSSProperties = expanded
     ? {}
     : {
         maxHeight: keyboardInset > 0
@@ -397,7 +407,7 @@ export function QuickAddSheet({
   return (
     <div
       className={
-        fullScreen
+        expanded
           ? 'fixed inset-0 z-[60]'
           : `fixed inset-0 z-[60] flex items-start justify-center p-2.5 sm:p-5 ${
               panel !== 'none'
@@ -422,12 +432,12 @@ export function QuickAddSheet({
         onClick={(e) => e.stopPropagation()}
       >
 
-        {fullScreen && (
+        {expanded && (
           <div className="flex items-center h-14 px-3 border-b border-tt-border">
             <button
               type="button"
-              onClick={() => setFullScreen(false)}
-              aria-label="Exit full screen"
+              onClick={onClose}
+              aria-label="Close"
               className="w-10 h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text"
             >
               <X className="w-5 h-5" />
@@ -446,7 +456,7 @@ export function QuickAddSheet({
           </div>
         )}
 
-        {!fullScreen && (
+        {!expanded && (
           <div className="flex items-center justify-between px-4 sm:px-5 pt-1.5 pb-0.5">
             <span className="text-xs font-bold uppercase tracking-wider text-tt-secondary">
               {initialTask ? 'Edit Routine' : 'New Routine'}
@@ -462,7 +472,7 @@ export function QuickAddSheet({
           </div>
         )}
 
-        <div className={`px-4 sm:px-5 ${fullScreen ? 'pt-4 flex-1' : 'pt-2'}`}>
+        <div className={`px-4 sm:px-5 ${expanded ? 'pt-4 flex-1' : 'pt-2'}`}>
           <input
             ref={titleRef}
             type="search"
@@ -487,7 +497,7 @@ export function QuickAddSheet({
             autoCorrect="off"
             placeholder="Description (optional)"
             aria-label="Description"
-            rows={fullScreen ? 6 : 1}
+            rows={expanded ? 6 : 1}
             className="w-full bg-transparent text-[15px] sm:text-[16px] text-tt-text placeholder:text-tt-muted/70 outline-none resize-none py-1 leading-relaxed"
           />
         </div>
@@ -529,18 +539,6 @@ export function QuickAddSheet({
               inactive:
                 'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
             }
-          )}
-
-          {toolBtn(
-            fullScreen ? 'Exit full screen' : 'Full screen',
-            fullScreen,
-            () => setFullScreen((prev) => !prev),
-            fullScreen ? (
-              <Minimize2 className="w-4 h-4" />
-            ) : (
-              <Maximize2 className="w-4 h-4" />
-            ),
-            'shrink-0'
           )}
 
           <div className="flex-1 min-w-1" />

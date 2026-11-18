@@ -21,7 +21,11 @@ You have access to the `local-gpu-subagent` MCP server backed by a local RTX 507
 4. **Use `local_analyze_git_diff(repo_path="~/work/tempo")`** when asked to review or summarize uncommitted changes.
 
 ## Agent Guidelines & Boundaries
-- **Build & Test Verification**: Verify changes that affect the build or tests using `local_run_and_diagnose` from the `local-gpu-subagent` MCP server (e.g. `npm run build`, `npx vitest run`, or `npm run lint`). Do not run tests or builds if the only action taken was creating a commit (or other actions that do not alter the build output).
+- **Build & Test Verification**: When making a change that affects the app, run these with `local_run_and_diagnose` (cwd `~/work/tempo`) and confirm each succeeds before finishing:
+  - `npm run build`
+  - `npx vitest run`
+  - `npm run lint`
+  Do not run them if the only action taken was creating a commit, or if the edit cannot change build, test, or lint output (for example this guidelines file). `npm run build` already runs `tsc -b`, so do not also run a separate typecheck.
 - **Git Commits**: Do NOT create Git commits automatically. Wait for the user to explicitly request the creation of a commit.
 - **Handling Investigations**: If the user asks you to locate bugs or inefficiencies in the code, and you find several, then list them in an implementation plan (identified by capital letters). Include a description, example user scenarios to trigger it (understandable to an end-user, in addition to any more technical description), and the best fix. Also include a status for each item (planned, implemented, skipped). Estimate a complexity of each fix (how likely it is to introduce new bugs).
 
