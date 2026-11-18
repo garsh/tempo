@@ -60,4 +60,16 @@ describe('googleAuth client id resolution', () => {
     clearStoredToken();
     expect(getCachedAccessToken()).toBeNull();
   });
+
+  it('considers tokens expired if remaining lifetime is within the 60s skew window', () => {
+    // Storing a token with 30s remaining lifetime (less than 60s skew)
+    storeAccessToken('short-lived-token', 30);
+    expect(getCachedAccessToken()).toBeNull();
+  });
+
+  it('returns token when expiration is well beyond the 60s skew window', () => {
+    // Storing a token with 300s (5 minutes) remaining lifetime
+    storeAccessToken('long-lived-token', 300);
+    expect(getCachedAccessToken()).toBe('long-lived-token');
+  });
 });
