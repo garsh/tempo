@@ -47,12 +47,11 @@ export function CalendarMonthView({
   const focusStr = selectedDateStr || todayStr;
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const currentDragOffsetRef = useRef(0);
   const justSwipedRef = useRef(false);
   const isSnappingRef = useRef(false);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [dragOffset, setDragOffset] = useState(0);
-  const [isSnapping, setIsSnapping] = useState(false);
 
   const pointerStartXRef = useRef(0);
   const pointerStartYRef = useRef(0);
@@ -116,10 +115,19 @@ export function CalendarMonthView({
     }
     if (recurringTasks.length > 0) {
       const allGrids = [prevCells, currentCells, nextCells];
-      for (const grid of allGrids) {
-        for (const cell of grid) {
-          if (!set.has(cell.dateStr) && recurringTasks.some((t) => taskOccursOnDate(t, cell.dateStr))) {
-            set.add(cell.dateStr);
+      const maxDateStr = nextCells[nextCells.length - 1]?.dateStr;
+
+      for (const t of recurringTasks) {
+        const anchor = t.dueAt ? getDueDatePart(t.dueAt) : formatDate(new Date(t.createdAt));
+        if (maxDateStr && anchor > maxDateStr) continue;
+
+        for (const grid of allGrids) {
+          for (const cell of grid) {
+            if (cell.dateStr < anchor) continue;
+            if (set.has(cell.dateStr)) continue;
+            if (taskOccursOnDate(t, cell.dateStr)) {
+              set.add(cell.dateStr);
+            }
           }
         }
       }
@@ -141,11 +149,14 @@ export function CalendarMonthView({
       }
 
       justSwipedRef.current = true;
-      setIsSnapping(true);
       isSnappingRef.current = true;
 
       const targetOffset = target === 1 ? -width : target === -1 ? width : 0;
-      setDragOffset(targetOffset);
+      currentDragOffsetRef.current = targetOffset;
+      if (trackRef.current) {
+        trackRef.current.style.transition = 'transform 350ms cubic-bezier(0.25, 1, 0.5, 1)';
+        trackRef.current.style.transform = `translateX(${targetOffset}px)`;
+      }
 
       // Slow and smooth snap transition duration (350ms)
       const SNAP_DURATION = 350;
@@ -183,9 +194,12 @@ export function CalendarMonthView({
         }
 
         // Seamlessly reset track offset to 0 without animation
-        setIsSnapping(false);
         isSnappingRef.current = false;
-        setDragOffset(0);
+        currentDragOffsetRef.current = 0;
+        if (trackRef.current) {
+          trackRef.current.style.transition = 'none';
+          trackRef.current.style.transform = 'translateX(0px)';
+        }
 
         setTimeout(() => {
           justSwipedRef.current = false;
@@ -237,14 +251,19 @@ export function CalendarMonthView({
 
       if (direction === 'horizontal') {
         if (e.cancelable) e.preventDefault();
-        setDragOffset(dx);
+        currentDragOffsetRef.current = dx;
+        if (trackRef.current) {
+          trackRef.current.style.transition = 'none';
+          trackRef.current.style.transform = `translateX(${dx}px)`;
+        }
       }
     };
 
     const onTouchEnd = (e: TouchEvent) => {
       if (direction !== 'horizontal') {
-        if (direction === 'none') {
-          setDragOffset(0);
+        if (direction === 'none' && trackRef.current) {
+          trackRef.current.style.transition = 'none';
+          trackRef.current.style.transform = 'translateX(0px)';
         }
         return;
       }
@@ -258,7 +277,11 @@ export function CalendarMonthView({
 
     const onTouchCancel = () => {
       direction = 'none';
-      setDragOffset(0);
+      currentDragOffsetRef.current = 0;
+      if (trackRef.current) {
+        trackRef.current.style.transition = 'none';
+        trackRef.current.style.transform = 'translateX(0px)';
+      }
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -285,8 +308,9 @@ export function CalendarMonthView({
   const onPointerMove = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
     if ((e.buttons & 1) === 0) {
-      if (pointerDirectionRef.current === 'horizontal') {
-        setDragOffset(0);
+      if (pointerDirectionRef.current === 'horizontal' && trackRef.current) {
+        trackRef.current.style.transition = 'none';
+        trackRef.current.style.transform = 'translateX(0px)';
       }
       pointerDirectionRef.current = 'none';
       return;
@@ -303,7 +327,11 @@ export function CalendarMonthView({
     }
 
     if (pointerDirectionRef.current === 'horizontal') {
-      setDragOffset(dx);
+      currentDragOffsetRef.current = dx;
+      if (trackRef.current) {
+        trackRef.current.style.transition = 'none';
+        trackRef.current.style.transform = `translateX(${dx}px)`;
+      }
     }
   };
 
@@ -319,7 +347,11 @@ export function CalendarMonthView({
 
   const onPointerCancel = () => {
     if (pointerDirectionRef.current === 'horizontal') {
-      setDragOffset(0);
+      currentDragOffsetRef.current = 0;
+      if (trackRef.current) {
+        trackRef.current.style.transition = 'none';
+        trackRef.current.style.transform = 'translateX(0px)';
+      }
     }
     pointerDirectionRef.current = 'none';
   };
@@ -445,9 +477,9 @@ export function CalendarMonthView({
         className={`overflow-hidden relative w-full ${isDraggingVertical ? '' : 'transition-[height] duration-200 ease-out'}`}
       >
         <div
+          ref={trackRef}
           style={{
-            transform: `translateX(${dragOffset}px)`,
-            transition: isSnapping ? 'transform 350ms cubic-bezier(0.25, 1, 0.5, 1)' : 'none',
+            transform: 'translateX(0px)',
             willChange: 'transform',
           }}
           className="w-full relative"

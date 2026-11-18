@@ -105,7 +105,6 @@ export function App() {
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
-  const [swipedTaskId, setSwipedTaskId] = useState<string | null>(null);
   const [changeDateTask, setChangeDateTask] = useState<Task | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
@@ -282,26 +281,25 @@ export function App() {
     setIsTaskModalOpen(true);
   }, []);
 
-  const handleComplete = async (id: string, dateStr?: string) => {
+  const handleComplete = useCallback(async (id: string, dateStr?: string) => {
     await completeTask(id, dateStr);
     scheduleSync();
-  };
+  }, [scheduleSync]);
 
-  const handleUncomplete = async (id: string, dateStr?: string) => {
+  const handleUncomplete = useCallback(async (id: string, dateStr?: string) => {
     await uncompleteTask(id, dateStr);
     scheduleSync();
-  };
+  }, [scheduleSync]);
 
-  const handleEdit = (task: Task) => {
-    const raw = activeTasks.find((t) => t.id === task.id) ?? task;
-    setEditingTask(raw);
+  const handleEdit = useCallback((task: Task) => {
+    setEditingTask(task);
     setIsTaskModalOpen(true);
-  };
+  }, []);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     await softDeleteTask(id);
     scheduleSync();
-  };
+  }, [scheduleSync]);
 
   const handleSave = async (taskData: TaskInput) => {
     await saveTask(taskData);
@@ -334,7 +332,6 @@ export function App() {
   const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
     await handlePatchTask(taskId, { dueAt: newDueAt });
     setChangeDateTask(null);
-    setSwipedTaskId(null);
   };
 
   const handleConfirmSkipOccurrence = async (task: Task) => {
@@ -344,12 +341,10 @@ export function App() {
       await handlePatchTask(task.id, { dueAt: nextDate });
     }
     setSkipOccurrenceTask(null);
-    setSwipedTaskId(null);
   };
 
   const handleConfirmDelete = async (taskId: string) => {
     setDeleteConfirmTask(null);
-    setSwipedTaskId(null);
     await handleDelete(taskId);
   };
 
@@ -408,16 +403,14 @@ export function App() {
             task={t}
             dense={dense}
             showDetails={prefs.showDetails}
-            onSelect={() => handleEdit(t)}
-            onComplete={() => handleComplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
-            onUncomplete={() => handleUncomplete(t.id, t.dueAt ? getDueDatePart(t.dueAt) : undefined)}
-            onEdit={() => handleEdit(t)}
-            onDelete={() => handleDelete(t.id)}
-            onRequestChangeDate={() => setChangeDateTask(t)}
-            onRequestSkipOccurrence={() => setSkipOccurrenceTask(t)}
-            onRequestDelete={() => setDeleteConfirmTask(t)}
-            isSwipedOpen={swipedTaskId === t.id}
-            onSwipeChange={(open) => setSwipedTaskId(open ? t.id : null)}
+            onSelect={handleEdit}
+            onComplete={handleComplete}
+            onUncomplete={handleUncomplete}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onRequestChangeDate={setChangeDateTask}
+            onRequestSkipOccurrence={setSkipOccurrenceTask}
+            onRequestDelete={setDeleteConfirmTask}
             {...dragProps}
           />
         )}

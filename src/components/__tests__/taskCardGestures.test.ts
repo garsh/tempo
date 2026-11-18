@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Task } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
+import { SwipeCoordinator } from '../../domain/swipeCoordinator';
 
 /**
  * Constants matching TaskCard swipe and interaction specifications.
@@ -175,46 +176,6 @@ export class TaskCardGestureMachine {
   }
 }
 
-/**
- * Multi-card mutual exclusion coordinator.
- * Ensures that opening a drawer on card B automatically signals card A to close.
- */
-export class SwipeCoordinator {
-  private activeTaskId: string | null = null;
-  private readonly listeners = new Map<string, (activeId: string | null) => void>();
-
-  public register(taskId: string, onActiveChange: (activeId: string | null) => void): () => void {
-    this.listeners.set(taskId, onActiveChange);
-    return () => {
-      this.listeners.delete(taskId);
-      if (this.activeTaskId === taskId) {
-        this.activeTaskId = null;
-      }
-    };
-  }
-
-  public notifyOpened(taskId: string): void {
-    this.activeTaskId = taskId;
-    for (const [id, callback] of this.listeners.entries()) {
-      if (id !== taskId) {
-        callback(taskId);
-      }
-    }
-  }
-
-  public notifyClosed(taskId: string): void {
-    if (this.activeTaskId === taskId) {
-      this.activeTaskId = null;
-      for (const callback of this.listeners.values()) {
-        callback(null);
-      }
-    }
-  }
-
-  public getActiveTaskId(): string | null {
-    return this.activeTaskId;
-  }
-}
 
 describe('TaskCard Gesture & Interaction State Machine', () => {
   const sampleTask: Task = {

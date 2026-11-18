@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import {
   formatDueLabel,
@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { SwipeActionButton } from './SwipeActionButton';
+import { globalSwipeCoordinator } from '../domain/swipeCoordinator';
 
 interface TaskCardProps {
   task: Task;
@@ -64,7 +65,7 @@ function formatRowDue(dueAt: string | null | undefined): string | null {
   return formatDueLabel(dueAt);
 }
 
-export const TaskCard: React.FC<TaskCardProps> = ({
+const TaskCardComponent: React.FC<TaskCardProps> = ({
   task,
   selected = false,
   dense = false,
@@ -130,31 +131,76 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   // --- Swipe-to-reveal gesture logic ---
   const DRAWER_WIDTH = 160;
   const [swipeOffset, setSwipeOffset] = useState(0);
-  const [isGesturing, setIsGesturing] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const isOpenRef = useRef(false);
+  const currentOffsetRef = useRef(0);
   const slidingRef = useRef<HTMLDivElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
   const mouseStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
   const swipeDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
   const suppressClickRef = useRef(false);
+  const onSwipeChangeRef = useRef(onSwipeChange);
+
+  useEffect(() => {
+    onSwipeChangeRef.current = onSwipeChange;
+  });
+
+  const openSwipe = () => {
+    isOpenRef.current = true;
+    currentOffsetRef.current = -DRAWER_WIDTH;
+    if (slidingRef.current) {
+      slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+      slidingRef.current.style.transform = `translateX(${-DRAWER_WIDTH}px)`;
+    }
+    if (drawerRef.current) {
+      drawerRef.current.style.visibility = 'visible';
+      drawerRef.current.style.pointerEvents = 'auto';
+    }
+    setIsOpen(true);
+    setSwipeOffset(-DRAWER_WIDTH);
+    globalSwipeCoordinator.notifyOpened(task.id);
+    onSwipeChangeRef.current?.(task.id, true);
+  };
+
+  const closeSwipe = () => {
+    const wasOpen = isOpenRef.current;
+    isOpenRef.current = false;
+    currentOffsetRef.current = 0;
+    if (slidingRef.current) {
+      slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+      slidingRef.current.style.transform = 'translateX(0px)';
+    }
+    if (drawerRef.current) {
+      drawerRef.current.style.visibility = 'hidden';
+      drawerRef.current.style.pointerEvents = 'none';
+    }
+    setIsOpen(false);
+    setSwipeOffset(0);
+    if (wasOpen) {
+      globalSwipeCoordinator.notifyClosed(task.id);
+      onSwipeChangeRef.current?.(task.id, false);
+    }
+  };
+
+  // Register with global coordinator for mutual exclusion across all task cards
+  useEffect(() => {
+    return globalSwipeCoordinator.register(task.id, (activeId) => {
+      if (activeId !== task.id && isOpenRef.current) {
+        closeSwipe();
+      }
+    });
+  }, [task.id]);
 
   useEffect(() => {
     if (isSwipedOpen !== undefined) {
-      if (isSwipedOpen) {
-        setIsOpen(true);
-        setSwipeOffset(-DRAWER_WIDTH);
-      } else {
-        setIsOpen(false);
-        setSwipeOffset(0);
+      if (isSwipedOpen && !isOpenRef.current) {
+        openSwipe();
+      } else if (!isSwipedOpen && isOpenRef.current) {
+        closeSwipe();
       }
     }
   }, [isSwipedOpen]);
-
-  const closeSwipe = () => {
-    setIsOpen(false);
-    setSwipeOffset(0);
-    onSwipeChange?.(task.id, false);
-  };
 
   useEffect(() => {
     const el = slidingRef.current;
@@ -166,10 +212,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       touchStartRef.current = {
         x: touch.clientX,
         y: touch.clientY,
-        initialOffset: isOpen ? -DRAWER_WIDTH : 0,
+        initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
       };
       swipeDirectionRef.current = null;
-      setIsGesturing(true);
+      if (drawerRef.current) {
+        drawerRef.current.style.visibility = 'visible';
+        drawerRef.current.style.pointerEvents = 'auto';
+      }
+      if (slidingRef.current) {
+        slidingRef.current.style.transition = 'none';
+      }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
@@ -191,7 +243,10 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         if (e.cancelable) e.preventDefault();
         let next = start.initialOffset + dx;
         next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
-        setSwipeOffset(next);
+        currentOffsetRef.current = next;
+        if (slidingRef.current) {
+          slidingRef.current.style.transform = `translateX(${next}px)`;
+        }
       }
     };
 
@@ -199,7 +254,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       const dir = swipeDirectionRef.current;
       touchStartRef.current = null;
       swipeDirectionRef.current = null;
-      setIsGesturing(false);
 
       if (dir === 'horizontal') {
         suppressClickRef.current = true;
@@ -207,12 +261,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           suppressClickRef.current = false;
         }, 220);
 
-        if (swipeOffset < -DRAWER_WIDTH * 0.35) {
-          setIsOpen(true);
-          setSwipeOffset(-DRAWER_WIDTH);
-          onSwipeChange?.(task.id, true);
+        if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
+          openSwipe();
         } else {
           closeSwipe();
+        }
+      } else if (!isOpenRef.current) {
+        if (drawerRef.current) {
+          drawerRef.current.style.visibility = 'hidden';
+          drawerRef.current.style.pointerEvents = 'none';
         }
       }
     };
@@ -228,7 +285,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [isDragging, isOpen, swipeOffset, task.id, onSwipeChange]);
+  }, [isDragging, task.id]);
 
   const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     onRowPointerDown?.(e);
@@ -237,8 +294,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
       mouseStartRef.current = {
         x: e.clientX,
         y: e.clientY,
-        initialOffset: isOpen ? -DRAWER_WIDTH : 0,
+        initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
       };
+      if (drawerRef.current) {
+        drawerRef.current.style.visibility = 'visible';
+        drawerRef.current.style.pointerEvents = 'auto';
+      }
+      if (slidingRef.current) {
+        slidingRef.current.style.transition = 'none';
+      }
     }
   };
 
@@ -246,10 +310,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
       const dx = e.clientX - mouseStartRef.current.x;
       if (Math.abs(dx) > 10) {
-        setIsGesturing(true);
         let next = mouseStartRef.current.initialOffset + dx;
         next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
-        setSwipeOffset(next);
+        currentOffsetRef.current = next;
+        if (slidingRef.current) {
+          slidingRef.current.style.transform = `translateX(${next}px)`;
+        }
       }
     }
   };
@@ -258,19 +324,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
       const dx = e.clientX - mouseStartRef.current.x;
       mouseStartRef.current = null;
-      setIsGesturing(false);
       if (Math.abs(dx) > 10) {
         suppressClickRef.current = true;
         setTimeout(() => {
           suppressClickRef.current = false;
         }, 220);
 
-        if (swipeOffset < -DRAWER_WIDTH * 0.35) {
-          setIsOpen(true);
-          setSwipeOffset(-DRAWER_WIDTH);
-          onSwipeChange?.(task.id, true);
+        if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
+          openSwipe();
         } else {
           closeSwipe();
+        }
+      } else if (!isOpenRef.current) {
+        if (drawerRef.current) {
+          drawerRef.current.style.visibility = 'hidden';
+          drawerRef.current.style.pointerEvents = 'none';
         }
       }
     }
@@ -335,8 +403,9 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     >
       {/* Revealed Swipe Action Buttons on the Right */}
       <div
+        ref={drawerRef}
         className={`absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1] ${
-          swipeOffset === 0 && !isOpen && !isGesturing ? 'invisible pointer-events-none' : ''
+          !isOpen && swipeOffset === 0 ? 'invisible pointer-events-none' : ''
         }`}
         style={{ width: `${DRAWER_WIDTH}px` }}
         onPointerDown={(e) => e.stopPropagation()}
@@ -388,7 +457,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
         ref={slidingRef}
         style={{
           transform: `translateX(${swipeOffset}px)`,
-          transition: isGesturing ? 'none' : 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         }}
         className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
           selected
@@ -445,3 +514,5 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   </div>
 );
 };
+
+export const TaskCard = memo(TaskCardComponent);

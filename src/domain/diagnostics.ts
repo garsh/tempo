@@ -30,7 +30,9 @@ export interface DiagnosticsSummary {
 }
 
 let inMemoryEvents: DiagEvent[] = [];
+let memoryInitialized = false;
 let diagnosticsInitialized = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function parseEventsJson(raw: string | null): DiagEvent[] {
   if (!raw) return [];
@@ -42,9 +44,11 @@ function parseEventsJson(raw: string | null): DiagEvent[] {
   }
 }
 
-function readStorageEvents(): DiagEvent[] {
+function ensureEventsLoaded(): void {
+  if (memoryInitialized) return;
+  memoryInitialized = true;
   try {
-    if (typeof localStorage === 'undefined') return inMemoryEvents;
+    if (typeof localStorage === 'undefined') return;
     const localRaw = localStorage.getItem(DIAG_STORAGE_KEY);
     let events = parseEventsJson(localRaw);
     if (!localRaw && inMemoryEvents.length > 0) {
@@ -78,42 +82,59 @@ function readStorageEvents(): DiagEvent[] {
     }
 
     inMemoryEvents = events;
-    return events;
   } catch {
-    return inMemoryEvents;
+    /* ignore storage access errors */
   }
 }
 
-function writeStorageEvents(events: DiagEvent[]): void {
-  inMemoryEvents = events;
+function flushStorageEvents(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(DIAG_STORAGE_KEY, JSON.stringify(events));
+      localStorage.setItem(DIAG_STORAGE_KEY, JSON.stringify(inMemoryEvents));
     }
   } catch {
     /* ignore storage quota / private mode */
   }
 }
 
+function scheduleStorageFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushStorageEvents();
+  }, 1000);
+}
+
 export function recordDiagEvent(type: string, detail: string): void {
-  const prev = readStorageEvents();
-  const next: DiagEvent[] = [
-    ...prev,
-    {
-      at: new Date().toISOString(),
-      type,
-      detail: detail.slice(0, 400),
-    },
-  ].slice(-MAX_DIAG_EVENTS);
-  writeStorageEvents(next);
+  ensureEventsLoaded();
+  inMemoryEvents.push({
+    at: new Date().toISOString(),
+    type,
+    detail: detail.slice(0, 400),
+  });
+  if (inMemoryEvents.length > MAX_DIAG_EVENTS) {
+    inMemoryEvents.shift();
+  }
+  scheduleStorageFlush();
 }
 
 export function getDiagEvents(): DiagEvent[] {
-  return readStorageEvents();
+  ensureEventsLoaded();
+  return [...inMemoryEvents];
 }
 
 export function clearDiagEvents(): void {
-  writeStorageEvents([]);
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  inMemoryEvents = [];
+  memoryInitialized = true;
+  flushStorageEvents();
   try {
     if (typeof sessionStorage !== 'undefined') {
       sessionStorage.removeItem(DIAG_STORAGE_KEY);
@@ -201,6 +222,6 @@ export function buildDiagnosticsSummary(
       duplicateOpenExtraCount: dup.extraCount,
     },
     ...(extra ? { extra } : {}),
-    recentEvents: readStorageEvents(),
+    recentEvents: getDiagEvents(),
   };
 }
