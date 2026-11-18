@@ -19,7 +19,6 @@ import type {
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
 import {
   formatDate,
-  formatRecurrenceLabel,
   getDueDatePart,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
@@ -135,14 +134,17 @@ export function QuickAddSheet({
     setPrevIsOpen(false);
   }
 
+  type EndMode = 'never' | 'on_date' | 'after_count';
+
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('after_completion');
-  const [intervalValue, setIntervalValue] = useState(3);
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('fixed_interval');
+  const [intervalValue, setIntervalValue] = useState(1);
   const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('days');
   const [weekdays, setWeekdays] = useState<Weekday[]>([]);
   const [useMonthDay, setUseMonthDay] = useState(false);
   const [monthDay, setMonthDay] = useState(1);
+  const [endMode, setEndMode] = useState<EndMode>('never');
   const [endOnDate, setEndOnDate] = useState('');
   const [endAfterCount, setEndAfterCount] = useState('');
 
@@ -166,10 +168,11 @@ export function QuickAddSheet({
         } catch {
           // Ignore localStorage errors
         }
-      } else if (!isMobile) {
+      } else if (!isMobile || panel !== 'none') {
+        // When configuring Date or Repeat panels without an active virtual keyboard, allow full window expansion
         setKeyboardInset(0);
       } else {
-        // Mobile virtual keyboard dismissed (e.g. non-text field clicked): remain above the keyboard
+        // Mobile virtual keyboard dismissed on main form: remain above the keyboard
         const preservedHeight =
           lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
         setKeyboardInset(preservedHeight);
@@ -184,19 +187,34 @@ export function QuickAddSheet({
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
     };
-  }, [isOpen]);
+  }, [isOpen, panel]);
+
+  // When opening a panel like Repeat or Date, dismiss any text-field keyboard focus so the window can expand fully
+  useEffect(() => {
+    if (panel !== 'none') {
+      titleRef.current?.blur();
+      const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+      const activeInset = vv
+        ? Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))
+        : 0;
+      if (activeInset <= 100) {
+        setKeyboardInset(0);
+      }
+    }
+  }, [panel]);
 
   const resetForm = useCallback(() => {
     setTitle('');
     setNotes('');
     setDueAt(dueAtForSelectedDay(defaultDueAt, todayStr));
     setIsRecurring(false);
-    setRecurrenceType('after_completion');
-    setIntervalValue(3);
+    setRecurrenceType('fixed_interval');
+    setIntervalValue(1);
     setIntervalUnit('days');
     setWeekdays([]);
     setUseMonthDay(false);
     setMonthDay(1);
+    setEndMode('never');
     setEndOnDate('');
     setEndAfterCount('');
     setPanel('none');
@@ -224,15 +242,27 @@ export function QuickAddSheet({
         setWeekdays(r.weekdays ? [...r.weekdays] : []);
         setUseMonthDay(r.monthDay != null);
         setMonthDay(r.monthDay ?? 1);
-        setEndOnDate(r.endOnDate || '');
-        setEndAfterCount(r.endAfterCount != null ? String(r.endAfterCount) : '');
+        if (r.endOnDate) {
+          setEndMode('on_date');
+          setEndOnDate(r.endOnDate);
+          setEndAfterCount('');
+        } else if (r.endAfterCount != null && r.endAfterCount > 0) {
+          setEndMode('after_count');
+          setEndAfterCount(String(r.endAfterCount));
+          setEndOnDate('');
+        } else {
+          setEndMode('never');
+          setEndOnDate('');
+          setEndAfterCount('');
+        }
       } else {
-        setRecurrenceType('after_completion');
-        setIntervalValue(3);
+        setRecurrenceType('fixed_interval');
+        setIntervalValue(1);
         setIntervalUnit('days');
         setWeekdays([]);
         setUseMonthDay(false);
         setMonthDay(1);
+        setEndMode('never');
         setEndOnDate('');
         setEndAfterCount('');
       }
@@ -263,18 +293,6 @@ export function QuickAddSheet({
           return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         })();
 
-  const currentRecurrenceRule: RecurrenceRule = {
-    type: recurrenceType,
-    intervalValue,
-    intervalUnit,
-    weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
-    monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
-  };
-
-  const repeatChipLabel = !isRecurring
-    ? 'Repeat'
-    : formatRecurrenceLabel(currentRecurrenceRule);
-
   const toggleWeekday = (d: Weekday) => {
     setWeekdays((prev) =>
       prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
@@ -288,16 +306,26 @@ export function QuickAddSheet({
     try {
       let recurrence: RecurrenceRule | null = null;
       if (isRecurring) {
-        const countNum = endAfterCount.trim() ? parseInt(endAfterCount, 10) : null;
+        let parsedEndOnDate: string | null = null;
+        let parsedEndAfterCount: number | null = null;
+
+        if (endMode === 'on_date' && endOnDate.trim()) {
+          parsedEndOnDate = endOnDate.trim();
+        } else if (endMode === 'after_count' && endAfterCount.trim()) {
+          const countNum = parseInt(endAfterCount, 10);
+          if (!Number.isNaN(countNum) && countNum > 0) {
+            parsedEndAfterCount = countNum;
+          }
+        }
+
         recurrence = {
           type: recurrenceType,
           intervalValue: Math.max(1, intervalValue),
           intervalUnit,
           weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
           monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
-          endOnDate: endOnDate.trim() ? endOnDate.trim() : null,
-          endAfterCount:
-            countNum != null && !Number.isNaN(countNum) && countNum > 0 ? countNum : null,
+          endOnDate: parsedEndOnDate,
+          endAfterCount: parsedEndAfterCount,
         };
       }
 
@@ -335,7 +363,8 @@ export function QuickAddSheet({
     active: boolean,
     onClick: () => void,
     child: React.ReactNode,
-    extraClass = ''
+    extraClass = '',
+    customStyles?: { active?: string; inactive?: string }
   ) => (
     <button
       type="button"
@@ -343,10 +372,10 @@ export function QuickAddSheet({
       title={label}
       aria-pressed={active}
       onClick={onClick}
-      className={`h-10 min-w-10 px-2.5 flex items-center justify-center rounded-xl transition-colors text-sm font-semibold ${
+      className={`h-10 min-w-10 px-2.5 flex items-center justify-center rounded-xl transition-all text-sm font-semibold cursor-pointer ${
         active
-          ? 'text-tt-blue bg-tt-blue-soft dark:bg-tt-blue/20 dark:text-blue-300'
-          : 'text-tt-secondary hover:text-tt-text hover:bg-tt-hover'
+          ? (customStyles?.active || 'text-tt-blue bg-tt-blue-soft dark:bg-tt-blue/20 dark:text-blue-300')
+          : (customStyles?.inactive || 'text-tt-secondary hover:text-tt-text hover:bg-tt-hover')
       } ${extraClass}`}
     >
       {child}
@@ -355,14 +384,14 @@ export function QuickAddSheet({
 
   const shellClass = fullScreen
     ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto'
-    : 'relative w-full max-w-xl flex flex-col bg-tt-elevated rounded-2xl sm:rounded-3xl border border-tt-border/80 shadow-2xl overflow-y-auto';
+    : 'relative w-full max-w-xl sm:max-w-2xl flex flex-col bg-tt-elevated rounded-2xl sm:rounded-3xl border border-tt-border/80 shadow-2xl overflow-y-auto';
 
   const dialogStyle: React.CSSProperties = fullScreen
     ? {}
     : {
         maxHeight: keyboardInset > 0
           ? `calc(100dvh - ${keyboardInset}px - max(24px, env(safe-area-inset-top)))`
-          : 'calc(100dvh - max(24px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)))',
+          : 'calc(100dvh - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)))',
       };
 
   return (
@@ -370,7 +399,11 @@ export function QuickAddSheet({
       className={
         fullScreen
           ? 'fixed inset-0 z-[60]'
-          : 'fixed inset-0 z-[60] flex items-start justify-center p-3 sm:p-5 pt-[max(12px,env(safe-area-inset-top))] sm:pt-16'
+          : `fixed inset-0 z-[60] flex items-start justify-center p-2.5 sm:p-5 ${
+              panel !== 'none'
+                ? 'pt-[max(8px,env(safe-area-inset-top))] sm:pt-6'
+                : 'pt-[max(12px,env(safe-area-inset-top))] sm:pt-14'
+            }`
       }
       data-testid="quick-add-sheet"
     >
@@ -460,27 +493,42 @@ export function QuickAddSheet({
         </div>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pt-1 pb-2">
+        <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 flex-nowrap min-w-0">
           {toolBtn(
             'Date',
             panel === 'date' || !!dueAt,
             () => setPanel((p) => (p === 'date' ? 'none' : 'date')),
-            <span className="inline-flex items-center gap-1.5 px-1.5 text-[14px] sm:text-[15px] font-semibold">
+            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
               <Calendar className="w-4 h-4 stroke-[2.2]" />
               <span>{dateChipLabel}</span>
             </span>,
-            'min-w-0'
+            'shrink-0'
           )}
 
           {toolBtn(
             'Repeat',
             panel === 'repeat' || isRecurring,
-            () => setPanel((p) => (p === 'repeat' ? 'none' : 'repeat')),
-            <span className="inline-flex items-center gap-1.5 px-1.5 text-[14px] sm:text-[15px] font-semibold truncate max-w-[200px]">
+            () => {
+              if (panel === 'repeat') {
+                setIsRecurring(false);
+                setPanel('none');
+              } else {
+                titleRef.current?.blur();
+                setKeyboardInset(0);
+                setIsRecurring(true);
+                setPanel('repeat');
+              }
+            },
+            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
               <RefreshCw className="w-4 h-4 stroke-[2.2]" />
-              <span className="truncate">{repeatChipLabel}</span>
+              <span>Repeat</span>
             </span>,
-            'min-w-0'
+            'shrink-0',
+            {
+              active: 'bg-tt-blue text-white border border-tt-blue shadow-sm shadow-tt-blue/25',
+              inactive:
+                'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
+            }
           )}
 
           {toolBtn(
@@ -491,16 +539,17 @@ export function QuickAddSheet({
               <Minimize2 className="w-4 h-4" />
             ) : (
               <Maximize2 className="w-4 h-4" />
-            )
+            ),
+            'shrink-0'
           )}
 
-          <div className="flex-1" />
+          <div className="flex-1 min-w-1" />
           <button
             type="button"
             aria-label={initialTask ? 'Save routine' : 'Create routine'}
             disabled={!canSubmit || isSubmitting}
             onClick={() => void handleSubmit()}
-            className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] sm:text-[15px] font-bold tracking-wide transition-all ${
+            className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] sm:text-[15px] font-bold tracking-wide transition-all ${
               canSubmit && !isSubmitting
                 ? 'bg-tt-blue hover:bg-tt-blue-hover active:scale-95 text-white shadow-md shadow-tt-blue/25 cursor-pointer'
                 : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
@@ -563,182 +612,212 @@ export function QuickAddSheet({
 
         {/* Repeat Panel */}
         {panel === 'repeat' && (
-          <div className="px-4 pb-4 space-y-3.5 border-t border-tt-border/80 pt-3.5 animate-in fade-in duration-150">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold text-tt-text flex items-center gap-1.5">
-                <RefreshCw className="w-4 h-4 text-tt-blue" />
-                Repeat routine
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsRecurring((r) => !r)}
-                className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-colors ${
-                  isRecurring
-                    ? 'bg-tt-blue text-white border-tt-blue'
-                    : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:text-tt-text'
-                }`}
-              >
-                {isRecurring ? 'Enabled' : 'Disabled'}
-              </button>
-            </div>
-
-            {isRecurring && (
-              <div className="space-y-3 p-3.5 rounded-2xl bg-tt-sidebar/50 border border-tt-border">
+          <div className="px-4 pb-4 space-y-3.5 border-t border-tt-border/80 pt-3 animate-in fade-in duration-150">
+            <div className="space-y-3.5 p-3.5 sm:p-4 rounded-2xl bg-tt-sidebar/60 border border-tt-border">
+              {/* Repeat Every & Unit at the top */}
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-tt-secondary mb-1.5">
-                    Recurrence Logic
+                  <label
+                    htmlFor="repeat-interval-input"
+                    className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                  >
+                    Repeat Every
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRecurrenceType('after_completion')}
-                      className={`p-2 rounded-xl border text-left transition-all ${
-                        recurrenceType === 'after_completion'
-                          ? 'border-tt-blue bg-tt-blue-soft text-tt-blue font-semibold'
-                          : 'border-tt-border bg-tt-sidebar text-tt-secondary hover:bg-tt-hover'
-                      }`}
-                    >
-                      <div className="text-xs font-bold">After Completion</div>
-                      <div className="text-[10px] opacity-75 mt-0.5">
-                        Reschedules after done
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRecurrenceType('fixed_interval')}
-                      className={`p-2 rounded-xl border text-left transition-all ${
-                        recurrenceType === 'fixed_interval'
-                          ? 'border-tt-blue bg-tt-blue-soft text-tt-blue font-semibold'
-                          : 'border-tt-border bg-tt-sidebar text-tt-secondary hover:bg-tt-hover'
-                      }`}
-                    >
-                      <div className="text-xs font-bold">Fixed Schedule</div>
-                      <div className="text-[10px] opacity-75 mt-0.5">
-                        Repeats on set days
-                      </div>
-                    </button>
+                  <input
+                    id="repeat-interval-input"
+                    type="number"
+                    min="1"
+                    value={intervalValue}
+                    onChange={(e) =>
+                      setIntervalValue(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    }
+                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="repeat-unit-select"
+                    className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                  >
+                    Unit
+                  </label>
+                  <select
+                    id="repeat-unit-select"
+                    value={intervalUnit}
+                    onChange={(e) => {
+                      const u = e.target.value as IntervalUnit;
+                      setIntervalUnit(u);
+                      if (u !== 'weeks') setWeekdays([]);
+                      if (u !== 'months') setUseMonthDay(false);
+                    }}
+                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                  >
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                    <option value="months">Months</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Weekdays selection */}
+              {intervalUnit === 'weeks' && (
+                <div>
+                  <label className="block text-base sm:text-[17px] font-bold text-tt-text mb-1.5">
+                    On Weekdays (Optional)
+                  </label>
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {ALL_WEEKDAYS.map((d) => {
+                      const sel = weekdays.includes(d);
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          aria-pressed={sel}
+                          onClick={() => toggleWeekday(d)}
+                          className={`h-10 sm:h-11 rounded-xl text-sm sm:text-base font-bold border transition-all flex items-center justify-center cursor-pointer ${
+                            sel
+                              ? 'bg-tt-blue text-white border-tt-blue shadow-sm shadow-tt-blue/25 ring-1 ring-tt-blue'
+                              : 'bg-tt-elevated text-tt-text border-tt-border hover:bg-tt-hover active:scale-95'
+                          }`}
+                        >
+                          {WEEKDAY_LABELS[d]}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-xs font-semibold text-tt-secondary mb-1">
-                      Repeat Every
-                    </label>
+              {/* Month Day selection */}
+              {intervalUnit === 'months' && (
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-tt-elevated border border-tt-border">
+                  <label className="inline-flex items-center gap-2.5 text-base sm:text-[17px] font-semibold text-tt-text cursor-pointer">
                     <input
-                      type="number"
-                      min="1"
-                      value={intervalValue}
-                      onChange={(e) =>
-                        setIntervalValue(Math.max(1, parseInt(e.target.value, 10) || 1))
-                      }
-                      className="w-full px-3 py-1.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-sm outline-none focus:border-tt-blue"
+                      type="checkbox"
+                      checked={useMonthDay}
+                      onChange={(e) => setUseMonthDay(e.target.checked)}
+                      className="w-5 h-5 rounded border-tt-border accent-tt-blue cursor-pointer"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-tt-secondary mb-1">
-                      Unit
-                    </label>
-                    <select
-                      value={intervalUnit}
-                      onChange={(e) => {
-                        const u = e.target.value as IntervalUnit;
-                        setIntervalUnit(u);
-                        if (u !== 'weeks') setWeekdays([]);
-                        if (u !== 'months') setUseMonthDay(false);
-                      }}
-                      className="w-full px-3 py-1.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-sm outline-none focus:border-tt-blue"
-                    >
-                      <option value="days">Days</option>
-                      <option value="weeks">Weeks</option>
-                      <option value="months">Months</option>
-                    </select>
-                  </div>
-                </div>
-
-                {intervalUnit === 'weeks' && (
-                  <div>
-                    <label className="block text-xs font-semibold text-tt-secondary mb-1.5">
-                      On Weekdays (Optional)
-                    </label>
-                    <div className="flex gap-1">
-                      {ALL_WEEKDAYS.map((d) => {
-                        const sel = weekdays.includes(d);
-                        return (
-                          <button
-                            key={d}
-                            type="button"
-                            onClick={() => toggleWeekday(d)}
-                            className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors ${
-                              sel
-                                ? 'bg-tt-blue text-white border-tt-blue'
-                                : 'bg-tt-sidebar text-tt-secondary border-tt-border hover:bg-tt-hover'
-                            }`}
-                          >
-                            {WEEKDAY_LABELS[d]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {intervalUnit === 'months' && (
-                  <div className="flex items-center gap-3">
-                    <label className="inline-flex items-center gap-2 text-xs text-tt-secondary cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useMonthDay}
-                        onChange={(e) => setUseMonthDay(e.target.checked)}
-                        className="rounded border-tt-border accent-tt-blue"
-                      />
-                      On Day of Month
-                    </label>
-                    {useMonthDay && (
+                    On Day of Month
+                  </label>
+                  {useMonthDay && (
+                    <div className="inline-flex items-center gap-2">
                       <input
                         type="number"
                         min="1"
                         max="31"
                         value={monthDay}
+                        aria-label="Day of month"
                         onChange={(e) =>
                           setMonthDay(
                             Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1))
                           )
                         }
-                        className="w-16 px-2 py-1 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-xs outline-none focus:border-tt-blue"
+                        className="w-20 h-10 px-3 bg-tt-sidebar border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
                       />
-                    )}
-                  </div>
-                )}
+                      <span className="text-sm sm:text-base text-tt-text/90 font-medium">
+                        of each month
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-tt-border/60">
-                  <div>
-                    <label className="block text-[11px] text-tt-muted mb-1">
-                      End on Date (Optional)
-                    </label>
+              {/* Recurrence Logic Selection Box */}
+              <div>
+                <label
+                  htmlFor="recurrence-logic-select"
+                  className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                >
+                  Recurrence Logic
+                </label>
+                <select
+                  id="recurrence-logic-select"
+                  value={recurrenceType}
+                  onChange={(e) => setRecurrenceType(e.target.value as RecurrenceType)}
+                  className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                >
+                  <option value="fixed_interval">
+                    Fixed Schedule (repeats on set calendar days)
+                  </option>
+                  <option value="after_completion">
+                    After Completion (reschedules after done)
+                  </option>
+                </select>
+              </div>
+
+              {/* Compact End Recurrence Selection */}
+              <div className="pt-2 border-t border-tt-border/80">
+                <label
+                  htmlFor="end-mode-select"
+                  className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                >
+                  Ends
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
+                  <select
+                    id="end-mode-select"
+                    value={endMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as EndMode;
+                      setEndMode(mode);
+                      if (mode === 'never') {
+                        setEndOnDate('');
+                        setEndAfterCount('');
+                      }
+                    }}
+                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                  >
+                    <option value="never">Never (repeats indefinitely)</option>
+                    <option value="on_date">On specific date</option>
+                    <option value="after_count">After number of occurrences</option>
+                  </select>
+
+                  {endMode === 'on_date' && (
                     <input
+                      id="end-on-date-input"
                       type="date"
+                      aria-label="End date"
                       value={endOnDate}
                       onChange={(e) => setEndOnDate(e.target.value)}
-                      className="w-full px-2.5 py-1 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-xs outline-none focus:border-tt-blue"
+                      className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-tt-muted mb-1">
-                      End after occurrences
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="Unlimited"
-                      value={endAfterCount}
-                      onChange={(e) => setEndAfterCount(e.target.value)}
-                      className="w-full px-2.5 py-1 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-xs outline-none focus:border-tt-blue"
-                    />
-                  </div>
+                  )}
+
+                  {endMode === 'after_count' && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="end-after-count-input"
+                        type="number"
+                        min="1"
+                        aria-label="Number of occurrences"
+                        placeholder="e.g. 10"
+                        value={endAfterCount}
+                        onChange={(e) => setEndAfterCount(e.target.value)}
+                        className="w-28 h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
+                      />
+                      <span className="text-sm sm:text-base font-semibold text-tt-text/80">
+                        occurrences
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+
+              {/* Remove repeat action */}
+              <div className="pt-2 flex justify-end border-t border-tt-border/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRecurring(false);
+                    setPanel('none');
+                  }}
+                  className="text-xs sm:text-sm font-semibold text-tt-secondary hover:text-red-500 transition-colors cursor-pointer py-1 px-2"
+                >
+                  Remove repeat
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

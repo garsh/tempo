@@ -81,12 +81,12 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative shrink-0 w-[42px] h-[24px] rounded-full transition-colors disabled:opacity-40 ${
-        checked ? 'bg-tt-blue' : 'bg-tt-border'
+      className={`relative shrink-0 w-[44px] h-[26px] rounded-full transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+        checked ? 'bg-tt-blue' : 'bg-zinc-300 dark:bg-zinc-700'
       }`}
     >
       <span
-        className={`absolute top-[2px] left-[2px] w-5 h-5 rounded-full bg-white shadow transition-transform ${
+        className={`absolute top-[3px] left-[3px] w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${
           checked ? 'translate-x-[18px]' : ''
         }`}
       />

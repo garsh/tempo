@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+@custom-variant dark {
+  html[data-theme="dark"] & {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme="light"]) & {
+      @slot;
+    }
+  }
+}
+
 /*
  * Tempo theme — follows the OS via `prefers-color-scheme` (default LIGHT).
  * Light = TickTick Android light (ref: ticktick-refs/android/brad-inbox-empty-light.png)
