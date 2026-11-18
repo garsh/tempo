@@ -1,11 +1,14 @@
 import { db, ensureInboxList } from '../db/db';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
+import { parseSyncPayload, readResponseTextCapped, SyncPayloadError, MAX_SYNC_BYTES } from '../domain/syncPayload';
 import type { Folder, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
+const DRIVE_FILE_ID_KEY = 'tempo_drive_backup_file_id';
+const DRIVE_FILE_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 /** Sync payload version: Task + lists + folders + filters. */
 export const SYNC_VERSION = 4;
@@ -27,22 +30,70 @@ export class DriveConflictError extends Error {
   }
 }
 
+export function isSafeDriveFileId(id: string): boolean {
+  return DRIVE_FILE_ID_RE.test(id);
+}
+
+/**
+ * Keep using the remembered file when it is still in the list.
+ * Otherwise use the newest safe id. Never deletes the extras.
+ * `idsNewestFirst` must already be ordered by modifiedTime descending.
+ */
+export function selectBackupFileId(remembered: string | null, idsNewestFirst: string[]): string | null {
+  const safe = idsNewestFirst.filter(isSafeDriveFileId);
+  if (remembered && isSafeDriveFileId(remembered) && safe.includes(remembered)) return remembered;
+  return safe[0] ?? null;
+}
+
+function readRememberedFileId(): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(DRIVE_FILE_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberFileId(fileId: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(DRIVE_FILE_ID_KEY, fileId);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function driveFileResourcePath(fileId: string): string {
+  if (!isSafeDriveFileId(fileId)) throw new Error('Invalid Drive file id');
+  return `/files/${encodeURIComponent(fileId)}`;
+}
+
 export async function getOrCreateAppDataFile(accessToken: string): Promise<string> {
   const query = encodeURIComponent(`name='${BACKUP_FILENAME}' and trashed=false`);
-  const searchRes = await fetch(
-    `${DRIVE_API_URL}/files?spaces=appDataFolder&q=${query}&fields=files(id,name)`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    }
-  );
+  const fields = 'files(id,name,modifiedTime)';
+  const searchUrl =
+    `${DRIVE_API_URL}/files?spaces=appDataFolder&q=${query}&orderBy=modifiedTime desc&pageSize=10&fields=${fields}`;
+  let searchRes = await fetch(searchUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  // Some Drive views reject orderBy. Fall back so sync still finds the file.
+  if (searchRes.status === 400) {
+    searchRes = await fetch(
+      `${DRIVE_API_URL}/files?spaces=appDataFolder&q=${query}&pageSize=10&fields=${fields}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+  }
 
   if (!searchRes.ok) {
     throw new Error(`Drive search failed: ${searchRes.statusText}`);
   }
 
-  const searchData = await searchRes.json();
-  if (searchData.files && searchData.files.length > 0) {
-    return searchData.files[0].id;
+  const searchData = (await searchRes.json()) as { files?: { id?: string }[] };
+  const ids = (searchData.files ?? []).map((file) => file.id ?? '');
+  const chosen = selectBackupFileId(readRememberedFileId(), ids);
+  if (chosen) {
+    rememberFileId(chosen);
+    return chosen;
   }
 
   const createRes = await fetch(`${DRIVE_API_URL}/files`, {
@@ -61,7 +112,11 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
     throw new Error(`Failed to create backup file in Drive: ${createRes.statusText}`);
   }
 
-  const createdFile = await createRes.json();
+  const createdFile = (await createRes.json()) as { id?: string };
+  if (!createdFile.id || !isSafeDriveFileId(createdFile.id)) {
+    throw new Error('Drive returned an invalid file id');
+  }
+  rememberFileId(createdFile.id);
   return createdFile.id;
 }
 
@@ -69,7 +124,7 @@ export async function downloadDriveBackup(
   fileId: string,
   accessToken: string
 ): Promise<{ data: SyncData | null; etag: string | null }> {
-  const res = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
+  const res = await fetch(`${DRIVE_API_URL}${driveFileResourcePath(fileId)}?alt=media`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
@@ -81,15 +136,24 @@ export async function downloadDriveBackup(
     throw new Error(`Failed to download backup: ${res.statusText}`);
   }
 
-  const text = await res.text();
+  const text = await readResponseTextCapped(res, MAX_SYNC_BYTES);
   if (!text || text.trim() === '') {
     return { data: null, etag: res.headers.get('ETag') };
   }
 
   try {
-    const data: SyncData = JSON.parse(text);
+    const parsed = parseSyncPayload(text);
+    const data: SyncData = {
+      version: SYNC_VERSION,
+      exportedAt: parsed.exportedAt ?? Date.now(),
+      tasks: parsed.tasks,
+      lists: parsed.lists,
+      folders: parsed.folders,
+    };
     return { data, etag: res.headers.get('ETag') };
-  } catch {
+  } catch (err) {
+    // Do not replace a rejected backup with a local upload.
+    if (err instanceof SyncPayloadError) throw err;
     return { data: null, etag: res.headers.get('ETag') };
   }
 }
@@ -109,7 +173,7 @@ export async function uploadDriveBackup(
     headers['If-Match'] = etag;
   }
 
-  const res = await fetch(`${UPLOAD_API_URL}/files/${fileId}?uploadType=media`, {
+  const res = await fetch(`${UPLOAD_API_URL}${driveFileResourcePath(fileId)}?uploadType=media`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify(data, null, 2),

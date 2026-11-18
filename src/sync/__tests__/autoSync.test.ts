@@ -61,6 +61,20 @@ describe('autoSync', () => {
     expect(snap.lastError).toBeNull();
   });
 
+  it('pauses sync when offline and does not drop the account or record an error', async () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    vi.spyOn(googleAuth, 'ensureGoogleAccessToken').mockRejectedValue(new googleAuth.AuthOfflineError());
+    const setAccount = vi.spyOn(googleAccount, 'setGoogleAccount');
+    autoSync.setAutoSyncEnabled(true);
+
+    const result = await autoSync.runDriveSync();
+
+    expect(result).toBeNull();
+    expect(autoSync.getLastSyncError()).toBeNull();
+    expect(setAccount).not.toHaveBeenCalled();
+  });
+
   it('triggerDebouncedSync debounces calls and executes when configured', async () => {
     vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
     vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });

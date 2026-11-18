@@ -70,6 +70,16 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(resolved.completionHistory).toEqual([500, 1500, 2500]);
   });
 
+  it('caps the union of completion history at 365 entries', () => {
+    const history = (start: number) => Array.from({ length: 300 }, (_, i) => start + i);
+    const resolved = resolveTaskConflict(
+      { ...baseTask, completionHistory: history(1), updatedAt: 1 },
+      { ...baseTask, completionHistory: history(200), updatedAt: 2 }
+    );
+    expect(resolved.completionHistory).toHaveLength(365);
+    expect(resolved.completionHistory.at(-1)).toBe(499);
+  });
+
   it('unions skippedDates and preserves startDate across conflicts', () => {
     const phoneVersion: Task = {
       ...baseTask,

@@ -8,8 +8,13 @@ import {
   type SyncPhase,
   type SyncStatusSnapshot,
 } from '../sync/autoSync';
-import { getStoredClientId } from '../sync/googleAuth';
-import { getGoogleAccount } from '../sync/googleAccount';
+import {
+  applyRemoteSignOut,
+  AuthOfflineError,
+  getStoredClientId,
+  subscribeGoogleSignOut,
+} from '../sync/googleAuth';
+import { getGoogleAccount, setGoogleAccount } from '../sync/googleAccount';
 
 export function useAutoSync(onSynced?: () => void): {
   status: SyncStatusSnapshot;
@@ -53,7 +58,8 @@ export function useAutoSync(onSynced?: () => void): {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         const quiet =
-          /popup_closed|access_denied|interaction_required|user_logged_out|user_closed|Token request failed/i.test(
+          err instanceof AuthOfflineError ||
+          /popup_closed|access_denied|interaction_required|user_logged_out|user_closed|Token request failed|Offline; sync paused/i.test(
             message
           );
         // Silent background auth expiry shouldn't flag a scary error banner
@@ -92,13 +98,19 @@ export function useAutoSync(onSynced?: () => void): {
       void syncNow(false);
     };
     window.addEventListener('online', onOnline);
+    const unsubscribeSignOut = subscribeGoogleSignOut(() => {
+      applyRemoteSignOut();
+      setGoogleAccount(null);
+      refreshStatus('idle');
+    });
 
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('online', onOnline);
+      unsubscribeSignOut();
     };
-  }, [syncNow]);
+  }, [syncNow, refreshStatus]);
 
   return { status, syncNow, scheduleSync, refreshStatus };
 }

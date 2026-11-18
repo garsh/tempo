@@ -31,6 +31,7 @@ import {
   saveStoredCalendarExpanded,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
+import { shareTextFromParts, takeSharedText } from './pwa/shareText';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { TaskCard } from './components/TaskCard';
@@ -151,19 +152,30 @@ export function App() {
     })();
   }, []);
 
-  // PWA Web Share Target / URL capture (?text=&title=&url= or ?share=1)
+  // PWA Web Share Target. Production posts to /share and the service worker
+  // stashes the note. A length-capped query string remains for older links.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('share') && !params.has('text') && !params.has('title')) return;
-    const parts = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean);
-    const combined = parts.join(' — ').trim();
-    if (combined) {
+    let cancelled = false;
+    void (async () => {
+      const stashed = await takeSharedText();
+      const params = new URLSearchParams(window.location.search);
+      const hasShareQuery = ['share', 'text', 'title', 'url'].some((key) => params.has(key));
+      const fromQuery = hasShareQuery
+        ? shareTextFromParts(params.get('title'), params.get('text'), params.get('url'))
+        : '';
+      if (hasShareQuery) {
+        const url = new URL(window.location.href);
+        ['share', 'text', 'title', 'url'].forEach((key) => url.searchParams.delete(key));
+        window.history.replaceState({}, '', url.pathname + url.search);
+      }
+      const combined = stashed || fromQuery;
+      if (cancelled || !combined) return;
       setEditingTask({ title: combined } as Task);
       setIsTaskModalOpen(true);
-    }
-    const url = new URL(window.location.href);
-    ['share', 'text', 'title', 'url'].forEach((k) => url.searchParams.delete(k));
-    window.history.replaceState({}, '', url.pathname + url.search);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const liveTasks = useLiveQuery(() => db.tasks.toArray(), []);

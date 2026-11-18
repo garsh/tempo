@@ -1,5 +1,12 @@
 import type { Folder, Task, TaskList } from '../types/task';
 
+/** Match the CSV import cap so a hostile history cannot grow without bound. */
+const MAX_MERGED_HISTORY = 365;
+
+function capTail<T>(items: T[]): T[] {
+  return items.length > MAX_MERGED_HISTORY ? items.slice(-MAX_MERGED_HISTORY) : items;
+}
+
 type Mergeable = {
   id: string;
   updatedAt: number;
@@ -87,13 +94,15 @@ function resolveConflict<T extends Mergeable>(
 
 export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
   return mergeEntities(localTasks, remoteTasks, (local, remote, winner) => {
-    const allCompletions = Array.from(
-      new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])
-    ).sort((a, b) => a - b);
+    const allCompletions = capTail(
+      Array.from(new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])).sort(
+        (a, b) => a - b
+      )
+    );
 
-    const allSkipped = Array.from(
-      new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])
-    ).sort();
+    const allSkipped = capTail(
+      Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])).sort()
+    );
 
     return {
       ...winner,

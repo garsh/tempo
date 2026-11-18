@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight } from 'lucide-react';
-import type { GoogleAccount } from '../../sync/googleAccount';
+import { sanitizePhotoUrl, type GoogleAccount } from '../../sync/googleAccount';
 
 export function Avatar({ account, size }: { account: GoogleAccount | null; size: number }) {
-  if (account?.photoUrl) {
+  const photoUrl = sanitizePhotoUrl(account?.photoUrl);
+  if (photoUrl) {
     return (
       <img
-        src={account.photoUrl}
+        src={photoUrl}
         alt=""
         width={size}
         height={size}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type { GoogleAccount } from '../googleAccount';
-import { getGoogleAccount, setGoogleAccount, fetchDriveAccount } from '../googleAccount';
+import { fetchDriveAccount, getGoogleAccount, sanitizePhotoUrl, setGoogleAccount } from '../googleAccount';
 
 function createMockStorage() {
   const store = new Map<string, string>();
@@ -116,5 +116,41 @@ describe('googleAccount', () => {
       const account = await fetchDriveAccount('valid-token-abc');
       expect(account).toBeNull();
     });
+
+    it('drops a photo URL that is not a Google image host', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          user: {
+            emailAddress: 'syncuser@example.com',
+            photoLink: 'https://example.com/track.png',
+          },
+        }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const account = await fetchDriveAccount('valid-token-abc');
+      expect(account?.email).toBe('syncuser@example.com');
+      expect(account?.photoUrl).toBeUndefined();
+      setGoogleAccount({ email: 'syncuser@example.com', photoUrl: 'javascript:alert(1)' });
+      expect(getGoogleAccount()?.email).toBe('syncuser@example.com');
+      expect(getGoogleAccount()?.photoUrl).toBeUndefined();
+    });
+  });
+});
+
+describe('sanitizePhotoUrl', () => {
+  it('allows Google profile image hosts', () => {
+    expect(sanitizePhotoUrl('https://lh3.googleusercontent.com/a/photo')).toBe(
+      'https://lh3.googleusercontent.com/a/photo'
+    );
+    expect(sanitizePhotoUrl('https://lh3.ggpht.com/a/photo')).toBe('https://lh3.ggpht.com/a/photo');
+  });
+
+  it('drops other urls', () => {
+    expect(sanitizePhotoUrl('https://example.com/a.png')).toBeUndefined();
+    expect(sanitizePhotoUrl('javascript:alert(1)')).toBeUndefined();
+    expect(sanitizePhotoUrl('http://lh3.googleusercontent.com/a/photo')).toBeUndefined();
+    expect(sanitizePhotoUrl('https://evilgoogleusercontent.com/a.png')).toBeUndefined();
   });
 });

@@ -25,7 +25,9 @@ import {
   getDefaultClientId,
   getCustomClientId,
   getStoredClientId,
+  isValidGoogleClientId,
   setStoredClientId,
+  signOutGoogleSession,
 } from '../../sync/googleAuth';
 import {
   isAutoSyncEnabled,
@@ -38,6 +40,7 @@ import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
 import { usePrefs } from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
 import { summarizeAccount } from '../../sync/accountSummary';
+import { MAX_SYNC_BYTES } from '../../domain/syncPayload';
 import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
 import { Avatar, Card, ControlRow, NavRow, Note, RadioRow, SectionLabel, SettingsHeader } from './settingsUi';
 import {
@@ -241,10 +244,22 @@ function AccountPage({
   const lastSynced = syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : 'Never';
 
   const handleSaveCustomClientId = () => {
-    setStoredClientId(customClientId.trim());
+    const trimmed = customClientId.trim();
+    if (trimmed && !isValidGoogleClientId(trimmed)) {
+      setStatus({
+        type: 'error',
+        message:
+          'Enter a Google Web client ID ending in .apps.googleusercontent.com. The previous ID was kept.',
+      });
+      return;
+    }
+    if (!setStoredClientId(trimmed)) {
+      setStatus({ type: 'error', message: 'Could not save that Client ID. The previous ID was kept.' });
+      return;
+    }
     setStatus({
       type: 'success',
-      message: customClientId.trim()
+      message: trimmed
         ? 'Custom Client ID saved locally.'
         : defaultClientId
         ? 'Custom Client ID cleared. Restored application default Client ID.'
@@ -309,7 +324,7 @@ function AccountPage({
   };
 
   const handleSignOut = () => {
-    clearStoredToken();
+    void signOutGoogleSession();
     setGoogleAccount(null);
     setStatus({ type: 'success', message: 'Signed out on this device. Local tasks are kept.' });
     onSyncStatusChange();
@@ -321,6 +336,9 @@ function AccountPage({
         <Avatar account={syncStatus.account} size={74} />
         <div className="mt-3 text-[19px] font-bold text-tt-text">{summary.title}</div>
         <div className={`text-[13px] ${summary.warn ? 'text-tt-icon-amber' : 'text-tt-secondary'}`}>{summary.subtitle}</div>
+        {hasCustomClientId && (
+          <div className="mt-1 text-[12px] text-tt-icon-amber">Using a custom OAuth client on this device.</div>
+        )}
       </div>
 
       {!hasActiveClientId && (
@@ -725,9 +743,13 @@ function IntegrationsPage({
           label="Restore JSON backup"
           accept=".json,application/json"
           disabled={!!busyLabel}
-          onFile={(f) =>
-            void run('Restoring JSON backup…', () => readFileText(f).then(importJsonBackup), 'Import failed')
-          }
+          onFile={(f) => {
+            if (f.size > MAX_SYNC_BYTES) {
+              setStatus({ type: 'error', message: 'Import failed: Backup is too large.' });
+              return;
+            }
+            void run('Restoring JSON backup…', () => readFileText(f).then(importJsonBackup), 'Import failed');
+          }}
         />
         <NavRow
           icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}

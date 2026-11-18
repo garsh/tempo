@@ -1,7 +1,7 @@
 # Tempo: Security Review Plan
 
-Status: **for review. Do not implement until explicitly asked.**
-Reviewed: 2026-11-18. Application code was not changed.
+Status: **implemented 2026-11-18.**
+Reviewed: 2026-11-18. The review notes at the bottom are part of the implementation. The production Content-Security-Policy also includes `frame-src https://accounts.google.com`, because silent Google sign-in uses a hidden iframe. Without that, item A would fail under the new policy.
 
 This is a local-first PWA. There is no backend. Tasks live in IndexedDB and in a private Google Drive appData file (`tempo_backup.json`). The OAuth scope is `drive.appdata` only (this app's folder, not the rest of Drive). That scope choice is the right one.
 
@@ -9,13 +9,13 @@ The review did not find a script-injection bug in the current UI. Task titles an
 
 The issues below are still worth fixing. One cross-site scripting bug, or one malicious backup, currently has a larger blast radius than it needs to.
 
-Letters are the implementation units. Each status is `planned`. Complexity is how likely the fix is to introduce a new bug.
+Letters are the implementation units. Each status is `implemented`. Complexity is how likely the fix was to introduce a new bug.
 
 ---
 
 ## A. Drive access token is stored in `sessionStorage`
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Medium. A bad silent-refresh path will either pop the Google prompt on every reload or stop background sync.
 
 **Where:** `src/sync/googleAuth.ts` (`storeAccessToken`, `getCachedAccessToken`, `TOKEN_KEY`). Callers: `src/sync/autoSync.ts`, `src/components/settings/SettingsPage.tsx`.
@@ -37,7 +37,7 @@ Letters are the implementation units. Each status is `planned`. Complexity is ho
 
 ## B. Sign out does not revoke the token, and other tabs keep working
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low. Revoke can fail offline or because of CORS. Sign-out must still finish locally.
 
 **Where:** `handleSignOut` in `src/components/settings/SettingsPage.tsx` (about line 311). It calls `clearStoredToken()` and `setGoogleAccount(null)` only.
@@ -64,7 +64,7 @@ Letters are the implementation units. Each status is `planned`. Complexity is ho
 
 ## C. Production responses have no security headers
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Medium. A tight Content-Security-Policy can break Google sign-in, the avatar image, or the theme boot script. Vite dev (HMR, eval) must not use this policy.
 
 **Where:**
@@ -103,7 +103,7 @@ Letters are the implementation units. Each status is `planned`. Complexity is ho
 
 ## D. Share Target puts private text in the URL
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Medium. Share-into-Tempo is easy to break. Dev mode unregisters the service worker, so this path only works in a production build.
 
 **Where:**
@@ -130,7 +130,7 @@ The shared string is not executed as HTML. This is a privacy and availability bu
 
 ## E. Imported and Drive backups are trusted without a schema or size limit
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Medium. Rejecting a whole backup because one field is odd can look like data loss. Clamping `updatedAt` carelessly can mark every task dirty and re-upload the world on each sync.
 
 **Where:**
@@ -166,7 +166,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## F. Two Drive backup files can split the sync
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low if the client only pins a file id. High if it deletes "extra" files. Do not delete files in this change.
 
 **Where:** `getOrCreateAppDataFile` in `src/sync/googleDrive.ts` (lines 30–66). It uses `files[0]` with no `orderBy`. The id is placed in the URL with no encoding: `` `/files/${fileId}` ``.
@@ -188,7 +188,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## G. Notification click will open whatever URL is in the payload
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low. Nothing in the app shows notifications today (the feature-removal plan removed them). This is shipped service-worker code, so it should still be tight.
 
 **Where:** `public/sw-notify.js`. `clients.openWindow(target)` uses `event.notification.data.url` or `'/'`. `vite.config.ts` imports this script into the production worker.
@@ -205,7 +205,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## H. Dev server allows every `*.lan` host
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low. A hostname other than `bird.lan` would stop working until it is added.
 
 **Where:** `vite.config.ts` `server.allowedHosts: ['bird.lan', '.lan']` and `host: true` (port 5180).
@@ -222,7 +222,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## I. Account avatar URL is taken from storage as-is
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low. A Google host rename would hide avatars until the allowlist is updated. The placeholder already exists.
 
 **Where:** `fetchDriveAccount` in `src/sync/googleAccount.ts` stores `photoLink`. `Avatar` in `src/components/settings/settingsUi.tsx` sets `<img src={account.photoUrl}>`. `referrerPolicy="no-referrer"` is already set, which is good.
@@ -239,7 +239,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## J. Custom OAuth client id is not checked
 
-**Status:** planned
+**Status:** implemented
 **Complexity:** Low. A too-strict pattern could reject a valid client id. Check the suffix only.
 
 **Where:** `setStoredClientId` in `src/sync/googleAuth.ts`. The Advanced settings field in `SettingsPage.tsx` (about lines 385–457) saves any string and prefers it over `VITE_GOOGLE_CLIENT_ID`.
@@ -260,7 +260,7 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 
 ## Suggested order
 
-Do not start any letter until you say so. A safe order:
+Implemented in this order:
 
 1. **A** and **B** together. They are the token lifetime.
 2. **E**. Stops a bad backup from sticking.

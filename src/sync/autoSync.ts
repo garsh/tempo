@@ -1,5 +1,7 @@
 import {
+  AuthOfflineError,
   ensureGoogleAccessToken,
+  getAuthGeneration,
   getStoredClientId,
   loadGoogleScript,
 } from './googleAuth';
@@ -106,13 +108,19 @@ export async function runDriveSync(opts: {
   }
 
   inflight = (async () => {
+    const generation = getAuthGeneration();
+    const signedOut = () => generation !== getAuthGeneration();
     try {
       await loadGoogleScript();
+      if (signedOut()) return null;
       const token = await ensureGoogleAccessToken(clientId, {
         allowInteractive: opts.allowInteractive === true,
       });
+      if (signedOut()) return null;
       await refreshGoogleAccount(token);
+      if (signedOut()) return null;
       const result = await syncWithGoogleDrive(token);
+      if (signedOut()) return null;
       if (result.success) {
         recordSyncSuccess(result.syncedAt);
         await refreshGoogleAccount(token);
@@ -120,14 +128,17 @@ export async function runDriveSync(opts: {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // Silent failures (popup_closed / interaction_required) stay quiet for background
+      const offline =
+        err instanceof AuthOfflineError ||
+        (typeof navigator !== 'undefined' && navigator.onLine === false);
+      // Silent failures and offline reloads stay quiet. The cached account is kept.
       const quiet =
-        /popup_closed|access_denied|interaction_required|user_closed|Token request failed/i.test(
+        offline ||
+        /popup_closed|access_denied|interaction_required|user_closed|Token request failed|failed to fetch|networkerror|offline/i.test(
           message
         );
-      if (!quiet || opts.allowInteractive) {
-        recordSyncError(message);
-      }
+      if (!opts.allowInteractive && quiet) return null;
+      recordSyncError(message);
       throw err;
     } finally {
       inflight = null;

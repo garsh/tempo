@@ -1,8 +1,9 @@
 import { db, ensureInboxList } from '../../db/db';
 import { SYNC_VERSION } from '../../sync/googleDrive';
-import type { Folder, SyncData, Task, TaskList } from '../../types/task';
+import type { SyncData, Task, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 import { mergeFolders, mergeLists, mergeTasks } from '../../domain/merge';
+import { parseSyncPayload, SyncPayloadError } from '../../domain/syncPayload';
 import { isCompleted, isRecurring } from '../../domain/recurrence';
 import { importTasksFromCsv } from '../../domain/ticktickImport';
 import { recordDiagEvent } from '../../domain/diagnostics';
@@ -30,11 +31,21 @@ export async function exportJsonBackup(): Promise<string> {
 
 /** Merge a JSON backup (SyncData or a bare Task[]) into the local database. */
 export async function importJsonBackup(content: string): Promise<string> {
-  const parsed = JSON.parse(content) as SyncData | Task[];
-  const incomingTasks: Task[] = Array.isArray(parsed) ? parsed : parsed.tasks || [];
-  const incomingLists: TaskList[] = Array.isArray(parsed) ? [] : parsed.lists || [];
-  const incomingFolders: Folder[] = Array.isArray(parsed) ? [] : parsed.folders || [];
-  if (!Array.isArray(incomingTasks)) throw new Error('Invalid format: tasks array missing.');
+  let incoming: ReturnType<typeof parseSyncPayload>;
+  try {
+    incoming = parseSyncPayload(content);
+  } catch (err) {
+    if (err instanceof SyncPayloadError && err.code === 'tasks_not_array') {
+      throw new Error('Invalid format: tasks array missing.');
+    }
+    throw err;
+  }
+  const incomingTasks = incoming.tasks;
+  const incomingLists = incoming.lists;
+  const incomingFolders = incoming.folders;
+  if (incomingTasks.length === 0 && incomingLists.length === 0 && incomingFolders.length === 0) {
+    throw new Error('Invalid format: no valid tasks, lists, or folders.');
+  }
 
   const mergedTasks = mergeTasks(await db.tasks.toArray(), incomingTasks);
   const mergedLists = mergeLists(await db.lists.toArray(), incomingLists);

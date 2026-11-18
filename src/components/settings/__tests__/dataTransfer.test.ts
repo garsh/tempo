@@ -120,6 +120,45 @@ describe('dataTransfer', () => {
       await expect(importJsonBackup('not valid { json')).rejects.toThrow();
     });
 
+    it('clamps a far-future updatedAt so a later local edit wins the next import', async () => {
+      const future = Date.now() + 1000 * 60 * 60 * 24 * 365 * 50;
+      await importJsonBackup(
+        JSON.stringify({
+          tasks: [
+            {
+              id: 'future-task',
+              title: 'Remote',
+              listId: 'inbox',
+              completionHistory: [],
+              createdAt: 1,
+              updatedAt: future,
+            },
+          ],
+        })
+      );
+      const imported = mockTasks.find((t) => t.id === 'future-task');
+      expect(imported).toBeDefined();
+      expect(imported!.updatedAt).toBeLessThanOrEqual(Date.now() + 5 * 60 * 1000);
+      expect(imported!.updatedAt).toBeGreaterThan(Date.now() - 60_000);
+
+      mockTasks[0] = { ...imported!, title: 'Local edit', updatedAt: imported!.updatedAt + 60_000 };
+      await importJsonBackup(
+        JSON.stringify({
+          tasks: [
+            {
+              id: 'future-task',
+              title: 'Remote again',
+              listId: 'inbox',
+              completionHistory: [],
+              createdAt: 1,
+              updatedAt: future,
+            },
+          ],
+        })
+      );
+      expect(mockTasks.find((t) => t.id === 'future-task')?.title).toBe('Local edit');
+    });
+
     it('throws error when tasks field is missing or not an array', async () => {
       const invalidPayload = {
         version: 4,

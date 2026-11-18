@@ -21,6 +21,7 @@ export default defineConfig({
         'mask-icon.svg',
         'tempo-icon.svg',
         'sw-notify.js',
+        'theme-init.js',
       ],
       manifest: {
         name: 'Tempo - Task Manager',
@@ -35,8 +36,8 @@ export default defineConfig({
         scope: '/',
         categories: ['productivity', 'utilities'],
         share_target: {
-          action: '/?share=1',
-          method: 'GET',
+          action: '/share',
+          method: 'POST',
           enctype: 'application/x-www-form-urlencoded',
           params: {
             title: 'title',
@@ -101,7 +102,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5180,
-    allowedHosts: ['bird.lan', '.lan'],
+    allowedHosts: ['bird.lan'],
   },
   test: {
     isolate: false,

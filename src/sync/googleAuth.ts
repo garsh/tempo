@@ -18,6 +18,8 @@ declare global {
           }) => {
             requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
           };
+          /** Present when the GIS script has loaded. Revokes an access token. */
+          revoke?: (accessToken: string, done: () => void) => void;
         };
       };
     };
@@ -28,9 +30,37 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_KEY = 'tempo_google_access_token';
 const EXPIRES_KEY = 'tempo_google_token_expires_at';
 const CLIENT_ID_KEY = 'tempo_google_client_id';
+const CLIENT_ID_SUFFIX = '.apps.googleusercontent.com';
+const MAX_CLIENT_ID_LENGTH = 200;
+const SIGNOUT_CHANNEL = 'tempo-auth-signout';
 
 /** Skew so we refresh slightly before real expiry. */
 const EXPIRY_SKEW_MS = 60_000;
+
+type CachedToken = { token: string; expiresAt: number };
+
+/** In-memory only. A reload uses silent GIS refresh instead of reading storage. */
+let cachedToken: CachedToken | null = null;
+let authGeneration = 0;
+
+export class AuthOfflineError extends Error {
+  constructor() {
+    super('Offline; sync paused');
+    this.name = 'AuthOfflineError';
+  }
+}
+
+export function getAuthGeneration(): number {
+  return authGeneration;
+}
+
+export function isValidGoogleClientId(clientId: string): boolean {
+  const trimmed = clientId.trim();
+  if (!trimmed || trimmed.length > MAX_CLIENT_ID_LENGTH) return false;
+  if (trimmed.length <= CLIENT_ID_SUFFIX.length) return false;
+  if (/[\s/:]/.test(trimmed)) return false;
+  return trimmed.endsWith(CLIENT_ID_SUFFIX);
+}
 
 export function getDefaultClientId(): string {
   const envId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
@@ -38,42 +68,65 @@ export function getDefaultClientId(): string {
 }
 
 export function getCustomClientId(): string {
-  return localStorage.getItem(CLIENT_ID_KEY)?.trim() || '';
+  try {
+    const stored = localStorage.getItem(CLIENT_ID_KEY)?.trim() || '';
+    return isValidGoogleClientId(stored) ? stored : '';
+  } catch {
+    return '';
+  }
 }
 
 export function getStoredClientId(): string {
   return getCustomClientId() || getDefaultClientId();
 }
 
-export function setStoredClientId(clientId: string): void {
+/** Empty string clears the override. An invalid id is refused and the previous value stays. */
+export function setStoredClientId(clientId: string): boolean {
   const trimmed = clientId.trim();
-  if (!trimmed) {
-    localStorage.removeItem(CLIENT_ID_KEY);
-  } else {
+  try {
+    if (!trimmed) {
+      localStorage.removeItem(CLIENT_ID_KEY);
+      return true;
+    }
+    if (!isValidGoogleClientId(trimmed)) return false;
     localStorage.setItem(CLIENT_ID_KEY, trimmed);
+    return true;
+  } catch {
+    return false;
   }
 }
 
+function forgetLegacySessionToken(): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(EXPIRES_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+// Older builds persisted the Drive token here. Drop it so a script cannot read it.
+forgetLegacySessionToken();
+
 export function clearStoredToken(): void {
-  sessionStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem(EXPIRES_KEY);
+  cachedToken = null;
+  forgetLegacySessionToken();
 }
 
 export function storeAccessToken(token: string, expiresInSec?: number): void {
-  sessionStorage.setItem(TOKEN_KEY, token);
   const ttl = (expiresInSec && expiresInSec > 0 ? expiresInSec : 3600) * 1000;
-  sessionStorage.setItem(EXPIRES_KEY, String(Date.now() + ttl));
+  cachedToken = { token, expiresAt: Date.now() + ttl };
+  forgetLegacySessionToken();
 }
 
 export function getCachedAccessToken(): string | null {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  const expiresAt = Number(sessionStorage.getItem(EXPIRES_KEY) || 0);
-  if (!token || !expiresAt) return null;
-  if (Date.now() >= expiresAt - EXPIRY_SKEW_MS) {
+  if (!cachedToken) return null;
+  if (Date.now() >= cachedToken.expiresAt - EXPIRY_SKEW_MS) {
     clearStoredToken();
     return null;
   }
-  return token;
+  return cachedToken.token;
 }
 
 export function loadGoogleScript(): Promise<void> {
@@ -110,7 +163,7 @@ export type TokenRequestMode = 'interactive' | 'silent';
  * Request a Drive AppData access token.
  * - interactive: may show Google consent UI
  * - silent: prompt '' — fails if user must consent again
- * Caches token in sessionStorage for reuse within expiry.
+ * The token stays in memory for this page load only.
  */
 export function requestGoogleAccessToken(
   clientId: string,
@@ -131,6 +184,7 @@ export function requestGoogleAccessToken(
         scope: SCOPES,
         callback: (resp) => {
           if (resp.error) {
+            clearStoredToken();
             reject(new Error(resp.error));
           } else if (resp.access_token) {
             storeAccessToken(resp.access_token, resp.expires_in);
@@ -155,8 +209,13 @@ export function requestGoogleAccessToken(
   });
 }
 
+function browserIsOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
 /**
- * Prefer cached token; otherwise try silent refresh, then optional interactive.
+ * Prefer the in-memory token; otherwise try silent refresh, then optional interactive.
+ * Offline reloads fail soft with AuthOfflineError so the cached account stays put.
  */
 export async function ensureGoogleAccessToken(
   clientId: string,
@@ -165,11 +224,81 @@ export async function ensureGoogleAccessToken(
   const cached = getCachedAccessToken();
   if (cached) return cached;
 
+  if (browserIsOffline()) throw new AuthOfflineError();
+
   await loadGoogleScript();
   try {
     return await requestGoogleAccessToken(clientId, 'silent');
   } catch (silentErr) {
-    if (!opts.allowInteractive) throw silentErr;
+    if (!opts.allowInteractive || browserIsOffline()) {
+      if (browserIsOffline()) throw new AuthOfflineError();
+      throw silentErr;
+    }
     return requestGoogleAccessToken(clientId, 'interactive');
   }
+}
+
+function broadcastSignOut(): void {
+  if (typeof BroadcastChannel === 'undefined') return;
+  try {
+    const channel = new BroadcastChannel(SIGNOUT_CHANNEL);
+    channel.postMessage({ type: 'signout' });
+    channel.close();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Other tabs (and this tab's listener) drop the in-memory token and stop sync. */
+export function applyRemoteSignOut(): void {
+  authGeneration += 1;
+  clearStoredToken();
+}
+
+export function subscribeGoogleSignOut(listener: () => void): () => void {
+  if (typeof BroadcastChannel === 'undefined') return () => {};
+  const channel = new BroadcastChannel(SIGNOUT_CHANNEL);
+  const onMessage = () => listener();
+  channel.addEventListener('message', onMessage);
+  return () => {
+    channel.removeEventListener('message', onMessage);
+    channel.close();
+  };
+}
+
+async function revokeWithGis(token: string): Promise<boolean> {
+  const revoke = typeof window !== 'undefined' ? window.google?.accounts?.oauth2?.revoke : undefined;
+  if (!revoke) return false;
+  return new Promise((resolve) => {
+    try {
+      revoke(token, () => resolve(true));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function revokeWithHttp(token: string): Promise<void> {
+  try {
+    await fetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `token=${encodeURIComponent(token)}`,
+    });
+  } catch {
+    /* offline or blocked; local sign-out still stands */
+  }
+}
+
+/**
+ * Drop the token, tell other tabs, and best-effort revoke it at Google.
+ * Does not block on the network. Does not delete local tasks.
+ */
+export async function signOutGoogleSession(): Promise<void> {
+  const token = cachedToken?.token ?? null;
+  applyRemoteSignOut();
+  broadcastSignOut();
+  if (!token) return;
+  const revoked = await revokeWithGis(token);
+  if (!revoked) await revokeWithHttp(token);
 }
