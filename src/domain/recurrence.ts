@@ -430,6 +430,11 @@ export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boo
 
 const dayBoundsCache = new Map<string, readonly [number, number]>();
 
+const completedDateSetCache = new WeakMap<
+  object,
+  { history: readonly number[] | undefined; length: number; set: Set<string> }
+>();
+
 /** Local midnight bounds `[startMs, nextMidnightMs)` for a YYYY-MM-DD calendar date. */
 export function getDayBoundsMs(dateStr: string): readonly [number, number] {
   const cached = dayBoundsCache.get(dateStr);
@@ -445,12 +450,22 @@ export function getDayBoundsMs(dateStr: string): readonly [number, number] {
   return bounds;
 }
 
-/** Set of YYYY-MM-DD local calendar dates present in `task.completionHistory`. */
+/**
+ * Set of YYYY-MM-DD local calendar dates present in `task.completionHistory`.
+ * Reused for the same task object until that history array changes, so a month
+ * grid or overdue scan does not reformat every timestamp once per day.
+ */
 export function getCompletedDateSet(task: Pick<Task, 'completionHistory'>): Set<string> {
+  const history = task.completionHistory;
+  const length = history?.length ?? 0;
+  const cached = completedDateSetCache.get(task);
+  if (cached && cached.history === history && cached.length === length) return cached.set;
+
   const set = new Set<string>();
-  for (const ts of task.completionHistory || []) {
-    set.add(formatDate(new Date(ts)));
+  if (history) {
+    for (const ts of history) set.add(formatDate(new Date(ts)));
   }
+  completedDateSetCache.set(task, { history, length, set });
   return set;
 }
 

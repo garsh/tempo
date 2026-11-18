@@ -7,6 +7,9 @@ import {
   defaultDateForMonth,
   dueAtForSelectedDay,
   jumpToToday,
+  calendarExpandProgress,
+  classifyCalendarPull,
+  commitCalendarExpanded,
   monthContains,
   monthName,
   readStoredCalendarExpanded,
@@ -229,5 +232,53 @@ describe('calendar swiping (week and month shifting)', () => {
       expect(readStoredCalendarExpanded(faultyStorage)).toBe(false);
       expect(() => saveStoredCalendarExpanded(true, faultyStorage)).not.toThrow();
     });
+  });
+});
+
+describe('calendar pull to expand', () => {
+  const expandDelta = 180;
+
+  it('ignores a nudge and treats a sideways move as scrolling', () => {
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 2, dy: 3, atTop: true, onHeader: false, expanded: false })
+    ).toBe('pending');
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 20, dy: 4, atTop: true, onHeader: false, expanded: false })
+    ).toBe('scroll');
+  });
+
+  it('pulls the month open only downward from the top, or upward while it is already open', () => {
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: 24, atTop: true, onHeader: false, expanded: false })
+    ).toBe('drag');
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: 24, atTop: false, onHeader: false, expanded: false })
+    ).toBe('scroll');
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: false, onHeader: true, expanded: true })
+    ).toBe('drag');
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: false, onHeader: false, expanded: true })
+    ).toBe('scroll');
+    expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: true, onHeader: false, expanded: false })
+    ).toBe('scroll');
+  });
+
+  it('keeps an in-progress drag in drag mode', () => {
+    expect(
+      classifyCalendarPull({ mode: 'drag', dx: 40, dy: 0, atTop: false, onHeader: false, expanded: false })
+    ).toBe('drag');
+  });
+
+  it('follows the finger between the week strip and the full month, then snaps', () => {
+    expect(calendarExpandProgress(0, expandDelta / 2, expandDelta)).toBeCloseTo(0.5);
+    expect(calendarExpandProgress(0, expandDelta * 3, expandDelta)).toBe(1);
+    expect(calendarExpandProgress(1, -expandDelta * 3, expandDelta)).toBe(0);
+
+    expect(commitCalendarExpanded(0, 0.25)).toBe(false);
+    expect(commitCalendarExpanded(0, 0.26)).toBe(true);
+    expect(commitCalendarExpanded(1, 0.74)).toBe(false);
+    expect(commitCalendarExpanded(1, 0.75)).toBe(true);
   });
 });

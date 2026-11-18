@@ -23,6 +23,9 @@ import { sortTasksForDailyView } from './domain/sorting';
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
 import {
+  calendarExpandProgress,
+  classifyCalendarPull,
+  commitCalendarExpanded,
   readStoredCalendarExpanded,
   saveStoredCalendarExpanded,
 } from './domain/calendarUi';
@@ -33,7 +36,11 @@ import { TaskCard } from './components/TaskCard';
 import { ReorderableTaskList } from './components/ReorderableTaskList';
 import { QuickAddSheet } from './components/QuickAddSheet';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
-import { CALENDAR_EXPAND_DELTA, CalendarMonthView } from './components/CalendarMonthView';
+import {
+  CALENDAR_EXPAND_DELTA,
+  CalendarMonthView,
+  type CalendarMonthHandle,
+} from './components/CalendarMonthView';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
@@ -91,8 +98,8 @@ export function App() {
     saveStoredCalendarExpanded(calExpanded);
   }, [calExpanded]);
 
-  const [calDragProgress, setCalDragProgress] = useState<number | null>(null);
   const calAreaRef = useRef<HTMLDivElement>(null);
+  const monthViewRef = useRef<CalendarMonthHandle>(null);
   const calScrollRef = useRef<HTMLDivElement>(null);
   const calGestureRef = useRef<{
     startY: number;
@@ -230,27 +237,25 @@ export function App() {
       const dx = t.clientX - g.startX;
 
       if (g.mode === 'pending') {
-        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
-          g.mode = 'scroll';
-          return;
-        }
-        if (Math.abs(dy) < 6) return;
         const scroller = calScrollRef.current;
-        const atTop = !scroller || scroller.scrollTop <= 1;
-        const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
-        if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
-          g.mode = 'drag';
-        } else {
-          g.mode = 'scroll';
-          return;
-        }
+        const nextMode = classifyCalendarPull({
+          mode: g.mode,
+          dx,
+          dy,
+          atTop: !scroller || scroller.scrollTop <= 1,
+          onHeader: scroller ? !scroller.contains(e.target as Node) : true,
+          expanded: calExpanded,
+        });
+        if (nextMode === 'pending') return;
+        g.mode = nextMode;
+        if (g.mode !== 'drag') return;
       }
 
       if (g.mode === 'drag') {
         e.preventDefault();
-        const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
+        const next = calendarExpandProgress(g.startProgress, dy, CALENDAR_EXPAND_DELTA);
         g.latestProgress = next;
-        setCalDragProgress(next);
+        monthViewRef.current?.setPullProgress(next);
       }
     };
 
@@ -258,10 +263,10 @@ export function App() {
       const g = calGestureRef.current;
       calGestureRef.current = null;
       if (!g || g.mode !== 'drag') return;
-      const shouldExpand =
-        g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
-      setCalExpanded(shouldExpand);
-      setCalDragProgress(null);
+      const shouldExpand = commitCalendarExpanded(g.startProgress, g.latestProgress);
+      monthViewRef.current?.releasePull(() => {
+        setCalExpanded(shouldExpand);
+      });
     };
 
     area.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -493,26 +498,27 @@ export function App() {
               const dx = e.clientX - g.startX;
 
               if (g.mode === 'pending') {
-                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
-                  calGestureRef.current = null;
-                  return;
-                }
-                if (Math.abs(dy) < 6) return;
                 const scroller = calScrollRef.current;
-                const atTop = !scroller || scroller.scrollTop <= 1;
-                const onHeader = scroller ? !scroller.contains(e.target as Node) : true;
-                if ((dy > 0 && atTop) || (dy < 0 && calExpanded && (atTop || onHeader))) {
-                  g.mode = 'drag';
-                } else {
+                const nextMode = classifyCalendarPull({
+                  mode: g.mode,
+                  dx,
+                  dy,
+                  atTop: !scroller || scroller.scrollTop <= 1,
+                  onHeader: scroller ? !scroller.contains(e.target as Node) : true,
+                  expanded: calExpanded,
+                });
+                if (nextMode === 'pending') return;
+                if (nextMode === 'scroll') {
                   calGestureRef.current = null;
                   return;
                 }
+                g.mode = 'drag';
               }
 
               if (g.mode === 'drag') {
-                const next = Math.max(0, Math.min(1, g.startProgress + dy / CALENDAR_EXPAND_DELTA));
+                const next = calendarExpandProgress(g.startProgress, dy, CALENDAR_EXPAND_DELTA);
                 g.latestProgress = next;
-                setCalDragProgress(next);
+                monthViewRef.current?.setPullProgress(next);
               }
             }}
             onPointerUp={(e) => {
@@ -520,10 +526,10 @@ export function App() {
               const g = calGestureRef.current;
               calGestureRef.current = null;
               if (!g || g.mode !== 'drag') return;
-              const shouldExpand =
-                g.startProgress === 0 ? g.latestProgress > 0.25 : g.latestProgress >= 0.75;
-              setCalExpanded(shouldExpand);
-              setCalDragProgress(null);
+              const shouldExpand = commitCalendarExpanded(g.startProgress, g.latestProgress);
+              monthViewRef.current?.releasePull(() => {
+                setCalExpanded(shouldExpand);
+              });
             }}
             className="flex-1 flex flex-col min-h-0 overflow-hidden"
           >
@@ -537,12 +543,12 @@ export function App() {
               <div className={activeView === 'calendar-month' ? 'shrink-0 px-3 sm:px-5' : 'space-y-3'}>
                 {activeView === 'calendar-month' ? (
                   <CalendarMonthView
+                    ref={monthViewRef}
                     year={calYear}
                     monthIndex={calMonth}
                     selectedDateStr={calSelectedDate}
                     tasks={activeTasks}
                     expanded={calExpanded}
-                    dragProgress={calDragProgress}
                     onToggleExpanded={(next) =>
                       setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
                     }

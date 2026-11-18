@@ -125,6 +125,38 @@ export function shiftMonthView(
   };
 }
 
+export type CalendarPullMode = 'pending' | 'drag' | 'scroll';
+
+/**
+ * While the finger is still undecided, classify a move as a month pull, a scroll,
+ * or not far enough yet. Horizontal movement is left to the month/week pager.
+ */
+export function classifyCalendarPull(input: {
+  mode: CalendarPullMode;
+  dx: number;
+  dy: number;
+  atTop: boolean;
+  onHeader: boolean;
+  expanded: boolean;
+}): CalendarPullMode {
+  if (input.mode !== 'pending') return input.mode;
+  if (Math.abs(input.dx) > Math.abs(input.dy) && Math.abs(input.dx) > 8) return 'scroll';
+  if (Math.abs(input.dy) < 6) return 'pending';
+  const { dy, atTop, onHeader, expanded } = input;
+  if ((dy > 0 && atTop) || (dy < 0 && expanded && (atTop || onHeader))) return 'drag';
+  return 'scroll';
+}
+
+/** 0 = week strip, 1 = full month. `expandDelta` is the pixel height between those two. */
+export function calendarExpandProgress(startProgress: number, dy: number, expandDelta: number): number {
+  return Math.max(0, Math.min(1, startProgress + dy / expandDelta));
+}
+
+/** Release rule: a collapsed grid opens past 25%; an open grid stays open at 75% or more. */
+export function commitCalendarExpanded(startProgress: number, progress: number): boolean {
+  return startProgress === 0 ? progress > 0.25 : progress >= 0.75;
+}
+
 /**
  * Builds a 7-day strip for the week containing `centerDateStr`, starting on `weekStart`.
  */

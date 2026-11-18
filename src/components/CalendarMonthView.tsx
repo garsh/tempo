@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import type { Task } from '../types/task';
 import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from '../domain/calendar';
 import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek } from '../domain/calendarUi';
@@ -9,19 +9,25 @@ export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
 export const CALENDAR_EXPAND_DELTA = CALENDAR_ROW_HEIGHT * (CALENDAR_WEEK_COUNT - 1);
 
+export type CalendarMonthHandle = {
+  /** Move the open/closed grid with the finger. Does not re-render. */
+  setPullProgress: (progress: number) => void;
+  /** Ease to the committed open or closed height, then run `commit` so React matches it. */
+  releasePull: (commit: () => void) => void;
+};
+
 interface CalendarMonthViewProps {
   tasks: Task[];
   year: number;
   monthIndex: number;
   selectedDateStr: string | null;
   expanded: boolean;
-  /** 0 (week strip) .. 1 (full month); overrides `expanded` while actively dragging. */
-  dragProgress?: number | null;
   onToggleExpanded: (next?: boolean) => void;
   onMonthChange: (year: number, monthIndex: number) => void;
   onSelectDate: (dateStr: string) => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
+  ref?: Ref<CalendarMonthHandle>;
 }
 
 /**
@@ -35,12 +41,12 @@ export function CalendarMonthView({
   monthIndex,
   selectedDateStr,
   expanded,
-  dragProgress,
   onToggleExpanded,
   onMonthChange,
   onSelectDate,
   onSwipeLeft,
   onSwipeRight,
+  ref,
 }: CalendarMonthViewProps) {
   const [{ weekStart }] = usePrefs();
   const todayStr = formatDate(new Date());
@@ -48,6 +54,11 @@ export function CalendarMonthView({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
+  const heightRef = useRef<HTMLDivElement>(null);
+  const weekShiftRef = useRef<HTMLDivElement>(null);
+  const pullingRef = useRef(false);
+  const releaseFrameRef = useRef<number | null>(null);
+  const pullLayoutRef = useRef({ expanded, selectedWeekIndex: 0 });
   const currentDragOffsetRef = useRef(0);
   const justSwipedRef = useRef(false);
   const isSnappingRef = useRef(false);
@@ -234,8 +245,7 @@ export function CalendarMonthView({
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1 || isSnappingRef.current) return;
-      if (dragProgress !== null && dragProgress !== undefined) return;
+      if (e.touches.length !== 1 || isSnappingRef.current || pullingRef.current) return;
 
       const t = e.touches[0];
       const dx = t.clientX - startX;
@@ -295,7 +305,7 @@ export function CalendarMonthView({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchCancel);
     };
-  }, [dragProgress, finishSwipe]);
+  }, [finishSwipe]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || e.button !== 0) return;
@@ -356,28 +366,22 @@ export function CalendarMonthView({
     pointerDirectionRef.current = 'none';
   };
 
-  const isDraggingVertical = dragProgress !== null && dragProgress !== undefined;
-  const progress = Math.max(0, Math.min(1, isDraggingVertical ? dragProgress : expanded ? 1 : 0));
+  const progress = expanded ? 1 : 0;
   const containerHeight = CALENDAR_ROW_HEIGHT + progress * CALENDAR_EXPAND_DELTA;
 
   const [isExpanding, setIsExpanding] = useState(false);
   const prevExpandedRef = useRef(expanded);
-  const prevDraggingVerticalRef = useRef(isDraggingVertical);
 
   useEffect(() => {
     const expandedChanged = prevExpandedRef.current !== expanded;
-    const draggingEnded = prevDraggingVerticalRef.current && !isDraggingVertical;
     prevExpandedRef.current = expanded;
-    prevDraggingVerticalRef.current = isDraggingVertical;
-
-    if (expandedChanged || draggingEnded) {
-      setIsExpanding(true);
-      const timer = setTimeout(() => {
-        setIsExpanding(false);
-      }, 250);
-      return () => clearTimeout(timer);
-    }
-  }, [expanded, isDraggingVertical]);
+    if (!expandedChanged) return;
+    setIsExpanding(true);
+    const timer = setTimeout(() => {
+      setIsExpanding(false);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [expanded]);
 
   const selectedWeekIndex = useMemo(() => {
     const idx = currentMonthGrid.findIndex((c) => c.dateStr === focusStr);
@@ -385,6 +389,42 @@ export function CalendarMonthView({
   }, [currentMonthGrid, focusStr]);
 
   const gridTranslateY = -selectedWeekIndex * CALENDAR_ROW_HEIGHT * (1 - progress);
+  pullLayoutRef.current = { expanded, selectedWeekIndex };
+
+  useImperativeHandle(ref, () => ({
+    setPullProgress(progress: number) {
+      if (releaseFrameRef.current != null) {
+        cancelAnimationFrame(releaseFrameRef.current);
+        releaseFrameRef.current = null;
+      }
+      pullingRef.current = true;
+      const p = Math.max(0, Math.min(1, progress));
+      const week = pullLayoutRef.current.selectedWeekIndex;
+      const heightEl = heightRef.current;
+      const shiftEl = weekShiftRef.current;
+      if (heightEl) {
+        heightEl.style.transition = 'none';
+        heightEl.style.height = `${CALENDAR_ROW_HEIGHT + p * CALENDAR_EXPAND_DELTA}px`;
+      }
+      if (shiftEl) {
+        shiftEl.style.transition = 'none';
+        shiftEl.style.transform = `translateY(${-week * CALENDAR_ROW_HEIGHT * (1 - p)}px)`;
+      }
+    },
+    releasePull(commit: () => void) {
+      pullingRef.current = false;
+      const heightEl = heightRef.current;
+      if (heightEl) heightEl.style.transition = 'height 200ms ease-out';
+      if (weekShiftRef.current) weekShiftRef.current.style.transition = 'transform 200ms ease-out';
+      const outer = requestAnimationFrame(() => {
+        releaseFrameRef.current = requestAnimationFrame(() => {
+          releaseFrameRef.current = null;
+          commit();
+        });
+      });
+      releaseFrameRef.current = outer;
+    },
+  }), []);
 
   const prevGridKey = expanded
     ? `m-${prevMonth.year}-${prevMonth.monthIndex}`
@@ -473,8 +513,9 @@ export function CalendarMonthView({
       </div>
 
       <div
+        ref={heightRef}
         style={{ height: `${containerHeight}px` }}
-        className={`overflow-hidden relative w-full ${isDraggingVertical ? '' : 'transition-[height] duration-200 ease-out'}`}
+        className="overflow-hidden relative w-full transition-[height] duration-200 ease-out"
       >
         <div
           ref={trackRef}
@@ -494,13 +535,14 @@ export function CalendarMonthView({
 
           {/* Current page (center) */}
           <div
+            ref={weekShiftRef}
             style={{
               position: 'relative',
               top: 0,
               left: 0,
               width: '100%',
               transform: `translateY(${gridTranslateY}px)`,
-              transition: isExpanding ? 'transform 200ms ease-out' : 'none',
+              ...(isExpanding ? { transition: 'transform 200ms ease-out' } : {}),
             }}
           >
             {renderCells(currentCells, focusStr, true, currentGridKey)}

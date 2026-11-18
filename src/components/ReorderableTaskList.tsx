@@ -120,6 +120,8 @@ export function ReorderableTaskList({
   const activeRef = useRef<ActiveDrag | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);
+  const attachDragTouchRef = useRef<() => void>(() => {});
+  const detachDragTouchRef = useRef<() => void>(() => {});
 
   const tasksRef = useRef(tasks);
   const onReorderRef = useRef(onReorder);
@@ -178,6 +180,7 @@ export function ReorderableTaskList({
   }, []);
 
   const cleanupDragImmediate = useCallback(() => {
+    detachDragTouchRef.current();
     clearPending();
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current);
@@ -265,10 +268,21 @@ export function ReorderableTaskList({
     };
 
     const onTouchMove = (e: TouchEvent) => {
-      if (activeRef.current) {
-        e.preventDefault();
-      }
+      if (activeRef.current && e.cancelable) e.preventDefault();
     };
+    let dragTouchAttached = false;
+    const attachDragTouch = () => {
+      if (dragTouchAttached) return;
+      dragTouchAttached = true;
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+    };
+    const detachDragTouch = () => {
+      if (!dragTouchAttached) return;
+      dragTouchAttached = false;
+      window.removeEventListener('touchmove', onTouchMove);
+    };
+    attachDragTouchRef.current = attachDragTouch;
+    detachDragTouchRef.current = detachDragTouch;
 
     const onPointerUp = (e: PointerEvent) => {
       const p = pendingRef.current;
@@ -280,6 +294,7 @@ export function ReorderableTaskList({
       const active = activeRef.current;
       if (!active || e.pointerId !== active.pointerId) return;
 
+      detachDragTouch();
       activeRef.current = null;
       const { taskId, fromIndex, targetIndex, draggedHeight, snapshots } = active;
       const insertAt = targetIndex > fromIndex ? targetIndex - 1 : targetIndex;
@@ -332,12 +347,13 @@ export function ReorderableTaskList({
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => {
+      detachDragTouch();
+      attachDragTouchRef.current = () => {};
+      detachDragTouchRef.current = () => {};
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
-      window.removeEventListener('touchmove', onTouchMove);
     };
   }, [clearPending, cleanupDragImmediate]);
 
@@ -390,6 +406,7 @@ export function ReorderableTaskList({
           orderKeys,
         };
         activeRef.current = nextActive;
+        attachDragTouchRef.current();
         onDragActiveChangeRef.current?.(true);
         setDragState({
           taskId,

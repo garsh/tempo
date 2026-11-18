@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Task } from '../types/task';
 import { completedTasksOnDate, startOfWeek, tasksDueOnDate } from '../domain/calendar';
 import { shiftWeek } from '../domain/calendarUi';
@@ -62,12 +62,17 @@ export function CalendarAgendaView({
   const [{ weekStart, showOverdue }] = usePrefs();
 
   const stripRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
   const justSwipedRef = useRef(false);
   const isSnappingRef = useRef(false);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [dragOffset, setDragOffset] = useState(0);
-  const [isSnapping, setIsSnapping] = useState(false);
+  const setTrackOffset = useCallback((offset: number, animate: boolean) => {
+    const track = trackRef.current;
+    if (!track) return;
+    track.style.transition = animate ? 'transform 350ms cubic-bezier(0.25, 1, 0.5, 1)' : 'none';
+    track.style.transform = `translateX(${offset}px)`;
+  }, []);
 
   const pointerStartXRef = useRef(0);
   const pointerStartYRef = useRef(0);
@@ -100,11 +105,10 @@ export function CalendarAgendaView({
       }
 
       justSwipedRef.current = true;
-      setIsSnapping(true);
       isSnappingRef.current = true;
 
       const targetOffset = target === 1 ? -width : target === -1 ? width : 0;
-      setDragOffset(targetOffset);
+      setTrackOffset(targetOffset, true);
 
       const SNAP_DURATION = 350;
 
@@ -120,16 +124,15 @@ export function CalendarAgendaView({
           onMonthChange?.(prev.year, prev.monthIndex);
         }
 
-        setIsSnapping(false);
         isSnappingRef.current = false;
-        setDragOffset(0);
+        setTrackOffset(0, false);
 
         setTimeout(() => {
           justSwipedRef.current = false;
         }, 100);
       }, SNAP_DURATION);
     },
-    [focus, onSelectDate, onMonthChange]
+    [focus, onSelectDate, onMonthChange, setTrackOffset]
   );
 
   useEffect(() => {
@@ -173,14 +176,14 @@ export function CalendarAgendaView({
 
       if (direction === 'horizontal') {
         if (e.cancelable) e.preventDefault();
-        setDragOffset(dx);
+        setTrackOffset(dx, false);
       }
     };
 
     const onTouchEnd = (e: TouchEvent) => {
       if (direction !== 'horizontal') {
         if (direction === 'none') {
-          setDragOffset(0);
+          setTrackOffset(0, false);
         }
         return;
       }
@@ -194,7 +197,7 @@ export function CalendarAgendaView({
 
     const onTouchCancel = () => {
       direction = 'none';
-      setDragOffset(0);
+      setTrackOffset(0, false);
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -208,7 +211,7 @@ export function CalendarAgendaView({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchCancel);
     };
-  }, [finishSwipe]);
+  }, [finishSwipe, setTrackOffset]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || e.button !== 0) return;
@@ -222,7 +225,7 @@ export function CalendarAgendaView({
     if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
     if ((e.buttons & 1) === 0) {
       if (pointerDirectionRef.current === 'horizontal') {
-        setDragOffset(0);
+        setTrackOffset(0, false);
       }
       pointerDirectionRef.current = 'none';
       return;
@@ -239,7 +242,7 @@ export function CalendarAgendaView({
     }
 
     if (pointerDirectionRef.current === 'horizontal') {
-      setDragOffset(dx);
+      setTrackOffset(dx, false);
     }
   };
 
@@ -255,7 +258,7 @@ export function CalendarAgendaView({
 
   const onPointerCancel = () => {
     if (pointerDirectionRef.current === 'horizontal') {
-      setDragOffset(0);
+      setTrackOffset(0, false);
     }
     pointerDirectionRef.current = 'none';
   };
@@ -350,9 +353,10 @@ export function CalendarAgendaView({
         onPointerCancel={onPointerCancel}
       >
         <div
+          ref={trackRef}
           style={{
-            transform: `translateX(${dragOffset}px)`,
-            transition: isSnapping ? 'transform 350ms cubic-bezier(0.25, 1, 0.5, 1)' : 'none',
+            transform: 'translateX(0px)',
+            transition: 'none',
             willChange: 'transform',
           }}
           className="w-full relative"

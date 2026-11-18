@@ -240,7 +240,6 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       }
 
       if (swipeDirectionRef.current === 'horizontal') {
-        if (e.cancelable) e.preventDefault();
         let next = start.initialOffset + dx;
         next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
         currentOffsetRef.current = next;
@@ -275,7 +274,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     };
 
     el.addEventListener('touchstart', handleTouchStart, { passive: true });
-    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchmove', handleTouchMove, { passive: true });
     el.addEventListener('touchend', handleTouchEnd, { passive: true });
     el.addEventListener('touchcancel', handleTouchEnd, { passive: true });
 
@@ -458,6 +457,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         style={{
           transform: `translateX(${swipeOffset}px)`,
           transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+          touchAction: 'pan-y',
         }}
         className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
           selected
