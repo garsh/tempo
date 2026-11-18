@@ -35,6 +35,67 @@ export interface QuickAddSheetProps {
 
 const ALL_WEEKDAYS: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
 
+export const KEYBOARD_HEIGHT_STORAGE_KEY = 'tempo_last_keyboard_height';
+
+export function isMobileKeyboardDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  const isTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+  const isCoarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isSmallScreen = window.innerWidth < 1024;
+  return isSmallScreen && (isTouch || isCoarse || isMobileUA);
+}
+
+export function getStoredOrEstimatedKeyboardHeight(): number {
+  if (typeof window === 'undefined') return 0;
+  if (!isMobileKeyboardDevice()) return 0;
+
+  try {
+    const stored = localStorage.getItem(KEYBOARD_HEIGHT_STORAGE_KEY);
+    if (stored) {
+      const val = parseInt(stored, 10);
+      if (!Number.isNaN(val) && val >= 160 && val <= 500) {
+        return val;
+      }
+    }
+  } catch {
+    // Ignore localStorage access failures
+  }
+
+  return Math.min(330, Math.max(260, Math.round(window.innerHeight * 0.36)));
+}
+
+export function computeQuickAddSheetMaxHeight({
+  keyboardInset,
+}: {
+  keyboardInset: number;
+}): string {
+  if (keyboardInset > 0) {
+    return `calc(100dvh - ${keyboardInset}px - max(24px, env(safe-area-inset-top)))`;
+  }
+  return 'calc(100dvh - max(24px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)))';
+}
+
+export function computeQuickAddSheetBottom({
+  isMobile,
+  activeKeyboardInset,
+  lastKnownKeyboardInset,
+  fallbackHeight,
+}: {
+  isMobile: boolean;
+  activeKeyboardInset: number;
+  lastKnownKeyboardInset: number;
+  fallbackHeight: number;
+}): number {
+  if (!isMobile) {
+    return activeKeyboardInset > 0 ? activeKeyboardInset : 0;
+  }
+  if (activeKeyboardInset > 100) {
+    return activeKeyboardInset;
+  }
+  return lastKnownKeyboardInset > 0 ? lastKnownKeyboardInset : fallbackHeight;
+}
+
 /**
  * Sleek bottom sheet for creating and editing routines.
  * Supports quick title/notes, inline date picker, and repeat/recurrence rules.
@@ -52,9 +113,27 @@ export function QuickAddSheet({
   const [dueAt, setDueAt] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'date' | 'repeat'>('none');
   const [fullScreen, setFullScreen] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Preserve the last measured virtual keyboard height across focus shifts
+  const lastActiveKeyboardInsetRef = useRef<number>(0);
+  const [keyboardInset, setKeyboardInset] = useState(() =>
+    isOpen ? getStoredOrEstimatedKeyboardHeight() : 0
+  );
+
+  // When opening on mobile, immediately position above the keyboard before the first paint
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (isOpen && !prevIsOpen) {
+    setPrevIsOpen(true);
+    if (isMobileKeyboardDevice()) {
+      const initialHeight = lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
+      if (initialHeight > 0 && keyboardInset !== initialHeight) {
+        setKeyboardInset(initialHeight);
+      }
+    }
+  } else if (!isOpen && prevIsOpen) {
+    setPrevIsOpen(false);
+  }
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -75,10 +154,26 @@ export function QuickAddSheet({
     const vv = window.visualViewport;
     if (!vv) return;
 
+    const isMobile = isMobileKeyboardDevice();
+
     const update = () => {
-      const inset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
-      setKeyboardInset(inset);
-      setVisualViewportHeight(Math.round(vv.height));
+      const activeInset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
+      if (activeInset > 100) {
+        lastActiveKeyboardInsetRef.current = activeInset;
+        setKeyboardInset(activeInset);
+        try {
+          localStorage.setItem(KEYBOARD_HEIGHT_STORAGE_KEY, String(activeInset));
+        } catch {
+          // Ignore localStorage errors
+        }
+      } else if (!isMobile) {
+        setKeyboardInset(0);
+      } else {
+        // Mobile virtual keyboard dismissed (e.g. non-text field clicked): remain above the keyboard
+        const preservedHeight =
+          lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
+        setKeyboardInset(preservedHeight);
+      }
     };
 
     vv.addEventListener('resize', update);
@@ -88,8 +183,6 @@ export function QuickAddSheet({
     return () => {
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
-      setKeyboardInset(0);
-      setVisualViewportHeight(null);
     };
   }, [isOpen]);
 
@@ -107,9 +200,9 @@ export function QuickAddSheet({
     setEndOnDate('');
     setEndAfterCount('');
     setPanel('none');
-    titleRef.current?.focus();
+    titleRef.current?.focus({ preventScroll: true });
     window.requestAnimationFrame(() => {
-      titleRef.current?.focus();
+      titleRef.current?.focus({ preventScroll: true });
     });
   }, [defaultDueAt, todayStr]);
 
@@ -149,7 +242,7 @@ export function QuickAddSheet({
 
     setPanel('none');
     setFullScreen(false);
-    const t = window.setTimeout(() => titleRef.current?.focus(), 60);
+    const t = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 60);
     return () => clearTimeout(t);
   }, [isOpen, initialTask, resetForm]);
 
@@ -262,23 +355,28 @@ export function QuickAddSheet({
 
   const shellClass = fullScreen
     ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto'
-    : 'fixed inset-x-0 bottom-0 z-[60] flex flex-col bg-tt-elevated rounded-t-[24px] border-t border-tt-border/80 shadow-[0_-8px_32px_rgba(0,0,0,0.2)] max-h-[90vh] overflow-y-auto';
+    : 'relative w-full max-w-xl flex flex-col bg-tt-elevated rounded-2xl sm:rounded-3xl border border-tt-border/80 shadow-2xl overflow-y-auto';
 
   const dialogStyle: React.CSSProperties = fullScreen
-    ? {
-        bottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
-      }
+    ? {}
     : {
-        bottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
-        paddingBottom: keyboardInset > 0 ? '8px' : 'max(12px, env(safe-area-inset-bottom))',
-        maxHeight: visualViewportHeight ? `${visualViewportHeight}px` : undefined,
+        maxHeight: keyboardInset > 0
+          ? `calc(100dvh - ${keyboardInset}px - max(24px, env(safe-area-inset-top)))`
+          : 'calc(100dvh - max(24px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)))',
       };
 
   return (
-    <div className="fixed inset-0 z-[60]" data-testid="quick-add-sheet">
+    <div
+      className={
+        fullScreen
+          ? 'fixed inset-0 z-[60]'
+          : 'fixed inset-0 z-[60] flex items-start justify-center p-3 sm:p-5 pt-[max(12px,env(safe-area-inset-top))] sm:pt-16'
+      }
+      data-testid="quick-add-sheet"
+    >
       <button
         type="button"
-        className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-black/40 backdrop-blur-[2px]"
         aria-label="Dismiss"
         onClick={onClose}
       />
@@ -290,9 +388,6 @@ export function QuickAddSheet({
         style={dialogStyle}
         onClick={(e) => e.stopPropagation()}
       >
-        {!fullScreen && (
-          <div className="mx-auto mt-2.5 mb-1 w-10 h-1 rounded-full bg-tt-border dark:bg-white/20" />
-        )}
 
         {fullScreen && (
           <div className="flex items-center h-14 px-3 border-b border-tt-border">
