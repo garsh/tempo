@@ -99,6 +99,7 @@ function slidingRow(container: HTMLElement): HTMLElement {
 
 function visibleDotsOnDay(container: HTMLElement, dayNum: string): number {
   return [...container.querySelectorAll('button')].filter((button) => {
+    if (button.closest('[aria-hidden="true"]')) return false;
     const spans = button.querySelectorAll('span');
     if (spans[0]?.textContent !== dayNum) return false;
     return spans[1] != null && !spans[1].className.includes('opacity-0');
@@ -292,6 +293,34 @@ describe('CalendarMonthView', () => {
     });
     expect(visibleDotsOnDay(done.container, '18')).toBe(0);
     done.unmount();
+
+    const recurringOpen = renderMonth({
+      tasks: [
+        task({
+          id: 'routine',
+          title: 'Routine',
+          dueAt: '2026-11-18',
+          recurrence: { type: 'fixed_interval', intervalUnit: 'days', intervalValue: 1 },
+        }),
+      ],
+    });
+    expect(visibleDotsOnDay(recurringOpen.container, '18')).toBe(1);
+    recurringOpen.unmount();
+
+    const recurringDone = renderMonth({
+      tasks: [
+        task({
+          id: 'routine',
+          title: 'Routine',
+          dueAt: '2026-11-19',
+          recurrence: { type: 'fixed_interval', intervalUnit: 'days', intervalValue: 1 },
+          completionHistory: [new Date(2026, 10, 18, 12, 0).getTime()],
+        }),
+      ],
+    });
+    expect(visibleDotsOnDay(recurringDone.container, '18')).toBe(0);
+    expect(visibleDotsOnDay(recurringDone.container, '19')).toBe(1);
+    recurringDone.unmount();
   });
 
   it('selects the next month after a left swipe and ignores a vertical drag', () => {
