@@ -231,6 +231,9 @@ export function QuickAddSheet({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void handleSubmit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
     }
   };
 
@@ -334,6 +337,10 @@ export function QuickAddSheet({
         <div className={`px-4 sm:px-5 ${fullScreen ? 'pt-4 flex-1' : 'pt-2'}`}>
           <input
             ref={titleRef}
+            type="search"
+            role="textbox"
+            name="routine_title"
+            id="routine_title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={onTitleKeyDown}
@@ -343,7 +350,7 @@ export function QuickAddSheet({
             spellCheck={false}
             placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
             aria-label="Routine title"
-            className="w-full bg-transparent text-[20px] sm:text-[22px] font-semibold text-tt-text placeholder:text-tt-muted outline-none py-1.5"
+            className="w-full bg-transparent text-[20px] sm:text-[22px] font-semibold text-tt-text placeholder:text-tt-muted outline-none py-1.5 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
           />
           <textarea
             value={notes}
