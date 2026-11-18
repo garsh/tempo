@@ -143,7 +143,7 @@ export function classifyCalendarPull(input: {
   if (Math.abs(input.dx) > Math.abs(input.dy) && Math.abs(input.dx) > 8) return 'scroll';
   if (Math.abs(input.dy) < 6) return 'pending';
   const { dy, atTop, onHeader, expanded } = input;
-  if ((dy > 0 && atTop) || (dy < 0 && expanded && (atTop || onHeader))) return 'drag';
+  if ((dy > 0 && atTop) || (dy < 0 && expanded && onHeader)) return 'drag';
   return 'scroll';
 }
 

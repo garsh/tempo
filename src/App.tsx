@@ -108,6 +108,18 @@ export function App() {
     latestProgress: number;
     mode: 'pending' | 'drag' | 'scroll';
   } | null>(null);
+  const isTaskReorderingRef = useRef(false);
+
+  const handleDragActiveChange = useCallback((active: boolean) => {
+    isTaskReorderingRef.current = active;
+    if (active) {
+      const g = calGestureRef.current;
+      calGestureRef.current = null;
+      if (g && g.mode === 'drag') {
+        monthViewRef.current?.releasePull(() => {});
+      }
+    }
+  }, []);
 
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
@@ -216,6 +228,7 @@ export function App() {
     if (!area || activeView !== 'calendar-month') return;
 
     const onTouchStart = (e: TouchEvent) => {
+      if (isTaskReorderingRef.current) return;
       const t = e.touches[0];
       if (!t) return;
       const startProgress = calExpanded ? 1 : 0;
@@ -229,6 +242,7 @@ export function App() {
     };
 
     const onTouchMove = (e: TouchEvent) => {
+      if (isTaskReorderingRef.current) return;
       const g = calGestureRef.current;
       const t = e.touches[0];
       if (!g || !t) return;
@@ -260,6 +274,10 @@ export function App() {
     };
 
     const finishDrag = () => {
+      if (isTaskReorderingRef.current) {
+        calGestureRef.current = null;
+        return;
+      }
       const g = calGestureRef.current;
       calGestureRef.current = null;
       if (!g || g.mode !== 'drag') return;
@@ -395,6 +413,7 @@ export function App() {
       <ReorderableTaskList
         tasks={tasks}
         enabled={reorderEnabled}
+        onDragActiveChange={handleDragActiveChange}
         onReorder={(taskIds) => {
           void reorderTasks(taskIds);
           scheduleSync();
@@ -476,7 +495,7 @@ export function App() {
           <div
             ref={calAreaRef}
             onPointerDown={(e) => {
-              if (activeView !== 'calendar-month' || e.pointerType === 'touch') return;
+              if (activeView !== 'calendar-month' || e.pointerType === 'touch' || isTaskReorderingRef.current) return;
               const startProgress = calExpanded ? 1 : 0;
               calGestureRef.current = {
                 startY: e.clientY,
@@ -487,7 +506,7 @@ export function App() {
               };
             }}
             onPointerMove={(e) => {
-              if (e.pointerType === 'touch') return;
+              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
               const g = calGestureRef.current;
               if (!g) return;
 
@@ -519,7 +538,7 @@ export function App() {
               }
             }}
             onPointerUp={(e) => {
-              if (e.pointerType === 'touch') return;
+              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
               const g = calGestureRef.current;
               calGestureRef.current = null;
               if (!g || g.mode !== 'drag') return;

@@ -58,7 +58,12 @@ export function CalendarMonthView({
   const weekShiftRef = useRef<HTMLDivElement>(null);
   const pullingRef = useRef(false);
   const releaseFrameRef = useRef<number | null>(null);
-  const pullLayoutRef = useRef({ expanded, selectedWeekIndex: 0 });
+  const pullLayoutRef = useRef({
+    expanded,
+    selectedWeekIndex: 0,
+    containerHeight: 0,
+    gridTranslateY: 0,
+  });
   const currentDragOffsetRef = useRef(0);
   const justSwipedRef = useRef(false);
   const isSnappingRef = useRef(false);
@@ -393,7 +398,7 @@ export function CalendarMonthView({
   }, [currentMonthGrid, focusStr]);
 
   const gridTranslateY = -selectedWeekIndex * CALENDAR_ROW_HEIGHT * (1 - progress);
-  pullLayoutRef.current = { expanded, selectedWeekIndex };
+  pullLayoutRef.current = { expanded, selectedWeekIndex, containerHeight, gridTranslateY };
 
   useImperativeHandle(ref, () => ({
     setPullProgress(progress: number) {
@@ -418,8 +423,16 @@ export function CalendarMonthView({
     releasePull(commit: () => void) {
       pullingRef.current = false;
       const heightEl = heightRef.current;
-      if (heightEl) heightEl.style.transition = 'height 200ms ease-out';
-      if (weekShiftRef.current) weekShiftRef.current.style.transition = 'transform 200ms ease-out';
+      const shiftEl = weekShiftRef.current;
+      const { containerHeight: targetHeight, gridTranslateY: targetTranslateY } = pullLayoutRef.current;
+      if (heightEl) {
+        heightEl.style.transition = 'height 200ms ease-out';
+        heightEl.style.height = `${targetHeight}px`;
+      }
+      if (shiftEl) {
+        shiftEl.style.transition = 'transform 200ms ease-out';
+        shiftEl.style.transform = `translateY(${targetTranslateY}px)`;
+      }
       const outer = requestAnimationFrame(() => {
         releaseFrameRef.current = requestAnimationFrame(() => {
           releaseFrameRef.current = null;

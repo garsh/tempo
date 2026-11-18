@@ -162,7 +162,7 @@ describe('TaskCard swipe', () => {
 });
 
 describe('ReorderableTaskList touch scroll', () => {
-  function renderList(onReorder = vi.fn()) {
+  function renderList(onReorder = vi.fn(), onDragActiveChange?: (active: boolean) => void) {
     const tasks = [
       task({ id: 'a', title: 'A', dueAt: null }),
       task({ id: 'b', title: 'B', dueAt: null }),
@@ -173,6 +173,7 @@ describe('ReorderableTaskList touch scroll', () => {
         tasks={tasks}
         enabled
         onReorder={onReorder}
+        onDragActiveChange={onDragActiveChange}
         renderRow={(item, drag) => (
           <div data-row={item.id} ref={drag.rowRef} onPointerDown={drag.onRowPointerDown}>
             {item.title}
@@ -212,6 +213,33 @@ describe('ReorderableTaskList touch scroll', () => {
       window.dispatchEvent(pointer('pointerup', 10, 200, 0));
     });
     expect(onReorder).toHaveBeenCalledWith(['b', 'c', 'a']);
+    view.unmount();
+  });
+
+  it('notifies onDragActiveChange when long-press activates and clears after drop', () => {
+    vi.useFakeTimers();
+    const onDragActiveChange = vi.fn();
+    const view = renderList(vi.fn(), onDragActiveChange);
+    const row = view.container.querySelector<HTMLElement>('[data-row="a"]');
+    if (!row) throw new Error('row not found');
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 10, 10, 1));
+    });
+    expect(onDragActiveChange).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    expect(onDragActiveChange).toHaveBeenCalledWith(true);
+
+    act(() => {
+      window.dispatchEvent(pointer('pointerup', 10, 10, 0));
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(onDragActiveChange).toHaveBeenCalledWith(false);
     view.unmount();
   });
 });
@@ -264,6 +292,10 @@ describe('CalendarMonthView', () => {
       ref.current?.setPullProgress(0.5);
     });
     expect(grid?.style.height).toBe(`${CALENDAR_ROW_HEIGHT + CALENDAR_EXPAND_DELTA * 0.5}px`);
+    act(() => {
+      ref.current?.releasePull(() => {});
+    });
+    expect(grid?.style.height).toBe(`${CALENDAR_ROW_HEIGHT}px`);
     view.unmount();
   });
 

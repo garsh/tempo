@@ -261,6 +261,9 @@ describe('calendar pull to expand', () => {
       classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: false, onHeader: false, expanded: true })
     ).toBe('scroll');
     expect(
+      classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: true, onHeader: false, expanded: true })
+    ).toBe('scroll');
+    expect(
       classifyCalendarPull({ mode: 'pending', dx: 0, dy: -24, atTop: true, onHeader: false, expanded: false })
     ).toBe('scroll');
   });
