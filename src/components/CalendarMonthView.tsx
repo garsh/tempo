@@ -48,7 +48,7 @@ export function CalendarMonthView({
   onSwipeRight,
   ref,
 }: CalendarMonthViewProps) {
-  const [{ weekStart }] = usePrefs();
+  const [{ weekStart, showOverdue }] = usePrefs();
   const todayStr = formatDate(new Date());
   const focusStr = selectedDateStr || todayStr;
 
@@ -463,11 +463,13 @@ export function CalendarMonthView({
           const selected = highlightDateStr === cell.dateStr;
           const isToday = cell.dateStr === todayStr;
           const hasTasks = dueDateSet.has(cell.dateStr);
+          const isOverduePast = showOverdue && cell.dateStr < todayStr && hasTasks;
           const rowIdx = Math.floor(idx / 7);
           const muted = (progress > 0.05 || (isCurrentPage && rowIdx !== selectedWeekIndex)) && !cell.inCurrentMonth;
           return (
             <button
               key={`${gridKey}-${cell.dateStr}`}
+              data-date={cell.dateStr}
               type="button"
               style={{ height: `${CALENDAR_ROW_HEIGHT}px` }}
               onClick={() => {
@@ -498,9 +500,13 @@ export function CalendarMonthView({
               <span
                 className={`w-1 h-1 rounded-full -mt-1 ${
                   hasTasks
-                    ? muted
-                      ? 'bg-tt-muted'
-                      : 'bg-tt-blue'
+                    ? isOverduePast
+                      ? muted
+                        ? 'bg-tt-overdue/40'
+                        : 'bg-tt-overdue'
+                      : muted
+                        ? 'bg-tt-muted'
+                        : 'bg-tt-blue'
                     : 'opacity-0'
                 }`}
               />

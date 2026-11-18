@@ -206,6 +206,7 @@ export function App() {
   const calOverdueTasks = useMemo(() => {
     if (activeView !== 'calendar-month' || !prefs.showOverdue) return [];
     const todayStr = formatDate(new Date());
+    if (calSelectedDate !== todayStr) return [];
     const overdue: Task[] = [];
     for (const t of activeTasks) {
       if (t.deletedAt || isCompleted(t)) continue;
@@ -218,9 +219,11 @@ export function App() {
         overdue.push(t);
       }
     }
-    const displayedIds = new Set(displayedTasks.map((t) => t.id));
-    return sortTasksForDailyView(overdue.filter((t) => !displayedIds.has(t.id)));
-  }, [activeView, prefs.showOverdue, activeTasks, displayedTasks]);
+    const displayedKeys = new Set(displayedTasks.map((t) => `${t.id}:${t.dueAt || ''}`));
+    return sortTasksForDailyView(
+      overdue.filter((t) => !displayedKeys.has(`${t.id}:${t.dueAt || ''}`))
+    );
+  }, [activeView, prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
     const todayStr = formatDate(new Date());
@@ -623,7 +626,7 @@ export function App() {
                           {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks, false)}
                         </div>
                       )}
-                      {displayedTasks.length > 0 && (
+                      {displayedTasks.length > 0 ? (
                         <div>
                           <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
                             <span className="text-[20px] font-bold text-tt-text">
@@ -635,6 +638,16 @@ export function App() {
                           </div>
                           {renderTaskRows(displayedTasks, false, true)}
                         </div>
+                      ) : (
+                        calOverdueTasks.length > 0 && (
+                          <div>
+                            <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
+                              <span className="text-[20px] font-bold text-tt-text">Today</span>
+                              <span className="text-[13px] text-tt-muted tabular-nums">0</span>
+                            </div>
+                            <p className="text-sm text-tt-muted px-3 sm:px-4 py-2">No tasks scheduled for today</p>
+                          </div>
+                        )
                       )}
                       {calCompletedTasks.length > 0 && (
                         <div>

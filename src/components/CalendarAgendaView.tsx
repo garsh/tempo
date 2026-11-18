@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { completedTasksOnDate, startOfWeek, tasksDueOnDate } from '../domain/calendar';
 import { shiftWeek } from '../domain/calendarUi';
@@ -11,7 +11,7 @@ import {
   getDueDatePart,
   projectTaskForDate,
 } from '../domain/recurrence';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 
 interface CalendarAgendaViewProps {
   tasks: Task[];
@@ -60,6 +60,7 @@ export function CalendarAgendaView({
   const todayStr = formatDate(new Date());
   const focus = selectedDateStr || todayStr;
   const [{ weekStart, showOverdue }] = usePrefs();
+  const [overdueCollapsed, setOverdueCollapsed] = useState(false);
 
   const stripRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -378,26 +379,33 @@ export function CalendarAgendaView({
         </div>
       </div>
 
-      {overdueTasks.length > 0 && (
+      {isToday && overdueTasks.length > 0 && (
         <div className="rounded-xl border border-tt-overdue/30 bg-tt-overdue/5 p-3 space-y-2">
-          <div className="text-xs font-bold text-tt-overdue">
-            Overdue ({overdueTasks.length})
-          </div>
-          <div className="space-y-1.5">
-            {overdueTasks.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => onSelectTask(t)}
-                className="w-full text-left p-2 rounded-lg bg-tt-elevated border border-tt-border hover:border-tt-blue flex items-center justify-between gap-2"
-              >
-                <span className="text-[14px] font-medium text-tt-text truncate">{t.title}</span>
-                <span className="text-[11px] text-tt-overdue shrink-0 font-medium">
-                  {t.dueAt ? getDueDatePart(t.dueAt) : 'Overdue'}
-                </span>
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setOverdueCollapsed((c) => !c)}
+            className="w-full flex items-center justify-between text-xs font-bold text-tt-overdue cursor-pointer"
+          >
+            <span>Overdue ({overdueTasks.length})</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${overdueCollapsed ? '-rotate-90' : ''}`} />
+          </button>
+          {!overdueCollapsed && (
+            <div className="space-y-1.5">
+              {overdueTasks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onSelectTask(t)}
+                  className="w-full text-left p-2 rounded-lg bg-tt-elevated border border-tt-border hover:border-tt-blue flex items-center justify-between gap-2"
+                >
+                  <span className="text-[14px] font-medium text-tt-text truncate">{t.title}</span>
+                  <span className="text-[11px] text-tt-overdue shrink-0 font-medium">
+                    {t.dueAt ? getDueDatePart(t.dueAt) : 'Overdue'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
