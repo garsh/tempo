@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   CALENDAR_EXPANDED_STORAGE_KEY,
+  PICKER_FUTURE_YEARS,
+  PICKER_PAST_YEARS,
+  PICKER_YEAR_COLUMNS,
+  buildPickerYears,
   buildWeekCells,
   calendarExpandProgress,
   calendarHeaderTitle,
@@ -14,10 +18,13 @@ import {
   jumpToToday,
   monthContains,
   monthName,
+  pickerDefaultScrollYear,
   readStoredCalendarExpanded,
   saveStoredCalendarExpanded,
   shiftMonthView,
   shiftWeek,
+  shortMonthNames,
+  stepCalendarView,
 } from '../calendarUi';
 
 describe('jump to today', () => {
@@ -45,10 +52,10 @@ describe('day card + row labels', () => {
     expect(monthName(2026, 0, 'en-US')).toBe('January');
   });
 
-  it('calendarHeaderTitle omits the reference year and includes other years', () => {
-    expect(calendarHeaderTitle(2026, 10, 2026, 'en-US')).toBe('November');
-    expect(calendarHeaderTitle(2027, 0, 2026, 'en-US')).toBe('January 2027');
-    expect(calendarHeaderTitle(2025, 11, 2026, 'en-US')).toBe('December 2025');
+  it('calendarHeaderTitle always includes the month and year', () => {
+    expect(calendarHeaderTitle(2026, 10, 'en-US')).toBe('November 2026');
+    expect(calendarHeaderTitle(2027, 0, 'en-US')).toBe('January 2027');
+    expect(calendarHeaderTitle(2025, 11, 'en-US')).toBe('December 2025');
   });
 });
 
@@ -346,5 +353,103 @@ describe('month title swipe state', () => {
       currentOpacity: 1,
       nextOpacity: 0,
     });
+  });
+});
+
+describe('header arrow stepping and month/year picker helpers', () => {
+  const mockToday = new Date(2026, 10, 19);
+
+  it('stepCalendarView steps by month when expanded, matching swipe behavior', () => {
+    expect(
+      stepCalendarView({
+        expanded: true,
+        year: 2026,
+        monthIndex: 10,
+        selectedDateStr: '2026-11-19',
+        delta: 1,
+        today: mockToday,
+      })
+    ).toEqual({ dateStr: '2026-12-01', year: 2026, monthIndex: 11 });
+
+    expect(
+      stepCalendarView({
+        expanded: true,
+        year: 2026,
+        monthIndex: 11,
+        selectedDateStr: '2026-12-01',
+        delta: -1,
+        today: mockToday,
+      })
+    ).toEqual({ dateStr: '2026-11-19', year: 2026, monthIndex: 10 });
+  });
+
+  it('stepCalendarView steps by 7 days when collapsed, across month and year boundaries', () => {
+    expect(
+      stepCalendarView({
+        expanded: false,
+        year: 2026,
+        monthIndex: 10,
+        selectedDateStr: '2026-11-19',
+        delta: 1,
+        today: mockToday,
+      })
+    ).toEqual({ dateStr: '2026-11-26', year: 2026, monthIndex: 10 });
+
+    expect(
+      stepCalendarView({
+        expanded: false,
+        year: 2026,
+        monthIndex: 11,
+        selectedDateStr: '2026-12-28',
+        delta: 1,
+        today: mockToday,
+      })
+    ).toEqual({ dateStr: '2027-01-04', year: 2027, monthIndex: 0 });
+
+    expect(
+      stepCalendarView({
+        expanded: false,
+        year: 2026,
+        monthIndex: 0,
+        selectedDateStr: '2026-01-03',
+        delta: -1,
+        today: mockToday,
+      })
+    ).toEqual({ dateStr: '2025-12-27', year: 2025, monthIndex: 11 });
+  });
+
+  it('shortMonthNames returns 12 localized month names', () => {
+    const names = shortMonthNames('en-US');
+    expect(names).toHaveLength(12);
+    expect(names[0]).toBe('Jan');
+    expect(names[11]).toBe('Dec');
+  });
+
+  it('buildPickerYears places past years before currentYear and aligns currentYear to column 0', () => {
+    const years = buildPickerYears(2026);
+    expect(years[0]).toBeLessThanOrEqual(2026 - PICKER_PAST_YEARS);
+    expect(years[years.length - 1]).toBeGreaterThanOrEqual(2026 + PICKER_FUTURE_YEARS);
+    const currentIndex = years.indexOf(2026);
+    expect(currentIndex).toBeGreaterThan(0);
+    expect(currentIndex % PICKER_YEAR_COLUMNS).toBe(0);
+    expect(years.length % PICKER_YEAR_COLUMNS).toBe(0);
+  });
+
+  it('buildPickerYears expands when selectedYear is outside the default range', () => {
+    const pastYears = buildPickerYears(2026, 1940);
+    expect(pastYears).toContain(1940);
+    expect(pastYears.indexOf(2026) % PICKER_YEAR_COLUMNS).toBe(0);
+
+    const futureYears = buildPickerYears(2026, 2120);
+    expect(futureYears).toContain(2120);
+    expect(futureYears.indexOf(2026) % PICKER_YEAR_COLUMNS).toBe(0);
+  });
+
+  it('pickerDefaultScrollYear anchors at currentYear by default and row-start for outside years', () => {
+    expect(pickerDefaultScrollYear(2026, 2026)).toBe(2026);
+    expect(pickerDefaultScrollYear(2030, 2026)).toBe(2026);
+    expect(pickerDefaultScrollYear(2037, 2026)).toBe(2026);
+    expect(pickerDefaultScrollYear(2025, 2026)).toBe(2022);
+    expect(pickerDefaultScrollYear(2040, 2026)).toBe(2038);
   });
 });

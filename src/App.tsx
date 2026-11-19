@@ -28,9 +28,12 @@ import {
   calendarHeaderTitle,
   classifyCalendarPull,
   commitCalendarExpanded,
+  defaultDateForMonth,
+  jumpToToday,
   readStoredCalendarExpanded,
   saveStoredCalendarExpanded,
   shiftWeek,
+  stepCalendarView,
   type CalendarSwipeEvent,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
@@ -50,6 +53,7 @@ import {
   SwipeableMonthTitle,
   type SwipeableMonthTitleHandle,
 } from './components/calendar/SwipeableMonthTitle';
+import { MonthYearPickerDialog } from './components/calendar/MonthYearPickerDialog';
 import {
   ChangeDatePicker,
   type ChangeDatePickerHandle,
@@ -61,6 +65,9 @@ import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Keyboard,
   MoreVertical,
   Plus,
@@ -68,6 +75,36 @@ import {
 } from 'lucide-react';
 
 const EMPTY_TASKS: Task[] = [];
+
+function TodayCalendarIcon({ day }: { day: number }) {
+  return (
+    <svg
+      width={20}
+      height={20}
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="3.5" width="15" height="14" rx="3" />
+      <path d="M6.5 2v2.5M13.5 2v2.5M2.5 7.5h15" />
+      <text
+        x="10"
+        y="14.5"
+        textAnchor="middle"
+        fill="currentColor"
+        stroke="none"
+        fontSize="7.5"
+        fontWeight="700"
+      >
+        {day}
+      </text>
+    </svg>
+  );
+}
 
 export function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -80,6 +117,18 @@ export function App() {
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
   const [calExpanded, setCalExpanded] = useState<boolean>(readStoredCalendarExpanded);
+  const [isMonthYearPickerOpen, setIsMonthYearPickerOpen] = useState(false);
+
+  const calViewRef = useRef({
+    year: calYear,
+    monthIndex: calMonth,
+    selectedDateStr: calSelectedDate,
+  });
+  calViewRef.current = {
+    year: calYear,
+    monthIndex: calMonth,
+    selectedDateStr: calSelectedDate,
+  };
 
   useEffect(() => {
     saveStoredCalendarExpanded(calExpanded);
@@ -93,6 +142,52 @@ export function App() {
   const handleCalendarSwipeProgress = useCallback((event: CalendarSwipeEvent) => {
     monthTitleRef.current?.applySwipe(event);
   }, []);
+
+  const applyCalendarTarget = useCallback(
+    (next: { year: number; monthIndex: number; dateStr: string }) => {
+      monthViewRef.current?.cancelPendingSwipe();
+      calViewRef.current = {
+        year: next.year,
+        monthIndex: next.monthIndex,
+        selectedDateStr: next.dateStr,
+      };
+      setCalYear(next.year);
+      setCalMonth(next.monthIndex);
+      setCalSelectedDate(next.dateStr);
+    },
+    []
+  );
+
+  const handleStepCalendar = useCallback(
+    (delta: -1 | 1) => {
+      const current = calViewRef.current;
+      const next = stepCalendarView({
+        expanded: calExpanded,
+        year: current.year,
+        monthIndex: current.monthIndex,
+        selectedDateStr: current.selectedDateStr,
+        delta,
+        today: new Date(),
+      });
+      applyCalendarTarget(next);
+    },
+    [calExpanded, applyCalendarTarget]
+  );
+
+  const handleJumpToToday = useCallback(() => {
+    applyCalendarTarget(jumpToToday(new Date()));
+  }, [applyCalendarTarget]);
+
+  const handleSelectMonthYear = useCallback(
+    (year: number, monthIndex: number) => {
+      applyCalendarTarget({
+        year,
+        monthIndex,
+        dateStr: defaultDateForMonth(year, monthIndex, new Date()),
+      });
+    },
+    [applyCalendarTarget]
+  );
   const calGestureRef = useRef<{
     startY: number;
     startX: number;
@@ -377,31 +472,38 @@ export function App() {
     await handleDelete(taskId);
   };
 
-  useKeyboardShortcuts({
-    onCapture: openCapture,
-    onEscape: () => {
-      if (showShortcutsHelp) {
-        setShowShortcutsHelp(false);
-        return;
-      }
-      if (isTaskModalOpen) {
-        setIsTaskModalOpen(false);
-        return;
-      }
-      if (isSettingsModalOpen) {
-        setIsSettingsModalOpen(false);
-        return;
-      }
+  useKeyboardShortcuts(
+    {
+      onCapture: openCapture,
+      onEscape: () => {
+        if (showShortcutsHelp) {
+          setShowShortcutsHelp(false);
+          return;
+        }
+        if (isTaskModalOpen) {
+          setIsTaskModalOpen(false);
+          return;
+        }
+        if (isSettingsModalOpen) {
+          setIsSettingsModalOpen(false);
+          return;
+        }
+      },
+      onOpenHelp: () => setShowShortcutsHelp(true),
     },
-    onOpenHelp: () => setShowShortcutsHelp(true),
-  });
+    !isMonthYearPickerOpen
+  );
 
   const toggleGroup = (id: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const referenceYear = now.getFullYear();
-  const calFocusStr = calSelectedDate || formatDate(now);
+  const todayDateStr = formatDate(now);
+  const isOnToday =
+    calSelectedDate === todayDateStr &&
+    calYear === now.getFullYear() &&
+    calMonth === now.getMonth();
+  const calFocusStr = calSelectedDate || todayDateStr;
   const prevTitleTarget = calExpanded
     ? shiftMonth(calYear, calMonth, -1)
     : shiftWeek(calFocusStr, -1);
@@ -410,14 +512,12 @@ export function App() {
     : shiftWeek(calFocusStr, 1);
   const prevCalHeaderTitle = calendarHeaderTitle(
     prevTitleTarget.year,
-    prevTitleTarget.monthIndex,
-    referenceYear
+    prevTitleTarget.monthIndex
   );
-  const calHeaderTitle = calendarHeaderTitle(calYear, calMonth, referenceYear);
+  const calHeaderTitle = calendarHeaderTitle(calYear, calMonth);
   const nextCalHeaderTitle = calendarHeaderTitle(
     nextTitleTarget.year,
-    nextTitleTarget.monthIndex,
-    referenceYear
+    nextTitleTarget.monthIndex
   );
   const canSwipePrevTitle =
     prevTitleTarget.year !== calYear || prevTitleTarget.monthIndex !== calMonth;
@@ -462,35 +562,81 @@ export function App() {
   return (
     <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center justify-between gap-2 h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
-          <div className="flex items-center gap-2 min-w-0">
-            <SwipeableMonthTitle
-              ref={monthTitleRef}
-              prevTitle={prevCalHeaderTitle}
-              currentTitle={calHeaderTitle}
-              nextTitle={nextCalHeaderTitle}
-              canSwipePrev={canSwipePrevTitle}
-              canSwipeNext={canSwipeNextTitle}
-              expanded={calExpanded}
-              onClick={() => setCalExpanded((prev) => !prev)}
+      <header className="shrink-0 flex items-center justify-between gap-1 sm:gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+        <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+          <SwipeableMonthTitle
+            ref={monthTitleRef}
+            prevTitle={prevCalHeaderTitle}
+            currentTitle={calHeaderTitle}
+            nextTitle={nextCalHeaderTitle}
+            canSwipePrev={canSwipePrevTitle}
+            canSwipeNext={canSwipeNextTitle}
+            expanded={calExpanded}
+            onClick={() => setCalExpanded((prev) => !prev)}
+          />
+          <button
+            type="button"
+            onClick={() => setIsMonthYearPickerOpen(true)}
+            aria-label="Choose month and year"
+            aria-expanded={isMonthYearPickerOpen}
+            title="Choose month and year"
+            className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+          >
+            <ChevronDown
+              className={`w-4 h-4 transition-transform duration-200 ${
+                isMonthYearPickerOpen ? 'rotate-180' : ''
+              }`}
+              strokeWidth={2.2}
             />
-          </div>
+          </button>
+        </div>
 
-          <div className="shrink-0 flex items-center gap-1 sm:gap-2">
-            {/* More / Overflow */}
-            <button
-              type="button"
-              className="w-10 h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors"
-              onClick={openOverflow}
-              title="More options"
-              aria-label="More options"
-              aria-haspopup="menu"
-              aria-expanded={!!overflowAnchor}
-            >
-              <MoreVertical className="w-5 h-5 text-tt-secondary" strokeWidth={2} />
-            </button>
-          </div>
-        </header>
+        <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
+          <button
+            type="button"
+            onClick={handleJumpToToday}
+            aria-label="Today"
+            title="Today"
+            className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              isOnToday
+                ? 'text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar'
+                : 'text-tt-blue hover:bg-tt-blue-soft'
+            }`}
+          >
+            <TodayCalendarIcon day={now.getDate()} />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleStepCalendar(-1)}
+            aria-label={calExpanded ? 'Previous month' : 'Previous week'}
+            title={calExpanded ? 'Previous month' : 'Previous week'}
+            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+          >
+            <ChevronLeft className="w-5 h-5" strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleStepCalendar(1)}
+            aria-label={calExpanded ? 'Next month' : 'Next week'}
+            title={calExpanded ? 'Next month' : 'Next week'}
+            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+          >
+            <ChevronRight className="w-5 h-5" strokeWidth={2} />
+          </button>
+          {/* More / Overflow */}
+          <button
+            type="button"
+            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+            onClick={openOverflow}
+            title="More options"
+            aria-label="More options"
+            aria-haspopup="menu"
+            aria-expanded={!!overflowAnchor}
+          >
+            <MoreVertical className="w-5 h-5 text-tt-secondary" strokeWidth={2} />
+          </button>
+        </div>
+      </header>
 
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 relative">
@@ -749,6 +895,16 @@ export function App() {
         task={deleteConfirmTask}
         onClose={() => setDeleteConfirmTask(null)}
         onConfirm={handleConfirmDelete}
+      />
+
+      <MonthYearPickerDialog
+        isOpen={isMonthYearPickerOpen}
+        year={calYear}
+        monthIndex={calMonth}
+        today={now}
+        onSelect={handleSelectMonthYear}
+        onJumpToToday={handleJumpToToday}
+        onClose={() => setIsMonthYearPickerOpen(false)}
       />
     </div>
   );

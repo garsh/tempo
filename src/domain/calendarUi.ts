@@ -6,16 +6,15 @@ export function monthName(year: number, monthIndex: number, locale?: string): st
   return new Date(year, monthIndex, 1).toLocaleString(locale, { month: 'long' });
 }
 
-/** Month title for the calendar header, omitting the year when it matches `referenceYear`. */
+/** Month + year title for the calendar header (e.g. "November 2026"). */
 export function calendarHeaderTitle(
   year: number,
   monthIndex: number,
-  referenceYear: number = new Date().getFullYear(),
   locale?: string
 ): string {
   return new Date(year, monthIndex, 1).toLocaleDateString(locale, {
     month: 'long',
-    ...(year !== referenceYear ? { year: 'numeric' } : {}),
+    year: 'numeric',
   });
 }
 
@@ -264,6 +263,78 @@ export function computeMonthTitleSwipeState(
     currentOpacity: 1 - Math.abs(effective),
     nextOpacity: Math.max(0, -effective),
   };
+}
+
+/** Step the calendar by 1 month (expanded) or 1 week (collapsed), matching swipe behavior. */
+export function stepCalendarView(input: {
+  expanded: boolean;
+  year: number;
+  monthIndex: number;
+  selectedDateStr: string | null | undefined;
+  delta: -1 | 1;
+  today?: Date;
+}): ShiftCalendarResult {
+  const { expanded, year, monthIndex, selectedDateStr, delta, today = new Date() } = input;
+  if (expanded) {
+    return shiftMonthView(year, monthIndex, selectedDateStr, delta, today);
+  }
+  return shiftWeek(selectedDateStr, delta, today);
+}
+
+/** Localized short month labels (Jan..Dec). */
+export function shortMonthNames(locale?: string): string[] {
+  return Array.from({ length: 12 }, (_, m) =>
+    new Date(2026, m, 1).toLocaleDateString(locale, { month: 'short' })
+  );
+}
+
+export const PICKER_YEAR_COLUMNS = 4;
+export const PICKER_PAST_YEARS = 56;
+export const PICKER_FUTURE_YEARS = 47;
+export const PICKER_DEFAULT_VISIBLE_FUTURE_YEARS = 12;
+
+/**
+ * Build the scrollable year grid list so `currentYear` always starts at column 0 of its row,
+ * with past years above (scrollable back) and future years from `currentYear` onward.
+ * Expands automatically if `selectedYear` falls outside the default window.
+ */
+export function buildPickerYears(
+  currentYear: number,
+  selectedYear: number = currentYear
+): number[] {
+  const minTarget = Math.min(currentYear - PICKER_PAST_YEARS, selectedYear);
+  const pastSpan =
+    Math.ceil((currentYear - minTarget) / PICKER_YEAR_COLUMNS) * PICKER_YEAR_COLUMNS;
+  const startYear = currentYear - pastSpan;
+
+  const maxTarget = Math.max(currentYear + PICKER_FUTURE_YEARS, selectedYear);
+  const futureSpan =
+    Math.ceil((maxTarget - currentYear + 1) / PICKER_YEAR_COLUMNS) * PICKER_YEAR_COLUMNS - 1;
+  const endYear = currentYear + futureSpan;
+
+  const years: number[] = [];
+  for (let y = startYear; y <= endYear; y++) {
+    years.push(y);
+  }
+  return years;
+}
+
+/**
+ * Year button whose row should align to the top of the picker's scrollable year list on open.
+ * When viewing the current year or near-future years (within the default 3-row viewport),
+ * anchor at `currentYear` so current + future years are shown by default.
+ * Otherwise anchor at the start of `selectedYear`'s row so it is immediately visible.
+ */
+export function pickerDefaultScrollYear(selectedYear: number, currentYear: number): number {
+  if (
+    selectedYear >= currentYear &&
+    selectedYear < currentYear + PICKER_DEFAULT_VISIBLE_FUTURE_YEARS
+  ) {
+    return currentYear;
+  }
+  const rowOffset =
+    Math.floor((selectedYear - currentYear) / PICKER_YEAR_COLUMNS) * PICKER_YEAR_COLUMNS;
+  return currentYear + rowOffset;
 }
 
 export { shiftMonth };

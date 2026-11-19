@@ -14,6 +14,8 @@ export type CalendarMonthHandle = {
   setPullProgress: (progress: number) => void;
   /** Ease to the committed open or closed height, then run `commit` so React matches it. */
   releasePull: (commit: () => void) => void;
+  /** Abort any in-flight swipe snap timer and reset the horizontal track to 0. */
+  cancelPendingSwipe: () => void;
 };
 
 interface CalendarMonthViewProps {
@@ -477,6 +479,21 @@ export function CalendarMonthView({
         });
       });
       releaseFrameRef.current = outer;
+    },
+    cancelPendingSwipe() {
+      if (snapTimerRef.current) {
+        clearTimeout(snapTimerRef.current);
+        snapTimerRef.current = null;
+      }
+      isSnappingRef.current = false;
+      justSwipedRef.current = false;
+      currentDragOffsetRef.current = 0;
+      pointerDirectionRef.current = 'none';
+      if (trackRef.current) {
+        trackRef.current.style.transition = 'none';
+        trackRef.current.style.transform = 'translateX(0px)';
+      }
+      onSwipeProgressRef.current?.({ phase: 'reset' });
     },
   }), []);
 

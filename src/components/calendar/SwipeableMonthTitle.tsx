@@ -98,7 +98,7 @@ export function SwipeableMonthTitle({
       onClick={onClick}
       aria-expanded={expanded}
       title="Click to expand/collapse month"
-      className="block max-w-full overflow-hidden text-left text-[22px] sm:text-[25px] font-bold tracking-[-0.01em] text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
+      className="block min-w-0 max-w-full overflow-hidden text-left text-[19px] sm:text-[25px] font-bold tracking-[-0.01em] text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
     >
       <span
         ref={trackRef}
@@ -106,19 +106,19 @@ export function SwipeableMonthTitle({
       >
         <span
           aria-hidden="true"
-          className="col-start-1 row-start-1 invisible truncate pr-6 pointer-events-none select-none"
+          className="col-start-1 row-start-1 invisible truncate pointer-events-none select-none"
         >
           {prevTitle}
         </span>
         <span
           aria-hidden="true"
-          className="col-start-1 row-start-1 invisible truncate pr-6 pointer-events-none select-none"
+          className="col-start-1 row-start-1 invisible truncate pointer-events-none select-none"
         >
           {currentTitle}
         </span>
         <span
           aria-hidden="true"
-          className="col-start-1 row-start-1 invisible truncate pr-6 pointer-events-none select-none"
+          className="col-start-1 row-start-1 invisible truncate pointer-events-none select-none"
         >
           {nextTitle}
         </span>

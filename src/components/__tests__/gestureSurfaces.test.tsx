@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, useCallback, useRef, useState, type ReactElement } from 'react';
+import { act, useCallback, useRef, useState, type ReactElement, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -415,6 +415,8 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
     initialExpanded = true,
     onTitleClick,
     onRender,
+    onMonthChange: onMonthChangeSpy,
+    monthViewRef,
   }: {
     initialYear?: number;
     initialMonth?: number;
@@ -422,6 +424,8 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
     initialExpanded?: boolean;
     onTitleClick?: () => void;
     onRender?: () => void;
+    onMonthChange?: (year: number, month: number) => void;
+    monthViewRef?: RefObject<CalendarMonthHandle | null>;
   }) {
     const [year, setYear] = useState(initialYear);
     const [month, setMonth] = useState(initialMonth);
@@ -441,9 +445,9 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
       <div>
         <SwipeableMonthTitle
           ref={titleRef}
-          prevTitle={calendarHeaderTitle(prevTarget.year, prevTarget.monthIndex, 2026, 'en-US')}
-          currentTitle={calendarHeaderTitle(year, month, 2026, 'en-US')}
-          nextTitle={calendarHeaderTitle(nextTarget.year, nextTarget.monthIndex, 2026, 'en-US')}
+          prevTitle={calendarHeaderTitle(prevTarget.year, prevTarget.monthIndex, 'en-US')}
+          currentTitle={calendarHeaderTitle(year, month, 'en-US')}
+          nextTitle={calendarHeaderTitle(nextTarget.year, nextTarget.monthIndex, 'en-US')}
           canSwipePrev={prevTarget.year !== year || prevTarget.monthIndex !== month}
           canSwipeNext={nextTarget.year !== year || nextTarget.monthIndex !== month}
           expanded={expanded}
@@ -453,6 +457,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
           }}
         />
         <CalendarMonthView
+          ref={monthViewRef}
           tasks={[]}
           year={year}
           monthIndex={month}
@@ -461,6 +466,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
           onToggleExpanded={() => setExpanded((prev) => !prev)}
           onSelectDate={setSelectedDate}
           onMonthChange={(y, m) => {
+            onMonthChangeSpy?.(y, m);
             setYear(y);
             setMonth(m);
           }}
@@ -491,7 +497,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
     const { track, prevSlide, currentSlide, nextSlide, calRoot } = queryElements(view.container);
 
     expect(onRender).toHaveBeenCalledTimes(1);
-    expect(currentSlide.textContent).toBe('November');
+    expect(currentSlide.textContent).toBe('November 2026');
     expect(track.style.getPropertyValue('--month-title-x')).toBe('0%');
 
     act(() => {
@@ -522,7 +528,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
     });
 
     expect(onRender).toHaveBeenCalledTimes(2);
-    expect(currentSlide.textContent).toBe('December');
+    expect(currentSlide.textContent).toBe('December 2026');
     expect(track.dataset.snapping).toBeUndefined();
     expect(track.style.getPropertyValue('--month-title-x')).toBe('0%');
     expect(currentSlide.style.getPropertyValue('--month-title-opacity')).toBe('1');
@@ -556,7 +562,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
       vi.advanceTimersByTime(350);
     });
 
-    expect(currentSlide.textContent).toBe('November');
+    expect(currentSlide.textContent).toBe('November 2026');
     expect(track.dataset.snapping).toBeUndefined();
     expect(track.style.getPropertyValue('--month-title-x')).toBe('0%');
     view.unmount();
@@ -598,7 +604,7 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
       calRoot.dispatchEvent(pointer('pointerdown', 200, 20, 1));
       calRoot.dispatchEvent(pointer('pointermove', 20, 22, 1));
     });
-    expect(nextSlide.textContent).toBe('December');
+    expect(nextSlide.textContent).toBe('December 2026');
     expect(track.style.getPropertyValue('--month-title-x')).toBe('-50%');
     expect(currentSlide.style.getPropertyValue('--month-title-opacity')).toBe('0.5');
     expect(nextSlide.style.getPropertyValue('--month-title-opacity')).toBe('0.5');
@@ -644,6 +650,40 @@ describe('SwipeableMonthTitle + CalendarMonthView integration', () => {
     });
     expect(onTitleClick).toHaveBeenCalledTimes(1);
     expect(button.getAttribute('aria-expanded')).toBe('false');
+    view.unmount();
+  });
+
+  it('aborts an in-flight swipe snap and resets track and title on cancelPendingSwipe()', () => {
+    vi.useFakeTimers();
+    const onMonthChange = vi.fn();
+    const monthViewRef: RefObject<CalendarMonthHandle | null> = { current: null };
+    const view = mount(<Harness onMonthChange={onMonthChange} monthViewRef={monthViewRef} />);
+    const { track, currentSlide, nextSlide, calRoot } = queryElements(view.container);
+
+    act(() => {
+      calRoot.dispatchEvent(pointer('pointerdown', 200, 40, 1));
+      calRoot.dispatchEvent(pointer('pointermove', 20, 42, 1));
+      calRoot.dispatchEvent(pointer('pointerup', 20, 42, 0));
+    });
+
+    expect(track.dataset.snapping).toBe('true');
+    expect(track.style.getPropertyValue('--month-title-x')).toBe('-100%');
+
+    act(() => {
+      monthViewRef.current?.cancelPendingSwipe();
+    });
+
+    expect(track.dataset.snapping).toBeUndefined();
+    expect(track.style.getPropertyValue('--month-title-x')).toBe('0%');
+    expect(currentSlide.style.getPropertyValue('--month-title-opacity')).toBe('1');
+    expect(nextSlide.style.getPropertyValue('--month-title-opacity')).toBe('0');
+
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+
+    expect(onMonthChange).not.toHaveBeenCalled();
+    expect(currentSlide.textContent).toBe('November 2026');
     view.unmount();
   });
 });
