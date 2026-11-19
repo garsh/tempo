@@ -241,3 +241,37 @@
   }
 }
 
+.month-title-track {
+  translate: 0 0;
+  @media (prefers-reduced-motion: no-preference) {
+    translate: var(--month-title-x, 0%) 0;
+    will-change: translate;
+    &[data-snapping="true"] {
+      transition: translate var(--month-title-snap-ms, 350ms) cubic-bezier(0.25, 1, 0.5, 1);
+    }
+  }
+}
+
+.month-title-slide {
+  &[data-slot="current"] {
+    opacity: 1;
+  }
+  &[data-slot="prev"],
+  &[data-slot="next"] {
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    will-change: opacity;
+    &[data-slot="current"] {
+      opacity: var(--month-title-opacity, 1);
+    }
+    &[data-slot="prev"],
+    &[data-slot="next"] {
+      opacity: var(--month-title-opacity, 0);
+    }
+    .month-title-track[data-snapping="true"] & {
+      transition: opacity var(--month-title-snap-ms, 350ms) cubic-bezier(0.25, 1, 0.5, 1);
+    }
+  }
+}
+

@@ -2,14 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   CALENDAR_EXPANDED_STORAGE_KEY,
   buildWeekCells,
+  calendarExpandProgress,
+  calendarHeaderTitle,
   calendarRowDueLabel,
+  classifyCalendarPull,
+  commitCalendarExpanded,
+  computeMonthTitleSwipeState,
   dayCardTitle,
   defaultDateForMonth,
   dueAtForSelectedDay,
   jumpToToday,
-  calendarExpandProgress,
-  classifyCalendarPull,
-  commitCalendarExpanded,
   monthContains,
   monthName,
   readStoredCalendarExpanded,
@@ -41,6 +43,12 @@ describe('day card + row labels', () => {
   it('month name has no year', () => {
     expect(monthName(2026, 9, 'en-US')).toBe('October');
     expect(monthName(2026, 0, 'en-US')).toBe('January');
+  });
+
+  it('calendarHeaderTitle omits the reference year and includes other years', () => {
+    expect(calendarHeaderTitle(2026, 10, 2026, 'en-US')).toBe('November');
+    expect(calendarHeaderTitle(2027, 0, 2026, 'en-US')).toBe('January 2027');
+    expect(calendarHeaderTitle(2025, 11, 2026, 'en-US')).toBe('December 2025');
   });
 });
 
@@ -283,5 +291,60 @@ describe('calendar pull to expand', () => {
     expect(commitCalendarExpanded(0, 0.26)).toBe(true);
     expect(commitCalendarExpanded(1, 0.74)).toBe(false);
     expect(commitCalendarExpanded(1, 0.75)).toBe(true);
+  });
+});
+
+describe('month title swipe state', () => {
+  it('stays centered and opaque at rest', () => {
+    expect(computeMonthTitleSwipeState(0, true, true)).toEqual({
+      translatePercent: 0,
+      prevOpacity: 0,
+      currentOpacity: 1,
+      nextOpacity: 0,
+    });
+  });
+
+  it('tracks left and right drag progress with crossfading opacities', () => {
+    const leftDrag = computeMonthTitleSwipeState(-0.4, true, true);
+    expect(leftDrag.translatePercent).toBeCloseTo(-40);
+    expect(leftDrag.prevOpacity).toBe(0);
+    expect(leftDrag.currentOpacity).toBeCloseTo(0.6);
+    expect(leftDrag.nextOpacity).toBeCloseTo(0.4);
+
+    const rightDrag = computeMonthTitleSwipeState(0.5, true, true);
+    expect(rightDrag.translatePercent).toBeCloseTo(50);
+    expect(rightDrag.prevOpacity).toBeCloseTo(0.5);
+    expect(rightDrag.currentOpacity).toBeCloseTo(0.5);
+    expect(rightDrag.nextOpacity).toBe(0);
+  });
+
+  it('clamps overswipe progress to [-1, 1]', () => {
+    expect(computeMonthTitleSwipeState(-1.5, true, true)).toEqual({
+      translatePercent: -100,
+      prevOpacity: 0,
+      currentOpacity: 0,
+      nextOpacity: 1,
+    });
+    expect(computeMonthTitleSwipeState(1.5, true, true)).toEqual({
+      translatePercent: 100,
+      prevOpacity: 1,
+      currentOpacity: 0,
+      nextOpacity: 0,
+    });
+  });
+
+  it('keeps the title stationary when swiping in a blocked direction', () => {
+    expect(computeMonthTitleSwipeState(0.6, false, true)).toEqual({
+      translatePercent: 0,
+      prevOpacity: 0,
+      currentOpacity: 1,
+      nextOpacity: 0,
+    });
+    expect(computeMonthTitleSwipeState(-0.6, true, false)).toEqual({
+      translatePercent: 0,
+      prevOpacity: 0,
+      currentOpacity: 1,
+      nextOpacity: 0,
+    });
   });
 });

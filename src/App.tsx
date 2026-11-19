@@ -22,13 +22,16 @@ import {
 } from './domain/recurrence';
 import { sortTasksForDailyView } from './domain/sorting';
 import { usePrefs } from './prefs/prefs';
-import { completedTasksOnDate, tasksDueOnDate } from './domain/calendar';
+import { completedTasksOnDate, shiftMonth, tasksDueOnDate } from './domain/calendar';
 import {
   calendarExpandProgress,
+  calendarHeaderTitle,
   classifyCalendarPull,
   commitCalendarExpanded,
   readStoredCalendarExpanded,
   saveStoredCalendarExpanded,
+  shiftWeek,
+  type CalendarSwipeEvent,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
 import { shareTextFromParts, takeSharedText } from './pwa/shareText';
@@ -43,6 +46,10 @@ import {
   CalendarMonthView,
   type CalendarMonthHandle,
 } from './components/CalendarMonthView';
+import {
+  SwipeableMonthTitle,
+  type SwipeableMonthTitleHandle,
+} from './components/calendar/SwipeableMonthTitle';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
 import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
@@ -101,7 +108,12 @@ export function App() {
 
   const calAreaRef = useRef<HTMLDivElement>(null);
   const monthViewRef = useRef<CalendarMonthHandle>(null);
+  const monthTitleRef = useRef<SwipeableMonthTitleHandle>(null);
   const calScrollRef = useRef<HTMLDivElement>(null);
+
+  const handleCalendarSwipeProgress = useCallback((event: CalendarSwipeEvent) => {
+    monthTitleRef.current?.applySwipe(event);
+  }, []);
   const calGestureRef = useRef<{
     startY: number;
     startX: number;
@@ -413,11 +425,29 @@ export function App() {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const calHeaderTitle = new Date(calYear, calMonth, 1).toLocaleDateString(undefined, {
-    month: 'long',
-    ...(calYear !== now.getFullYear() ? { year: 'numeric' } : {}),
-  });
-  const viewTitleText = activeView === 'calendar-month' ? calHeaderTitle : 'Agenda';
+  const referenceYear = now.getFullYear();
+  const calFocusStr = calSelectedDate || formatDate(now);
+  const prevTitleTarget = calExpanded
+    ? shiftMonth(calYear, calMonth, -1)
+    : shiftWeek(calFocusStr, -1);
+  const nextTitleTarget = calExpanded
+    ? shiftMonth(calYear, calMonth, 1)
+    : shiftWeek(calFocusStr, 1);
+  const prevCalHeaderTitle = calendarHeaderTitle(
+    prevTitleTarget.year,
+    prevTitleTarget.monthIndex,
+    referenceYear
+  );
+  const calHeaderTitle = calendarHeaderTitle(calYear, calMonth, referenceYear);
+  const nextCalHeaderTitle = calendarHeaderTitle(
+    nextTitleTarget.year,
+    nextTitleTarget.monthIndex,
+    referenceYear
+  );
+  const canSwipePrevTitle =
+    prevTitleTarget.year !== calYear || prevTitleTarget.monthIndex !== calMonth;
+  const canSwipeNextTitle =
+    nextTitleTarget.year !== calYear || nextTitleTarget.monthIndex !== calMonth;
 
   const openOverflow = (e: React.MouseEvent<HTMLButtonElement>) => {
     setOverflowAnchor(e.currentTarget.getBoundingClientRect());
@@ -457,21 +487,30 @@ export function App() {
   return (
     <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center justify-between h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+      <header className="shrink-0 flex items-center justify-between gap-2 h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
           <div className="flex items-center gap-2 min-w-0">
-            <button
-              type="button"
-              onClick={() => {
-                if (activeView === 'calendar-month') setCalExpanded((prev) => !prev);
-              }}
-              className="text-left text-[22px] sm:text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
-              title={activeView === 'calendar-month' ? 'Click to expand/collapse month' : undefined}
-            >
-              {viewTitleText}
-            </button>
+            {activeView === 'calendar-month' ? (
+              <SwipeableMonthTitle
+                ref={monthTitleRef}
+                prevTitle={prevCalHeaderTitle}
+                currentTitle={calHeaderTitle}
+                nextTitle={nextCalHeaderTitle}
+                canSwipePrev={canSwipePrevTitle}
+                canSwipeNext={canSwipeNextTitle}
+                expanded={calExpanded}
+                onClick={() => setCalExpanded((prev) => !prev)}
+              />
+            ) : (
+              <button
+                type="button"
+                className="text-left text-[22px] sm:text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                Agenda
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="shrink-0 flex items-center gap-1 sm:gap-2">
             {/* Toggle Month / Agenda View */}
             <button
               type="button"
@@ -584,6 +623,7 @@ export function App() {
                       setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
                     }
                     onSelectDate={setCalSelectedDate}
+                    onSwipeProgress={handleCalendarSwipeProgress}
                     onMonthChange={(y, m) => {
                       setCalYear(y);
                       setCalMonth(m);

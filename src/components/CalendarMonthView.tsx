@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import type { Task } from '../types/task';
 import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from '../domain/calendar';
-import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek } from '../domain/calendarUi';
+import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek, type CalendarSwipeEvent } from '../domain/calendarUi';
 import { usePrefs } from '../prefs/prefs';
 import { formatDate, getDueDatePart, getRecurrenceAnchor, isCompleted, isCompletedOnDate, isRecurring, isSkippedOnDate, taskOccursOnDate } from '../domain/recurrence';
 
@@ -27,6 +27,7 @@ interface CalendarMonthViewProps {
   onSelectDate: (dateStr: string) => void;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
+  onSwipeProgress?: (event: CalendarSwipeEvent) => void;
   ref?: Ref<CalendarMonthHandle>;
 }
 
@@ -46,6 +47,7 @@ export function CalendarMonthView({
   onSelectDate,
   onSwipeLeft,
   onSwipeRight,
+  onSwipeProgress,
   ref,
 }: CalendarMonthViewProps) {
   const [{ weekStart, showOverdue }] = usePrefs();
@@ -68,6 +70,8 @@ export function CalendarMonthView({
   const justSwipedRef = useRef(false);
   const isSnappingRef = useRef(false);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSwipeProgressRef = useRef(onSwipeProgress);
+  onSwipeProgressRef.current = onSwipeProgress;
 
   const pointerStartXRef = useRef(0);
   const pointerStartYRef = useRef(0);
@@ -180,20 +184,27 @@ export function CalendarMonthView({
 
       // Slow and smooth snap transition duration (350ms)
       const SNAP_DURATION = 350;
+      onSwipeProgressRef.current?.({ phase: 'snap', target, durationMs: SNAP_DURATION });
 
       if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
       snapTimerRef.current = setTimeout(() => {
+        snapTimerRef.current = null;
+        let monthWillChange = false;
         if (target === 1) {
           if (onSwipeLeft) {
             onSwipeLeft();
           } else if (expanded) {
             const next = shiftMonthView(year, monthIndex, selectedDateStr, 1);
             onSelectDate(next.dateStr);
+            if (next.year !== year || next.monthIndex !== monthIndex) {
+              monthWillChange = true;
+            }
             onMonthChange(next.year, next.monthIndex);
           } else {
             const next = shiftWeek(selectedDateStr, 1);
             onSelectDate(next.dateStr);
             if (next.year !== year || next.monthIndex !== monthIndex) {
+              monthWillChange = true;
               onMonthChange(next.year, next.monthIndex);
             }
           }
@@ -203,11 +214,15 @@ export function CalendarMonthView({
           } else if (expanded) {
             const prev = shiftMonthView(year, monthIndex, selectedDateStr, -1);
             onSelectDate(prev.dateStr);
+            if (prev.year !== year || prev.monthIndex !== monthIndex) {
+              monthWillChange = true;
+            }
             onMonthChange(prev.year, prev.monthIndex);
           } else {
             const prev = shiftWeek(selectedDateStr, -1);
             onSelectDate(prev.dateStr);
             if (prev.year !== year || prev.monthIndex !== monthIndex) {
+              monthWillChange = true;
               onMonthChange(prev.year, prev.monthIndex);
             }
           }
@@ -220,6 +235,9 @@ export function CalendarMonthView({
           trackRef.current.style.transition = 'none';
           trackRef.current.style.transform = 'translateX(0px)';
         }
+        if (!monthWillChange) {
+          onSwipeProgressRef.current?.({ phase: 'reset' });
+        }
 
         setTimeout(() => {
           justSwipedRef.current = false;
@@ -231,7 +249,11 @@ export function CalendarMonthView({
 
   useEffect(() => {
     return () => {
-      if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+      if (snapTimerRef.current) {
+        clearTimeout(snapTimerRef.current);
+        snapTimerRef.current = null;
+        onSwipeProgressRef.current?.({ phase: 'reset' });
+      }
     };
   }, []);
 
@@ -275,6 +297,11 @@ export function CalendarMonthView({
           trackRef.current.style.transition = 'none';
           trackRef.current.style.transform = `translateX(${dx}px)`;
         }
+        const width = containerRef.current?.offsetWidth || 360;
+        onSwipeProgressRef.current?.({
+          phase: 'drag',
+          progress: Math.max(-1, Math.min(1, dx / width)),
+        });
       }
     };
 
@@ -301,6 +328,7 @@ export function CalendarMonthView({
         trackRef.current.style.transition = 'none';
         trackRef.current.style.transform = 'translateX(0px)';
       }
+      onSwipeProgressRef.current?.({ phase: 'reset' });
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -327,9 +355,12 @@ export function CalendarMonthView({
   const onPointerMove = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
     if ((e.buttons & 1) === 0) {
-      if (pointerDirectionRef.current === 'horizontal' && trackRef.current) {
-        trackRef.current.style.transition = 'none';
-        trackRef.current.style.transform = 'translateX(0px)';
+      if (pointerDirectionRef.current === 'horizontal') {
+        if (trackRef.current) {
+          trackRef.current.style.transition = 'none';
+          trackRef.current.style.transform = 'translateX(0px)';
+        }
+        onSwipeProgressRef.current?.({ phase: 'reset' });
       }
       pointerDirectionRef.current = 'none';
       return;
@@ -351,6 +382,11 @@ export function CalendarMonthView({
         trackRef.current.style.transition = 'none';
         trackRef.current.style.transform = `translateX(${dx}px)`;
       }
+      const width = containerRef.current?.offsetWidth || 360;
+      onSwipeProgressRef.current?.({
+        phase: 'drag',
+        progress: Math.max(-1, Math.min(1, dx / width)),
+      });
     }
   };
 
@@ -371,6 +407,7 @@ export function CalendarMonthView({
         trackRef.current.style.transition = 'none';
         trackRef.current.style.transform = 'translateX(0px)';
       }
+      onSwipeProgressRef.current?.({ phase: 'reset' });
     }
     pointerDirectionRef.current = 'none';
   };

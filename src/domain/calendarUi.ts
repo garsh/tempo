@@ -6,6 +6,19 @@ export function monthName(year: number, monthIndex: number, locale?: string): st
   return new Date(year, monthIndex, 1).toLocaleString(locale, { month: 'long' });
 }
 
+/** Month title for the calendar header, omitting the year when it matches `referenceYear`. */
+export function calendarHeaderTitle(
+  year: number,
+  monthIndex: number,
+  referenceYear: number = new Date().getFullYear(),
+  locale?: string
+): string {
+  return new Date(year, monthIndex, 1).toLocaleDateString(locale, {
+    month: 'long',
+    ...(year !== referenceYear ? { year: 'numeric' } : {}),
+  });
+}
+
 /**
  * Day-card title under the month grid: "Today" when the selected day is today,
  * otherwise a short date like "Mon, Oct 7".
@@ -218,6 +231,39 @@ export function saveStoredCalendarExpanded(
   } catch {
     /* ignore storage errors */
   }
+}
+
+export type CalendarSwipeEvent =
+  | { phase: 'drag'; progress: number }
+  | { phase: 'snap'; target: -1 | 0 | 1; durationMs: number }
+  | { phase: 'reset' };
+
+export interface MonthTitleSwipeState {
+  translatePercent: number;
+  prevOpacity: number;
+  currentOpacity: number;
+  nextOpacity: number;
+}
+
+/**
+ * Computes the horizontal translation and per-slide opacities for the month header title
+ * given normalized swipe progress in [-1, 1] (negative = dragging left toward next month,
+ * positive = dragging right toward previous month).
+ */
+export function computeMonthTitleSwipeState(
+  progress: number,
+  canSwipePrev: boolean,
+  canSwipeNext: boolean
+): MonthTitleSwipeState {
+  const clamped = Math.max(-1, Math.min(1, progress));
+  const blocked = (clamped > 0 && !canSwipePrev) || (clamped < 0 && !canSwipeNext);
+  const effective = blocked ? 0 : clamped;
+  return {
+    translatePercent: effective * 100,
+    prevOpacity: Math.max(0, effective),
+    currentOpacity: 1 - Math.abs(effective),
+    nextOpacity: Math.max(0, -effective),
+  };
 }
 
 export { shiftMonth };
