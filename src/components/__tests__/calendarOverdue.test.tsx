@@ -3,7 +3,6 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CalendarMonthView } from '../CalendarMonthView';
-import { CalendarAgendaView } from '../CalendarAgendaView';
 import { formatDate } from '../../domain/recurrence';
 import { INBOX_LIST_ID, type Task } from '../../types/task';
 
@@ -89,119 +88,6 @@ describe('Calendar Overdue Display', () => {
         const futureDot = futureButton?.querySelector('span.rounded-full.-mt-1');
         expect(futureDot?.className).toContain('bg-tt-blue');
       }
-    });
-  });
-
-  describe('CalendarAgendaView Overdue Scoping', () => {
-    it('renders overdue container when focus is today and overdue tasks exist', () => {
-      const now = new Date();
-      const todayStr = formatDate(now);
-      const pastStr = formatDate(new Date(now.getTime() - 86400000 * 2));
-
-      const tasks: Task[] = [
-        makeTask({ id: 't-overdue', title: 'Overdue Task', dueAt: pastStr }),
-        makeTask({ id: 't-today', title: 'Today Task', dueAt: todayStr }),
-      ];
-
-      const { container, unmount } = mount(
-        <CalendarAgendaView
-          tasks={tasks}
-          selectedDateStr={todayStr}
-          onSelectTask={vi.fn()}
-        />
-      );
-      mounted.push(unmount);
-
-      expect(container.textContent).toContain('Overdue (1)');
-      expect(container.textContent).toContain('Overdue Task');
-    });
-
-    it('does not render overdue container when focus is on a future date', () => {
-      const now = new Date();
-      const pastStr = formatDate(new Date(now.getTime() - 86400000 * 2));
-      const futureStr = formatDate(new Date(now.getTime() + 86400000 * 3));
-
-      const tasks: Task[] = [
-        makeTask({ id: 't-overdue', title: 'Overdue Task', dueAt: pastStr }),
-        makeTask({ id: 't-future', title: 'Future Task', dueAt: futureStr }),
-      ];
-
-      const { container, unmount } = mount(
-        <CalendarAgendaView
-          tasks={tasks}
-          selectedDateStr={futureStr}
-          onSelectTask={vi.fn()}
-        />
-      );
-      mounted.push(unmount);
-
-      expect(container.textContent).not.toContain('Overdue (1)');
-      expect(container.textContent).not.toContain('Overdue Task');
-      expect(container.textContent).toContain('Future Task');
-    });
-
-    it('does not render overdue container when focus is on a past date', () => {
-      const now = new Date();
-      const pastStr = formatDate(new Date(now.getTime() - 86400000 * 2));
-
-      const tasks: Task[] = [
-        makeTask({ id: 't-overdue', title: 'Overdue Task', dueAt: pastStr }),
-      ];
-
-      const { container, unmount } = mount(
-        <CalendarAgendaView
-          tasks={tasks}
-          selectedDateStr={pastStr}
-          onSelectTask={vi.fn()}
-        />
-      );
-      mounted.push(unmount);
-
-      // On the past date itself, the task is in dayTasks, not the global Overdue box
-      expect(container.textContent).not.toContain('Overdue (1)');
-      expect(container.textContent).toContain('Overdue Task');
-    });
-
-    it('allows collapsing and expanding the overdue container', () => {
-      const now = new Date();
-      const todayStr = formatDate(now);
-      const pastStr = formatDate(new Date(now.getTime() - 86400000 * 2));
-
-      const tasks: Task[] = [
-        makeTask({ id: 't-overdue', title: 'Overdue Task', dueAt: pastStr }),
-      ];
-
-      const { container, unmount } = mount(
-        <CalendarAgendaView
-          tasks={tasks}
-          selectedDateStr={todayStr}
-          onSelectTask={vi.fn()}
-        />
-      );
-      mounted.push(unmount);
-
-      expect(container.textContent).toContain('Overdue (1)');
-      expect(container.textContent).toContain('Overdue Task');
-
-      // Click the overdue accordion button
-      const collapseButton = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.includes('Overdue (1)')
-      );
-      expect(collapseButton).toBeDefined();
-
-      act(() => {
-        collapseButton?.click();
-      });
-
-      // Task row is collapsed
-      expect(container.textContent).toContain('Overdue (1)');
-      expect(container.textContent).not.toContain('Overdue Task');
-
-      // Click again to re-expand
-      act(() => {
-        collapseButton?.click();
-      });
-      expect(container.textContent).toContain('Overdue Task');
     });
   });
 });

@@ -3,8 +3,6 @@ import { useEffect, useRef } from 'react';
 export type ShortcutHandlers = {
   onCapture?: () => void;
   onEscape?: () => void;
-  onGoCalendarMonth?: () => void;
-  onGoCalendarAgenda?: () => void;
   onOpenHelp?: () => void;
 };
 
@@ -17,7 +15,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 /**
- * Global keyboard shortcuts for calendar navigation and capture.
+ * Global keyboard shortcuts for task capture and dialogs.
  * Ignored while typing in inputs (except Escape).
  */
 export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: boolean = true): void {
@@ -46,12 +44,6 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: boolea
         case 'c':
           e.preventDefault();
           h.onCapture?.();
-          break;
-        case 'm':
-          h.onGoCalendarMonth?.();
-          break;
-        case 'a':
-          h.onGoCalendarAgenda?.();
           break;
         case '?':
           h.onOpenHelp?.();

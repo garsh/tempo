@@ -10,7 +10,7 @@ import {
   softDeleteTask,
   uncompleteTask,
 } from './db/db';
-import type { AppView, Task, TaskInput } from './types/task';
+import type { Task, TaskInput } from './types/task';
 import {
   addDays,
   formatDate,
@@ -50,7 +50,6 @@ import {
   SwipeableMonthTitle,
   type SwipeableMonthTitleHandle,
 } from './components/calendar/SwipeableMonthTitle';
-import { CalendarAgendaView } from './components/CalendarAgendaView';
 import {
   ChangeDatePicker,
   type ChangeDatePickerHandle,
@@ -62,30 +61,15 @@ import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import {
-  CalendarRange,
   Keyboard,
-  LayoutList,
   MoreVertical,
   Plus,
   X,
 } from 'lucide-react';
 
 const EMPTY_TASKS: Task[] = [];
-const ACTIVE_VIEW_STORAGE_KEY = 'tempo_active_view';
-
-function readInitialView(): AppView {
-  try {
-    const raw = localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
-    if (raw === 'calendar-agenda') return 'calendar-agenda';
-  } catch {
-    /* ignore storage access errors */
-  }
-  return 'calendar-month';
-}
 
 export function App() {
-  const [activeView, setActiveView] = useState<AppView>(readInitialView);
-
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
@@ -96,14 +80,6 @@ export function App() {
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
   const [calExpanded, setCalExpanded] = useState<boolean>(readStoredCalendarExpanded);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView);
-    } catch {
-      /* ignore storage errors */
-    }
-  }, [activeView]);
 
   useEffect(() => {
     saveStoredCalendarExpanded(calExpanded);
@@ -207,19 +183,19 @@ export function App() {
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
 
   const displayedTasks = useMemo(() => {
-    if (activeView === 'calendar-month' && calSelectedDate) {
+    if (calSelectedDate) {
       return sortTasksForDailyView(tasksDueOnDate(activeTasks, calSelectedDate));
     }
     return [];
-  }, [activeView, calSelectedDate, activeTasks]);
+  }, [calSelectedDate, activeTasks]);
 
   const calCompletedTasks = useMemo(() => {
-    if (activeView !== 'calendar-month' || !calSelectedDate) return [];
+    if (!calSelectedDate) return [];
     return sortTasksForDailyView(completedTasksOnDate(activeTasks, calSelectedDate));
-  }, [activeView, calSelectedDate, activeTasks]);
+  }, [calSelectedDate, activeTasks]);
 
   const calOverdueTasks = useMemo(() => {
-    if (activeView !== 'calendar-month' || !prefs.showOverdue) return [];
+    if (!prefs.showOverdue) return [];
     const todayStr = formatDate(new Date());
     if (calSelectedDate !== todayStr) return [];
     const overdue: Task[] = [];
@@ -238,7 +214,7 @@ export function App() {
     return sortTasksForDailyView(
       overdue.filter((t) => !displayedKeys.has(`${t.id}:${t.dueAt || ''}`))
     );
-  }, [activeView, prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks]);
+  }, [prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
     const todayStr = formatDate(new Date());
@@ -255,7 +231,7 @@ export function App() {
 
   useEffect(() => {
     const area = calAreaRef.current;
-    if (!area || activeView !== 'calendar-month') return;
+    if (!area) return;
 
     const onTouchStart = (e: TouchEvent) => {
       if (isTaskReorderingRef.current) return;
@@ -327,7 +303,7 @@ export function App() {
       area.removeEventListener('touchend', finishDrag);
       area.removeEventListener('touchcancel', finishDrag);
     };
-  }, [activeView, calExpanded]);
+  }, [calExpanded]);
 
   const openCapture = useCallback(() => {
     setEditingTask(null);
@@ -401,11 +377,6 @@ export function App() {
     await handleDelete(taskId);
   };
 
-  const goView = useCallback((view: AppView) => {
-    setActiveView(view);
-    setOverflowAnchor(null);
-  }, []);
-
   useKeyboardShortcuts({
     onCapture: openCapture,
     onEscape: () => {
@@ -422,8 +393,6 @@ export function App() {
         return;
       }
     },
-    onGoCalendarMonth: () => goView('calendar-month'),
-    onGoCalendarAgenda: () => goView('calendar-agenda'),
     onOpenHelp: () => setShowShortcutsHelp(true),
   });
 
@@ -495,45 +464,19 @@ export function App() {
       {/* Header */}
       <header className="shrink-0 flex items-center justify-between gap-2 h-14 sm:h-16 px-3 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
           <div className="flex items-center gap-2 min-w-0">
-            {activeView === 'calendar-month' ? (
-              <SwipeableMonthTitle
-                ref={monthTitleRef}
-                prevTitle={prevCalHeaderTitle}
-                currentTitle={calHeaderTitle}
-                nextTitle={nextCalHeaderTitle}
-                canSwipePrev={canSwipePrevTitle}
-                canSwipeNext={canSwipeNextTitle}
-                expanded={calExpanded}
-                onClick={() => setCalExpanded((prev) => !prev)}
-              />
-            ) : (
-              <button
-                type="button"
-                className="text-left text-[22px] sm:text-[25px] font-bold tracking-[-0.01em] truncate text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
-              >
-                Agenda
-              </button>
-            )}
+            <SwipeableMonthTitle
+              ref={monthTitleRef}
+              prevTitle={prevCalHeaderTitle}
+              currentTitle={calHeaderTitle}
+              nextTitle={nextCalHeaderTitle}
+              canSwipePrev={canSwipePrevTitle}
+              canSwipeNext={canSwipeNextTitle}
+              expanded={calExpanded}
+              onClick={() => setCalExpanded((prev) => !prev)}
+            />
           </div>
 
           <div className="shrink-0 flex items-center gap-1 sm:gap-2">
-            {/* Toggle Month / Agenda View */}
-            <button
-              type="button"
-              className="w-10 h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors"
-              onClick={() =>
-                goView(activeView === 'calendar-month' ? 'calendar-agenda' : 'calendar-month')
-              }
-              title={activeView === 'calendar-month' ? 'Switch to Agenda view' : 'Switch to Month view'}
-              aria-label={activeView === 'calendar-month' ? 'Switch to Agenda view' : 'Switch to Month view'}
-            >
-              {activeView === 'calendar-month' ? (
-                <CalendarRange className="w-5 h-5 text-tt-secondary" strokeWidth={1.9} />
-              ) : (
-                <LayoutList className="w-5 h-5 text-tt-secondary" strokeWidth={1.9} />
-              )}
-            </button>
-
             {/* More / Overflow */}
             <button
               type="button"
@@ -555,7 +498,7 @@ export function App() {
           <div
             ref={calAreaRef}
             onPointerDown={(e) => {
-              if (activeView !== 'calendar-month' || e.pointerType === 'touch' || isTaskReorderingRef.current) return;
+              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
               const startProgress = calExpanded ? 1 : 0;
               calGestureRef.current = {
                 startY: e.clientY,
@@ -609,46 +552,27 @@ export function App() {
             }}
             className="flex-1 flex flex-col min-h-0 overflow-hidden"
           >
-            <div
-              className={
-                activeView === 'calendar-month'
-                  ? 'flex-1 flex flex-col min-h-0 overflow-hidden'
-                  : 'px-3 sm:px-5 space-y-3 flex-1 overflow-y-auto'
-              }
-            >
-              <div className={activeView === 'calendar-month' ? 'shrink-0 px-3 sm:px-5' : 'space-y-3'}>
-                {activeView === 'calendar-month' ? (
-                  <CalendarMonthView
-                    ref={monthViewRef}
-                    year={calYear}
-                    monthIndex={calMonth}
-                    selectedDateStr={calSelectedDate}
-                    tasks={activeTasks}
-                    expanded={calExpanded}
-                    onToggleExpanded={(next) =>
-                      setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
-                    }
-                    onSelectDate={setCalSelectedDate}
-                    onSwipeProgress={handleCalendarSwipeProgress}
-                    onMonthChange={(y, m) => {
-                      setCalYear(y);
-                      setCalMonth(m);
-                    }}
-                  />
-                ) : (
-                  <CalendarAgendaView
-                    tasks={activeTasks}
-                    onSelectTask={handleEdit}
-                    selectedDateStr={calSelectedDate}
-                    onSelectDate={setCalSelectedDate}
-                    onMonthChange={(y, m) => {
-                      setCalYear(y);
-                      setCalMonth(m);
-                    }}
-                  />
-                )}
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="shrink-0 px-3 sm:px-5">
+                <CalendarMonthView
+                  ref={monthViewRef}
+                  year={calYear}
+                  monthIndex={calMonth}
+                  selectedDateStr={calSelectedDate}
+                  tasks={activeTasks}
+                  expanded={calExpanded}
+                  onToggleExpanded={(next) =>
+                    setCalExpanded((prev) => (typeof next === 'boolean' ? next : !prev))
+                  }
+                  onSelectDate={setCalSelectedDate}
+                  onSwipeProgress={handleCalendarSwipeProgress}
+                  onMonthChange={(y, m) => {
+                    setCalYear(y);
+                    setCalMonth(m);
+                  }}
+                />
               </div>
-              {activeView === 'calendar-month' && calSelectedDate && (
+              {calSelectedDate && (
                 <div
                   ref={calScrollRef}
                   className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
@@ -749,7 +673,6 @@ export function App() {
         onSyncStatusChange={() => refreshSyncStatus()}
         onShowShortcuts={() => setShowShortcutsHelp(true)}
         diagnosticsContext={{
-          activeView,
           calSelectedDate,
           collapsedGroups,
           groupBy: prefs.groupBy,
@@ -793,7 +716,6 @@ export function App() {
             <ul className="space-y-2 text-xs text-tt-text">
               {[
                 ['n / c', 'New task (capture)'],
-                ['m / a', 'Calendar month / Agenda'],
                 ['Esc', 'Close modals'],
                 ['?', 'This help'],
               ].map(([key, desc]) => (

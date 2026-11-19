@@ -2,7 +2,6 @@
 import { act, useCallback, useRef, useState, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CalendarAgendaView } from '../CalendarAgendaView';
 import {
   CALENDAR_EXPAND_DELTA,
   CALENDAR_ROW_HEIGHT,
@@ -404,42 +403,6 @@ describe('CalendarMonthView', () => {
       vi.advanceTimersByTime(350);
     });
     expect(onSelectDate).toHaveBeenCalledWith('2026-11-23');
-    view.unmount();
-  });
-});
-
-describe('CalendarAgendaView week swipe', () => {
-  it('follows the finger and then selects the next week', () => {
-    vi.useFakeTimers();
-    const onSelectDate = vi.fn();
-    const onMonthChange = vi.fn();
-    const view = mount(
-      <CalendarAgendaView
-        tasks={[]}
-        onSelectTask={vi.fn()}
-        selectedDateStr="2026-11-16"
-        onSelectDate={onSelectDate}
-        onMonthChange={onMonthChange}
-      />
-    );
-    const strip = view.container.querySelector<HTMLElement>('.touch-pan-y');
-    if (!strip) throw new Error('week strip not found');
-    Object.defineProperty(strip, 'offsetWidth', { configurable: true, value: 360 });
-    const track = strip.querySelector<HTMLElement>('[style*="translateX"]');
-    if (!track) throw new Error('week track not found');
-
-    act(() => {
-      strip.dispatchEvent(pointer('pointerdown', 200, 20, 1));
-      strip.dispatchEvent(pointer('pointermove', 100, 22, 1));
-    });
-    expect(track.style.transform).toContain('translateX(-100px)');
-
-    act(() => {
-      strip.dispatchEvent(pointer('pointerup', 100, 22, 0));
-      vi.advanceTimersByTime(350);
-    });
-    expect(onSelectDate).toHaveBeenCalledWith('2026-11-23');
-    expect(onMonthChange).toHaveBeenCalledWith(2026, 10);
     view.unmount();
   });
 });

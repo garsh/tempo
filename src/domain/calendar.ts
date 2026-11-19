@@ -3,8 +3,6 @@ import {
   formatDate,
   getDayBoundsMs,
   getDueDatePart,
-  getNextUncompletedOccurrenceDate,
-  isCompleted,
   isCompletedOnDate,
   isRecurring,
   isSkippedOnDate,
@@ -93,65 +91,6 @@ export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
       return isCompletedOnDate(t, dateStr);
     })
     .map((t) => projectTaskForDate(t, dateStr));
-}
-
-/**
- * Agenda groups: consecutive days from `from` for `dayCount` days,
- * only including days that have tasks (plus always include today if empty? —
- * include all days in range for a predictable agenda feel, empty ones optional).
- */
-export type AgendaDay = {
-  dateStr: string;
-  date: Date;
-  tasks: Task[];
-};
-
-export function buildAgenda(
-  tasks: Task[],
-  from: Date = new Date(),
-  dayCount: number = 14,
-  includeEmpty: boolean = false
-): AgendaDay[] {
-  const days: AgendaDay[] = [];
-  const start = startOfDay(from);
-
-  for (let i = 0; i < dayCount; i++) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    const dateStr = formatDate(d);
-    const dayTasks = tasksDueOnDate(tasks, dateStr).sort((a, b) =>
-      (a.dueAt || '').localeCompare(b.dueAt || '')
-    );
-    if (includeEmpty || dayTasks.length > 0 || i === 0) {
-      days.push({ dateStr, date: d, tasks: dayTasks });
-    }
-  }
-
-  // Also surface overdue before the range as a synthetic "Overdue" bucket
-  const rangeStartStr = formatDate(start);
-  const overdue: Task[] = [];
-  for (const t of tasks) {
-    if (t.deletedAt || isCompleted(t)) continue;
-    if (isRecurring(t)) {
-      const nextDate = getNextUncompletedOccurrenceDate(t, start);
-      if (nextDate && nextDate < rangeStartStr) {
-        overdue.push(projectTaskForDate(t, nextDate));
-      }
-    } else if (t.dueAt && getDueDatePart(t.dueAt) < rangeStartStr) {
-      overdue.push(t);
-    }
-  }
-  overdue.sort((a, b) => (a.dueAt || '').localeCompare(b.dueAt || ''));
-
-  if (overdue.length > 0) {
-    days.unshift({
-      dateStr: 'overdue',
-      date: new Date(start.getTime() - 86400000),
-      tasks: overdue,
-    });
-  }
-
-  return days;
 }
 
 export function monthLabel(year: number, monthIndex: number): string {

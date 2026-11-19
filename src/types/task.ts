@@ -116,5 +116,3 @@ export type TaskListInput = Omit<TaskList, 'id' | 'createdAt' | 'updatedAt'> & {
 export type FolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'> & {
   id?: string;
 };
-
-export type AppView = 'calendar-month' | 'calendar-agenda';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildAgenda, buildMonthGrid, completedTasksOnDate, tasksDueOnDate } from '../calendar';
+import { buildMonthGrid, completedTasksOnDate, tasksDueOnDate } from '../calendar';
 import { completionTimestampForDate } from '../recurrence';
 import type { Task } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
@@ -31,20 +31,6 @@ describe('Calendar helpers', () => {
       task({ id: '3', title: 'Done', dueAt: '2026-10-05', completedAt: 1 }),
     ];
     expect(tasksDueOnDate(tasks, '2026-10-05').map((t) => t.id)).toEqual(['1']);
-  });
-
-  it('builds agenda with overdue bucket', () => {
-    const now = new Date(2026, 9, 5);
-    const tasks = [
-      task({ id: '1', title: 'Old', dueAt: '2026-10-01' }),
-      task({ id: '2', title: 'Today', dueAt: '2026-10-05' }),
-      task({ id: '3', title: 'Soon', dueAt: '2026-10-07' }),
-    ];
-    const agenda = buildAgenda(tasks, now, 7, false);
-    expect(agenda[0].dateStr).toBe('overdue');
-    expect(agenda[0].tasks.map((t) => t.id)).toEqual(['1']);
-    expect(agenda.some((d) => d.dateStr === '2026-10-05')).toBe(true);
-    expect(agenda.some((d) => d.dateStr === '2026-10-07')).toBe(true);
   });
 });
 
@@ -126,20 +112,6 @@ describe('Calendar recurring tasks', () => {
       'weekly',
     ]);
     expect(tasksDueOnDate(tasks, '2026-11-05').map((t) => t.id)).toEqual(['daily', 'monthly']);
-
-    // Agenda projects recurring tasks across days in the range
-    const agenda = buildAgenda(tasks, new Date(2026, 9, 5), 4, false);
-    expect(agenda.find((d) => d.dateStr === '2026-10-05')?.tasks.map((t) => t.id)).toEqual([
-      'mwf',
-      'weekly',
-      'monthly',
-      'daily',
-    ]);
-    expect(agenda.find((d) => d.dateStr === '2026-10-06')).toBeUndefined();
-    expect(agenda.find((d) => d.dateStr === '2026-10-07')?.tasks.map((t) => t.id)).toEqual([
-      'mwf',
-      'daily',
-    ]);
   });
 
   it('omits skipped occurrences on specific dates without affecting surrounding occurrences', () => {
