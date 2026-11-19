@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   completeTask,
@@ -63,6 +63,7 @@ import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
 import { InstallPrompt } from './components/InstallPrompt';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
+import { TaskSearchView } from './components/search/TaskSearchView';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import {
   ChevronDown,
@@ -111,6 +112,8 @@ export function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -138,6 +141,10 @@ export function App() {
   const monthViewRef = useRef<CalendarMonthHandle>(null);
   const monthTitleRef = useRef<SwipeableMonthTitleHandle>(null);
   const calScrollRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const savedCalScrollTopRef = useRef<number | null>(null);
+  const restoreMoreFocusRef = useRef(false);
 
   const handleCalendarSwipeProgress = useCallback((event: CalendarSwipeEvent) => {
     monthTitleRef.current?.applySwipe(event);
@@ -398,7 +405,51 @@ export function App() {
       area.removeEventListener('touchend', finishDrag);
       area.removeEventListener('touchcancel', finishDrag);
     };
-  }, [calExpanded]);
+  }, [calExpanded, isSearchOpen]);
+
+  const openSearch = useCallback(() => {
+    calGestureRef.current = null;
+    savedCalScrollTopRef.current = calScrollRef.current?.scrollTop ?? null;
+    setOverflowAnchor(null);
+    setIsSearchOpen(true);
+  }, []);
+
+  const closeSearch = useCallback((restoreFocus = true) => {
+    restoreMoreFocusRef.current = restoreFocus;
+    setIsSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+
+  const handleJumpToDate = useCallback(
+    (dateStr: string, expandCompleted: boolean) => {
+      savedCalScrollTopRef.current = null;
+      restoreMoreFocusRef.current = false;
+      setIsSearchOpen(false);
+      setSearchQuery('');
+      if (expandCompleted) {
+        setCollapsedGroups((prev) =>
+          prev['cal-completed'] ? { ...prev, 'cal-completed': false } : prev
+        );
+      }
+      const [y, m] = dateStr.split('-').map(Number);
+      if (!Number.isNaN(y) && !Number.isNaN(m)) {
+        applyCalendarTarget({ year: y, monthIndex: m - 1, dateStr });
+      }
+    },
+    [applyCalendarTarget]
+  );
+
+  useLayoutEffect(() => {
+    if (isSearchOpen) return;
+    if (savedCalScrollTopRef.current != null && calScrollRef.current) {
+      calScrollRef.current.scrollTop = savedCalScrollTopRef.current;
+    }
+    savedCalScrollTopRef.current = null;
+    if (restoreMoreFocusRef.current) {
+      restoreMoreFocusRef.current = false;
+      moreButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [isSearchOpen]);
 
   const openCapture = useCallback(() => {
     setEditingTask(null);
@@ -472,12 +523,31 @@ export function App() {
     await handleDelete(taskId);
   };
 
+  const canOpenSearch =
+    !isSearchOpen &&
+    !isTaskModalOpen &&
+    !isSettingsModalOpen &&
+    !overflowAnchor &&
+    !showShortcutsHelp &&
+    !skipOccurrenceTask &&
+    !deleteConfirmTask &&
+    !isMonthYearPickerOpen;
+
   useKeyboardShortcuts(
     {
       onCapture: openCapture,
+      onSearch: canOpenSearch ? openSearch : undefined,
       onEscape: () => {
         if (showShortcutsHelp) {
           setShowShortcutsHelp(false);
+          return;
+        }
+        if (deleteConfirmTask) {
+          setDeleteConfirmTask(null);
+          return;
+        }
+        if (skipOccurrenceTask) {
+          setSkipOccurrenceTask(null);
           return;
         }
         if (isTaskModalOpen) {
@@ -486,6 +556,15 @@ export function App() {
         }
         if (isSettingsModalOpen) {
           setIsSettingsModalOpen(false);
+          return;
+        }
+        if (isSearchOpen) {
+          if (searchQuery.length > 0) {
+            setSearchQuery('');
+            searchInputRef.current?.focus({ preventScroll: true });
+          } else {
+            closeSearch(true);
+          }
           return;
         }
       },
@@ -561,82 +640,102 @@ export function App() {
 
   return (
     <div className="h-dvh bg-tt-bg xl:bg-tt-surface text-tt-text flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="shrink-0 flex items-center justify-between gap-1 sm:gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
-        <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
-          <SwipeableMonthTitle
-            ref={monthTitleRef}
-            prevTitle={prevCalHeaderTitle}
-            currentTitle={calHeaderTitle}
-            nextTitle={nextCalHeaderTitle}
-            canSwipePrev={canSwipePrevTitle}
-            canSwipeNext={canSwipeNextTitle}
-            expanded={calExpanded}
-            onClick={() => setCalExpanded((prev) => !prev)}
-          />
-          <button
-            type="button"
-            onClick={() => setIsMonthYearPickerOpen(true)}
-            aria-label="Choose month and year"
-            aria-expanded={isMonthYearPickerOpen}
-            title="Choose month and year"
-            className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
-          >
-            <ChevronDown
-              className={`w-4 h-4 transition-transform duration-200 ${
-                isMonthYearPickerOpen ? 'rotate-180' : ''
-              }`}
-              strokeWidth={2.2}
-            />
-          </button>
-        </div>
+      {isSearchOpen ? (
+        <TaskSearchView
+          tasks={activeTasks}
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          onClose={() => closeSearch(true)}
+          showDetails={prefs.showDetails}
+          onJumpToDate={handleJumpToDate}
+          onComplete={handleComplete}
+          onUncomplete={handleUncomplete}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onRequestChangeDate={handleRequestChangeDate}
+          onRequestSkipOccurrence={setSkipOccurrenceTask}
+          onRequestDelete={setDeleteConfirmTask}
+          inputRef={searchInputRef}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <header className="shrink-0 flex items-center justify-between gap-1 sm:gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+            <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+              <SwipeableMonthTitle
+                ref={monthTitleRef}
+                prevTitle={prevCalHeaderTitle}
+                currentTitle={calHeaderTitle}
+                nextTitle={nextCalHeaderTitle}
+                canSwipePrev={canSwipePrevTitle}
+                canSwipeNext={canSwipeNextTitle}
+                expanded={calExpanded}
+                onClick={() => setCalExpanded((prev) => !prev)}
+              />
+              <button
+                type="button"
+                onClick={() => setIsMonthYearPickerOpen(true)}
+                aria-label="Choose month and year"
+                aria-expanded={isMonthYearPickerOpen}
+                title="Choose month and year"
+                className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+              >
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform duration-200 ${
+                    isMonthYearPickerOpen ? 'rotate-180' : ''
+                  }`}
+                  strokeWidth={2.2}
+                />
+              </button>
+            </div>
 
-        <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
-          <button
-            type="button"
-            onClick={handleJumpToToday}
-            aria-label="Today"
-            title="Today"
-            className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-              isOnToday
-                ? 'text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar'
-                : 'text-tt-blue hover:bg-tt-blue-soft'
-            }`}
-          >
-            <TodayCalendarIcon day={now.getDate()} />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleStepCalendar(-1)}
-            aria-label={calExpanded ? 'Previous month' : 'Previous week'}
-            title={calExpanded ? 'Previous month' : 'Previous week'}
-            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
-          >
-            <ChevronLeft className="w-5 h-5" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={() => handleStepCalendar(1)}
-            aria-label={calExpanded ? 'Next month' : 'Next week'}
-            title={calExpanded ? 'Next month' : 'Next week'}
-            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
-          >
-            <ChevronRight className="w-5 h-5" strokeWidth={2} />
-          </button>
-          {/* More / Overflow */}
-          <button
-            type="button"
-            className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
-            onClick={openOverflow}
-            title="More options"
-            aria-label="More options"
-            aria-haspopup="menu"
-            aria-expanded={!!overflowAnchor}
-          >
-            <MoreVertical className="w-5 h-5 text-tt-secondary" strokeWidth={2} />
-          </button>
-        </div>
-      </header>
+            <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
+              <button
+                type="button"
+                onClick={handleJumpToToday}
+                aria-label="Today"
+                title="Today"
+                className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                  isOnToday
+                    ? 'text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar'
+                    : 'text-tt-blue hover:bg-tt-blue-soft'
+                }`}
+              >
+                <TodayCalendarIcon day={now.getDate()} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStepCalendar(-1)}
+                aria-label={calExpanded ? 'Previous month' : 'Previous week'}
+                title={calExpanded ? 'Previous month' : 'Previous week'}
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-5 h-5" strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStepCalendar(1)}
+                aria-label={calExpanded ? 'Next month' : 'Next week'}
+                title={calExpanded ? 'Next month' : 'Next week'}
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+              >
+                <ChevronRight className="w-5 h-5" strokeWidth={2} />
+              </button>
+              {/* More / Overflow */}
+              <button
+                ref={moreButtonRef}
+                type="button"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+                onClick={openOverflow}
+                title="More options"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded={!!overflowAnchor}
+              >
+                <MoreVertical className="w-5 h-5 text-tt-secondary" strokeWidth={2} />
+              </button>
+            </div>
+          </header>
 
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 relative">
@@ -785,6 +884,8 @@ export function App() {
           </div>
         </main>
       </div>
+        </>
+      )}
 
       {/* FAB */}
       <button
@@ -834,6 +935,7 @@ export function App() {
         hideCompleted={prefs.hideCompleted}
         showOverdue={prefs.showOverdue}
         onClose={() => setOverflowAnchor(null)}
+        onSearch={openSearch}
         onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
         onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
         onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
@@ -862,6 +964,7 @@ export function App() {
             <ul className="space-y-2 text-xs text-tt-text">
               {[
                 ['n / c', 'New task (capture)'],
+                ['/', 'Search tasks'],
                 ['Esc', 'Close modals'],
                 ['?', 'This help'],
               ].map(([key, desc]) => (

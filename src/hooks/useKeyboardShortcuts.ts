@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 export type ShortcutHandlers = {
   onCapture?: () => void;
+  onSearch?: () => void;
   onEscape?: () => void;
   onOpenHelp?: () => void;
 };
@@ -44,6 +45,12 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: boolea
         case 'c':
           e.preventDefault();
           h.onCapture?.();
+          break;
+        case '/':
+          if (h.onSearch) {
+            e.preventDefault();
+            h.onSearch();
+          }
           break;
         case '?':
           h.onOpenHelp?.();

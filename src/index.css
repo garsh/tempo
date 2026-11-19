@@ -74,6 +74,8 @@
   --tt-icon-green: #0cce9c;
   --tt-icon-amber: #ffb000;
   --tt-scrim: rgb(0 0 0 / 0.4);
+  --tt-mark-bg: #fef08a;
+  --tt-mark-text: #191919;
 }
 
 /* Dark: OS dark unless the user pinned Light; or the user pinned Dark. */
@@ -113,6 +115,8 @@
     --tt-menu-divider: #3a3a3c;
     --tt-chevron: #5c5c60;
     --tt-scrim: rgb(0 0 0 / 0.6);
+    --tt-mark-bg: #713f12;
+    --tt-mark-text: #fef9c3;
   }
 }
 
@@ -153,6 +157,8 @@
   --tt-menu-divider: #3a3a3c;
   --tt-chevron: #5c5c60;
   --tt-scrim: rgb(0 0 0 / 0.6);
+  --tt-mark-bg: #713f12;
+  --tt-mark-text: #fef9c3;
 
 }
 
@@ -284,5 +290,12 @@ dialog::backdrop {
   backdrop-filter: blur(2px);
   overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.tt-search-mark {
+  background-color: var(--tt-mark-bg);
+  color: var(--tt-mark-text);
+  border-radius: 3px;
+  padding: 0 1px;
 }
 

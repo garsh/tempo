@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Settings } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 
 const ICON = {
   width: 20,
@@ -63,6 +63,7 @@ interface OverflowMenuProps {
   onToggleDetails: () => void;
   onToggleHideCompleted: () => void;
   onToggleShowOverdue: () => void;
+  onSearch?: () => void;
   onSettings: () => void;
   onUpdateApp?: () => void;
 }
@@ -114,6 +115,12 @@ export function OverflowMenu(props: OverflowMenuProps) {
         className="absolute w-[247px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
         style={{ top: pos.top, right: pos.right }}
       >
+        {props.onSearch && (
+          <button type="button" role="menuitem" className={row} onClick={act(props.onSearch)}>
+            <Search className="w-5 h-5 shrink-0" strokeWidth={1.8} />
+            Search
+          </button>
+        )}
         <button type="button" role="menuitem" className={row} onClick={act(props.onToggleDetails)}>
           <DetailsIcon />
           {props.showDetails ? 'Hide Details' : 'Show Details'}

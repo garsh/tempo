@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { SwipeActionButton } from './SwipeActionButton';
 import { globalSwipeCoordinator } from '../domain/swipeCoordinator';
+import { splitHighlightSegments } from '../domain/search';
 
 interface TaskCardProps {
   task: Task;
@@ -30,6 +31,10 @@ interface TaskCardProps {
   onDelete?: (id: string) => void;
   /** ⋮ › Show Details: notes preview under the title. */
   showDetails?: boolean;
+  /** Search match snippet overriding `showDetails` preview when provided. */
+  notesSnippet?: string;
+  /** Normalized search tokens highlighted inside title and notes preview. */
+  highlightTokens?: string[];
   /** Long-press drag-to-reorder support. */
   reorderEnabled?: boolean;
   isDragging?: boolean;
@@ -65,6 +70,21 @@ function formatRowDue(dueAt: string | null | undefined): string | null {
   return formatDueLabel(dueAt);
 }
 
+function renderHighlighted(text: string, tokens?: string[]) {
+  if (!tokens || tokens.length === 0) return text;
+  const segments = splitHighlightSegments(text, tokens);
+  if (segments.length === 1 && !segments[0].highlighted) return text;
+  return segments.map((seg, idx) =>
+    seg.highlighted ? (
+      <mark key={idx} className="tt-search-mark">
+        {seg.text}
+      </mark>
+    ) : (
+      seg.text
+    )
+  );
+}
+
 const TaskCardComponent: React.FC<TaskCardProps> = ({
   task,
   selected = false,
@@ -75,6 +95,8 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   onEdit,
   onDelete,
   showDetails = false,
+  notesSnippet,
+  highlightTokens,
   reorderEnabled = false,
   isDragging = false,
   isSettling = false,
@@ -94,6 +116,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const [justCompleted, setJustCompleted] = useState(false);
   const completed = isCompleted(task);
   const recurring = isRecurring(task);
+  const canSkip = recurring && !!onRequestSkipOccurrence;
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
   const dueLabel = formatRowDue(task.dueAt);
@@ -125,7 +148,12 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   };
 
   const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
-  const notesPreview = showDetails ? task.notes?.trim().split('\n').find((l) => l.trim()) : undefined;
+  const notesPreview =
+    notesSnippet !== undefined
+      ? notesSnippet
+      : showDetails
+        ? task.notes?.trim().split('\n').find((l) => l.trim())
+        : undefined;
   const activate = () => onSelect?.(task);
 
   // --- Swipe-to-reveal gesture logic ---
@@ -425,11 +453,13 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           icon={<SkipForward className="w-4 h-4" />}
           label="Skip Occurrence"
           explanation={
-            recurring
+            canSkip
               ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
-              : "Skip Occurrence: Only available for recurring tasks"
+              : recurring
+                ? 'Skip Occurrence: Not available for ended series'
+                : 'Skip Occurrence: Only available for recurring tasks'
           }
-          disabled={!recurring}
+          disabled={!canSkip}
           colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
           onClick={() => {
             closeSwipe();
@@ -490,12 +520,12 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
               completed ? 'text-tt-secondary line-through' : 'text-tt-text'
             }`}
           >
-            {task.title}
+            {renderHighlighted(task.title, highlightTokens)}
           </span>
         </div>
         {notesPreview && (
           <p className="mt-0.5 text-[13px] leading-snug text-tt-secondary truncate" data-testid="task-notes-preview">
-            {notesPreview}
+            {renderHighlighted(notesPreview, highlightTokens)}
           </p>
         )}
       </div>
