@@ -6,7 +6,7 @@ export interface SwipeActionButtonProps {
   label: string;
   explanation: string;
   colorClasses: string;
-  onClick: () => void;
+  onClick: (anchorEl?: HTMLButtonElement | null) => void;
   disabled?: boolean;
 }
 
@@ -161,7 +161,7 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
     setShowMobileTooltip(false);
     setIsHovered(false);
     clearDismissTimer();
-    onClick();
+    onClick(buttonRef.current);
   };
 
   const handleMouseEnter = () => {

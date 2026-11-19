@@ -42,7 +42,7 @@ interface TaskCardProps {
   onRowClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** Swipe action triggers */
-  onRequestChangeDate?: (task: Task) => void;
+  onRequestChangeDate?: (task: Task, anchorRect?: DOMRect) => void;
   onRequestSkipOccurrence?: (task: Task) => void;
   onRequestDelete?: (task: Task) => void;
   isSwipedOpen?: boolean;
@@ -415,9 +415,10 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           label="Change Date"
           explanation="Change Date: Pick a new date for this task"
           colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
-          onClick={() => {
+          onClick={(anchorEl) => {
+            const rect = anchorEl?.getBoundingClientRect();
             closeSwipe();
-            onRequestChangeDate?.(task);
+            onRequestChangeDate?.(task, rect);
           }}
         />
         <SwipeActionButton

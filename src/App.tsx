@@ -51,7 +51,10 @@ import {
   type SwipeableMonthTitleHandle,
 } from './components/calendar/SwipeableMonthTitle';
 import { CalendarAgendaView } from './components/CalendarAgendaView';
-import { ChangeDateDialog } from './components/dialogs/ChangeDateDialog';
+import {
+  ChangeDatePicker,
+  type ChangeDatePickerHandle,
+} from './components/dialogs/ChangeDatePicker';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
 import { InstallPrompt } from './components/InstallPrompt';
@@ -137,7 +140,7 @@ export function App() {
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
-  const [changeDateTask, setChangeDateTask] = useState<Task | null>(null);
+  const changeDatePickerRef = useRef<ChangeDatePickerHandle | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -379,9 +382,12 @@ export function App() {
     scheduleSync();
   };
 
+  const handleRequestChangeDate = useCallback((task: Task, anchorRect?: DOMRect) => {
+    changeDatePickerRef.current?.open(task, anchorRect);
+  }, []);
+
   const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
     await handlePatchTask(taskId, { dueAt: newDueAt });
-    setChangeDateTask(null);
   };
 
   const handleConfirmSkipOccurrence = async (task: Task, dateToSkip: string) => {
@@ -474,7 +480,7 @@ export function App() {
             onUncomplete={handleUncomplete}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onRequestChangeDate={setChangeDateTask}
+            onRequestChangeDate={handleRequestChangeDate}
             onRequestSkipOccurrence={setSkipOccurrenceTask}
             onRequestDelete={setDeleteConfirmTask}
             {...dragProps}
@@ -804,10 +810,8 @@ export function App() {
       )}
 
       {/* Swipe Action Dialogs */}
-      <ChangeDateDialog
-        isOpen={!!changeDateTask}
-        task={changeDateTask}
-        onClose={() => setChangeDateTask(null)}
+      <ChangeDatePicker
+        ref={changeDatePickerRef}
         onSave={handleConfirmChangeDate}
       />
 
