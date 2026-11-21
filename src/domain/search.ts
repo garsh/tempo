@@ -5,6 +5,8 @@ import {
   getDueDeadline,
   getNextUncompletedOccurrenceDate,
   isRecurring,
+  isWindowPeriodic,
+  isWindowStopped,
   projectTaskForDate,
 } from './recurrence';
 
@@ -350,6 +352,46 @@ export function searchTasks(
           },
           titleBoost,
           dueMs: task.dueAt ? getDueDeadline(task.dueAt).getTime() : Number.POSITIVE_INFINITY,
+          completedSortTs: 0,
+        });
+      }
+      continue;
+    }
+
+    if (isWindowPeriodic(task)) {
+      if (isWindowStopped(task, now)) {
+        const latestCompTs = latestTimestamp(task.completionHistory || []);
+        const latestCompDate = latestCompTs != null ? formatDate(new Date(latestCompTs)) : null;
+        const completedTs = latestCompTs ?? task.updatedAt;
+        completedEntries.push({
+          item: {
+            task: {
+              ...task,
+              dueAt: latestCompDate,
+              completedAt: completedTs,
+            },
+            id: task.id,
+            status: 'completed',
+            completable: false,
+            jumpDateStr: latestCompDate,
+            notesSnippet,
+          },
+          titleBoost,
+          dueMs: Number.POSITIVE_INFINITY,
+          completedSortTs: completedTs,
+        });
+      } else {
+        activeEntries.push({
+          item: {
+            task: { ...task, dueAt: null },
+            id: task.id,
+            status: 'active',
+            completable: true,
+            jumpDateStr: null,
+            notesSnippet,
+          },
+          titleBoost,
+          dueMs: Number.POSITIVE_INFINITY,
           completedSortTs: 0,
         });
       }

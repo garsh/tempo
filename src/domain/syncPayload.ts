@@ -113,25 +113,47 @@ function asRecurrence(value: unknown): RecurrenceRule | null | undefined {
   if (typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
   if (raw.type !== 'after_completion' && raw.type !== 'fixed_interval') return undefined;
-  if (raw.intervalUnit !== 'days' && raw.intervalUnit !== 'weeks' && raw.intervalUnit !== 'months') return undefined;
+  if (
+    raw.intervalUnit !== 'days' &&
+    raw.intervalUnit !== 'weeks' &&
+    raw.intervalUnit !== 'months' &&
+    raw.intervalUnit !== 'years'
+  ) {
+    return undefined;
+  }
   const interval = asFinite(raw.intervalValue);
   if (interval === undefined) return undefined;
+  const clampedMin = Math.min(999, Math.max(1, Math.floor(interval)));
+  const rawMax = asFinite(raw.maxIntervalValue);
+  let maxIntervalValue: number | undefined;
+  if (rawMax !== undefined) {
+    maxIntervalValue = Math.min(999, Math.max(clampedMin, Math.floor(rawMax)));
+  } else if (raw.type === 'after_completion') {
+    maxIntervalValue = clampedMin;
+  }
+
+  const isWindow = raw.type === 'after_completion' || maxIntervalValue !== undefined;
   const rule: RecurrenceRule = {
-    type: raw.type,
+    type: isWindow ? 'after_completion' : 'fixed_interval',
     intervalUnit: raw.intervalUnit,
-    intervalValue: Math.min(999, Math.max(1, Math.floor(interval))),
+    intervalValue: clampedMin,
+    ...(maxIntervalValue !== undefined ? { maxIntervalValue } : {}),
   };
-  if (Array.isArray(raw.weekdays)) {
+  if (!isWindow && Array.isArray(raw.weekdays)) {
     const days = raw.weekdays.map(asWeekday).filter((d): d is Weekday => d !== undefined).slice(0, 7);
     if (days.length > 0) rule.weekdays = days;
   }
-  const monthDay = asFinite(raw.monthDay);
-  if (monthDay !== undefined && monthDay >= 1 && monthDay <= 31) rule.monthDay = Math.floor(monthDay);
+  if (!isWindow) {
+    const monthDay = asFinite(raw.monthDay);
+    if (monthDay !== undefined && monthDay >= 1 && monthDay <= 31) rule.monthDay = Math.floor(monthDay);
+  }
   if (typeof raw.endOnDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
   else if (raw.endOnDate === null) rule.endOnDate = null;
-  const endCount = asFinite(raw.endAfterCount);
-  if (endCount !== undefined && endCount >= 0) rule.endAfterCount = Math.min(10_000, Math.floor(endCount));
-  else if (raw.endAfterCount === null) rule.endAfterCount = null;
+  if (!isWindow) {
+    const endCount = asFinite(raw.endAfterCount);
+    if (endCount !== undefined && endCount >= 0) rule.endAfterCount = Math.min(10_000, Math.floor(endCount));
+    else if (raw.endAfterCount === null) rule.endAfterCount = null;
+  }
   return rule;
 }
 
@@ -193,6 +215,12 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (subtasks && subtasks.length > 0) task.subtasks = subtasks;
   const recurrence = asRecurrence(record.recurrence);
   if (recurrence !== undefined) task.recurrence = recurrence;
+  if (task.recurrence?.type === 'after_completion') {
+    task.dueAt = null;
+    task.startDate = null;
+  }
+  const removedCompletions = asHistory(record.removedCompletions);
+  if (removedCompletions.length > 0) task.removedCompletions = removedCompletions;
   const completedAt = asOptionalStamp(record.completedAt, now);
   if (completedAt !== undefined) task.completedAt = completedAt;
   const deletedAt = asOptionalStamp(record.deletedAt, now);

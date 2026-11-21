@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ACTIVE_VIEW_STORAGE_KEY,
   CALENDAR_EXPANDED_STORAGE_KEY,
   PICKER_FUTURE_YEARS,
   PICKER_PAST_YEARS,
@@ -19,7 +20,9 @@ import {
   monthContains,
   monthName,
   pickerDefaultScrollYear,
+  readStoredActiveView,
   readStoredCalendarExpanded,
+  saveStoredActiveView,
   saveStoredCalendarExpanded,
   shiftMonthView,
   shiftWeek,
@@ -185,15 +188,16 @@ describe('calendar swiping (week and month shifting)', () => {
     });
   });
 
+  function createMockStorage() {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      map,
+    };
+  }
+
   describe('calendar view persistence (week vs month)', () => {
-    function createMockStorage() {
-      const map = new Map<string, string>();
-      return {
-        getItem: (k: string) => map.get(k) ?? null,
-        setItem: (k: string, v: string) => void map.set(k, v),
-        map,
-      };
-    }
 
     it('defaults to false (week view) when storage is empty', () => {
       const storage = createMockStorage();
@@ -246,6 +250,40 @@ describe('calendar swiping (week and month shifting)', () => {
       };
       expect(readStoredCalendarExpanded(faultyStorage)).toBe(false);
       expect(() => saveStoredCalendarExpanded(true, faultyStorage)).not.toThrow();
+    });
+  });
+
+  describe('active main view storage', () => {
+    it('defaults to calendar when unset or invalid', () => {
+      const storage = createMockStorage();
+      expect(readStoredActiveView(storage)).toBe('calendar');
+
+      storage.setItem(ACTIVE_VIEW_STORAGE_KEY, 'invalid-view');
+      expect(readStoredActiveView(storage)).toBe('calendar');
+    });
+
+    it('persists and restores tasks and calendar views', () => {
+      const storage = createMockStorage();
+      saveStoredActiveView('tasks', storage);
+      expect(storage.getItem(ACTIVE_VIEW_STORAGE_KEY)).toBe('tasks');
+      expect(readStoredActiveView(storage)).toBe('tasks');
+
+      saveStoredActiveView('calendar', storage);
+      expect(storage.getItem(ACTIVE_VIEW_STORAGE_KEY)).toBe('calendar');
+      expect(readStoredActiveView(storage)).toBe('calendar');
+    });
+
+    it('handles storage errors gracefully when reading/saving active view', () => {
+      const faultyStorage = {
+        getItem: () => {
+          throw new Error('Access denied');
+        },
+        setItem: () => {
+          throw new Error('Quota exceeded');
+        },
+      };
+      expect(readStoredActiveView(faultyStorage)).toBe('calendar');
+      expect(() => saveStoredActiveView('tasks', faultyStorage)).not.toThrow();
     });
   });
 });

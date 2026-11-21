@@ -9,14 +9,19 @@ import type {
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import {
+  addDays,
   completionTimestampForDate,
   formatDate,
   getDueDatePart,
+  getLatestCompletionMs,
   getRecurrenceAnchor,
   getSkipOccurrenceDate,
+  getWindowBounds,
   isCompleted,
   isCompletedOnDate,
-  isRecurring,
+  isFixedRecurring,
+  isWindowPeriodic,
+  parseDate,
 } from '../domain/recurrence';
 import { newId } from '../domain/id';
 import { recordDiagEvent } from '../domain/diagnostics';
@@ -65,6 +70,26 @@ export class TempoDatabase extends Dexie {
     this.version(5).stores({
       savedFilters: null,
     });
+
+    // v6: One-time soft-delete cleanup of legacy undated non-recurring tasks
+    this.version(6)
+      .stores({
+        tasks: 'id, listId, dueAt, updatedAt, deletedAt, completedAt',
+        lists: 'id, folderId, sortOrder, updatedAt, deletedAt',
+        folders: 'id, sortOrder, updatedAt, deletedAt',
+      })
+      .upgrade(async (tx) => {
+        const now = Date.now();
+        await tx
+          .table('tasks')
+          .toCollection()
+          .modify((t: Task) => {
+            if (!t.dueAt && !t.recurrence && !t.deletedAt) {
+              t.deletedAt = now;
+              t.updatedAt = now;
+            }
+          });
+      });
   }
 }
 
@@ -153,6 +178,25 @@ export async function clearAllData(): Promise<number> {
   return removedTasks;
 }
 
+function normalizeRecurrenceForSave(
+  rule: Task['recurrence'] | undefined
+): Task['recurrence'] {
+  if (!rule) return null;
+  if (isWindowPeriodic({ recurrence: rule })) {
+    const { min, max, unit } = getWindowBounds(rule);
+    return {
+      type: 'after_completion',
+      intervalValue: min,
+      maxIntervalValue: max,
+      intervalUnit: unit,
+      ...(rule.endOnDate !== undefined ? { endOnDate: rule.endOnDate } : {}),
+    };
+  }
+  const fixed = { ...rule, type: 'fixed_interval' as const };
+  delete fixed.maxIntervalValue;
+  return fixed;
+}
+
 export async function saveTask(task: TaskInput): Promise<Task> {
   const now = Date.now();
   let fullTask: Task;
@@ -160,13 +204,25 @@ export async function saveTask(task: TaskInput): Promise<Task> {
   if (task.id) {
     const existing = await db.tasks.get(task.id);
     const prevDate = existing?.dueAt ? getDueDatePart(existing.dueAt) : null;
-    const nextDue = task.dueAt !== undefined ? task.dueAt : existing?.dueAt ?? null;
+    const rawRecurrence =
+      task.recurrence === undefined ? existing?.recurrence ?? null : task.recurrence;
+    const recurrenceRule = normalizeRecurrenceForSave(rawRecurrence);
+    const isWindow = isWindowPeriodic({ recurrence: recurrenceRule });
+
+    const nextDue = isWindow
+      ? null
+      : task.dueAt !== undefined
+        ? task.dueAt
+        : existing?.dueAt ?? null;
     const nextDate = nextDue ? getDueDatePart(nextDue) : null;
     const dateChanged = task.dueAt !== undefined && prevDate !== nextDate;
     const existingStartDate = existing?.startDate ?? null;
-    let nextStartDate = task.startDate !== undefined ? task.startDate : existingStartDate;
-    const recurrenceRule = task.recurrence === undefined ? existing?.recurrence ?? null : task.recurrence;
-    if (recurrenceRule && !nextStartDate) {
+    let nextStartDate = isWindow
+      ? null
+      : task.startDate !== undefined
+        ? task.startDate
+        : existingStartDate;
+    if (!isWindow && recurrenceRule && !nextStartDate) {
       nextStartDate = getRecurrenceAnchor({
         startDate: undefined,
         dueAt: nextDue,
@@ -190,23 +246,28 @@ export async function saveTask(task: TaskInput): Promise<Task> {
             : existing?.sortOrder,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
-      completionHistory: existing?.completionHistory || [],
+      completionHistory:
+        task.completionHistory !== undefined
+          ? [...task.completionHistory].sort((a, b) => a - b)
+          : existing?.completionHistory || [],
+      ...(existing?.removedCompletions ? { removedCompletions: existing.removedCompletions } : {}),
       skippedDates: task.skippedDates !== undefined ? task.skippedDates : existing?.skippedDates || [],
       completedAt: task.completedAt !== undefined ? task.completedAt : existing?.completedAt ?? null,
       recurrence: recurrenceRule,
       subtasks: task.subtasks !== undefined ? task.subtasks : existing?.subtasks,
     };
   } else {
-    const recurrenceRule = task.recurrence ?? null;
-    let initialStartDate = task.startDate ?? null;
-    if (recurrenceRule && !initialStartDate) {
+    const recurrenceRule = normalizeRecurrenceForSave(task.recurrence ?? null);
+    const isWindow = isWindowPeriodic({ recurrence: recurrenceRule });
+    let initialStartDate = isWindow ? null : task.startDate ?? null;
+    if (!isWindow && recurrenceRule && !initialStartDate) {
       initialStartDate = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now));
     }
     fullTask = {
       title: task.title,
       notes: task.notes,
       listId: task.listId || INBOX_LIST_ID,
-      dueAt: task.dueAt ?? null,
+      dueAt: isWindow ? null : task.dueAt ?? null,
       startDate: initialStartDate,
       priority: task.priority,
       pinned: task.pinned,
@@ -216,8 +277,10 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       id: newId(),
       createdAt: now,
       updatedAt: now,
-      completionHistory: [],
-      skippedDates: task.skippedDates || [],
+      completionHistory: task.completionHistory
+        ? [...task.completionHistory].sort((a, b) => a - b)
+        : [],
+      skippedDates: isWindow ? [] : task.skippedDates || [],
       completedAt: null,
       deletedAt: null,
     };
@@ -228,14 +291,103 @@ export async function saveTask(task: TaskInput): Promise<Task> {
 }
 
 /**
- * Persist a manual task ordering (e.g. after long-press drag-and-drop within a day).
- * Assigns spaced `sortOrder` values and updates `updatedAt` so Drive sync propagates the order.
+ * Find a single moved task in `orderedIds` when all other ordered tasks remain strictly increasing
+ * and no unordered (`null`) task precedes an ordered one. Returns `null` if a full rebalance is needed.
+ */
+export function findMidpointReorderUpdate(
+  existing: (Task | undefined)[],
+  orderedIds: string[],
+): { task: Task; nextOrder: number } | null {
+  if (orderedIds.length < 2 || existing.some((t) => !t)) return null;
+  const tasks = existing as Task[];
+
+  for (let candidateIdx = 0; candidateIdx < tasks.length; candidateIdx++) {
+    let prevOrder = -Infinity;
+    let seenNull = false;
+    let validRest = true;
+    for (let j = 0; j < tasks.length; j++) {
+      if (j === candidateIdx) continue;
+      const ord = tasks[j].sortOrder;
+      if (ord == null) {
+        seenNull = true;
+        continue;
+      }
+      if (seenNull || ord <= prevOrder) {
+        validRest = false;
+        break;
+      }
+      prevOrder = ord;
+    }
+    if (!validRest) continue;
+
+    // Candidate must be placed into an ordered position (not after an unordered tail)
+    let hasNullBefore = false;
+    for (let j = 0; j < candidateIdx; j++) {
+      if (tasks[j].sortOrder == null) {
+        hasNullBefore = true;
+        break;
+      }
+    }
+    if (hasNullBefore) continue;
+
+    const leftOrder = candidateIdx > 0 ? tasks[candidateIdx - 1].sortOrder ?? null : null;
+    let rightOrder: number | null = null;
+    for (let j = candidateIdx + 1; j < tasks.length; j++) {
+      if (tasks[j].sortOrder != null) {
+        rightOrder = tasks[j].sortOrder!;
+        break;
+      }
+    }
+
+    let nextOrder: number | null = null;
+    if (leftOrder != null && rightOrder != null) {
+      if (rightOrder - leftOrder >= 2) {
+        nextOrder = Math.floor((leftOrder + rightOrder) / 2);
+      }
+    } else if (leftOrder == null && rightOrder != null) {
+      nextOrder = rightOrder - 1000;
+    } else if (leftOrder != null && rightOrder == null) {
+      nextOrder = leftOrder + 1000;
+    }
+
+    if (nextOrder != null) {
+      const moved = tasks[candidateIdx];
+      if (moved.sortOrder === nextOrder) return null;
+      return { task: moved, nextOrder };
+    }
+  }
+  return null;
+}
+
+/**
+ * Persist a manual task ordering (e.g. after long-press drag-and-drop).
+ * Uses midpoint single-task updates when possible and falls back to spaced rebalancing when gaps narrow.
  */
 export async function reorderTasks(orderedIds: string[]): Promise<void> {
   if (orderedIds.length === 0) return;
   const now = Date.now();
   const updatedCount = await db.transaction('rw', db.tasks, async () => {
     const existing = await db.tasks.bulkGet(orderedIds);
+    const alreadyStrictlyIncreasing =
+      existing.length > 0 &&
+      existing.every((t, idx) => {
+        if (!t || t.sortOrder == null) return false;
+        return idx === 0 || t.sortOrder > existing[idx - 1]!.sortOrder!;
+      });
+    if (alreadyStrictlyIncreasing) {
+      return 0;
+    }
+
+    const single = findMidpointReorderUpdate(existing, orderedIds);
+    if (single) {
+      await db.tasks.put({
+        ...single.task,
+        sortOrder: single.nextOrder,
+        updatedAt: now,
+      });
+      return 1;
+    }
+
     const updates: Task[] = [];
     for (let i = 0; i < orderedIds.length; i++) {
       const task = existing[i];
@@ -259,8 +411,9 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
 
 /**
  * Complete a task.
- * - Recurring: marks the given occurrence date (or dueAt date / today) completed in completionHistory without advancing dueAt away from other days; resets subtasks.
- * - One-off: sets completedAt.
+ * - Window periodic: logs completion in completionHistory while keeping dueAt and completedAt null.
+ * - Fixed recurring: marks occurrence date completed in completionHistory; resets subtasks.
+ * - One-off: sets completedAt; if undated, sets dueAt to the completion date so it converts into a completed calendar task.
  */
 export async function completeTask(id: string, dateStr?: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
@@ -272,7 +425,29 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
   const now = Date.now();
   let updated: Task;
 
-  if (isRecurring(task) && task.recurrence) {
+  if (isWindowPeriodic(task) && task.recurrence) {
+    const targetDateStr = dateStr || formatDate(new Date(now));
+    const ts = completionTimestampForDate(targetDateStr, now);
+    const alreadyDone = isCompletedOnDate(task, targetDateStr);
+    const history = alreadyDone
+      ? [...(task.completionHistory || [])]
+      : [...(task.completionHistory || []), ts].sort((a, b) => a - b);
+    const removed = (task.removedCompletions || []).filter((r) => r !== ts);
+
+    updated = {
+      ...task,
+      startDate: null,
+      dueAt: null,
+      completedAt: null,
+      completionHistory: history,
+      ...(removed.length > 0 ? { removedCompletions: removed } : { removedCompletions: undefined }),
+      updatedAt: now,
+    };
+    recordDiagEvent(
+      'complete_window',
+      `id=${id} title=${task.title.slice(0, 30)} target=${targetDateStr} already=${alreadyDone} hist=${history.length}`
+    );
+  } else if (isFixedRecurring(task) && task.recurrence) {
     const targetDateStr =
       dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
     const ts = completionTimestampForDate(targetDateStr, now);
@@ -301,6 +476,8 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       `id=${id} title=${task.title.slice(0, 30)} target=${targetDateStr} already=${alreadyDone} hist=${history.length}`
     );
   } else {
+    const targetDateStr =
+      dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
     const compTs = dateStr ? completionTimestampForDate(dateStr, now) : now;
     const prevHistory = task.completionHistory || [];
     const history = prevHistory.includes(now)
@@ -310,13 +487,14 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
         : [...prevHistory, now];
     updated = {
       ...task,
+      dueAt: task.dueAt ?? targetDateStr,
       completedAt: now,
       completionHistory: history,
       updatedAt: now,
     };
     recordDiagEvent(
       'complete_oneoff',
-      `id=${id} title=${task.title.slice(0, 30)} due=${task.dueAt ?? ''}`
+      `id=${id} title=${task.title.slice(0, 30)} due=${updated.dueAt ?? ''}`
     );
   }
 
@@ -335,6 +513,9 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
     recordDiagEvent('skip_missing', `id=${id} date=${dateStr}`);
     return null;
   }
+  if (!isFixedRecurring(task)) {
+    return null;
+  }
 
   const now = Date.now();
   const existingSkipped = task.skippedDates || [];
@@ -345,16 +526,14 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
   let updatedDueAt = task.dueAt;
   const masterDueDate = task.dueAt ? getDueDatePart(task.dueAt) : null;
 
-  if (isRecurring(task)) {
-    // Only advance task.dueAt if the date being skipped was the master task's current dueAt (or earlier)
-    if (masterDueDate && dateStr <= masterDueDate) {
-      const nextOccurrence = getSkipOccurrenceDate(
-        { ...task, skippedDates: updatedSkipped },
-        dateStr
-      );
-      if (nextOccurrence) {
-        updatedDueAt = nextOccurrence;
-      }
+  // Only advance task.dueAt if the date being skipped was the master task's current dueAt (or earlier)
+  if (masterDueDate && dateStr <= masterDueDate) {
+    const nextOccurrence = getSkipOccurrenceDate(
+      { ...task, skippedDates: updatedSkipped },
+      dateStr
+    );
+    if (nextOccurrence) {
+      updatedDueAt = nextOccurrence;
     }
   }
 
@@ -402,31 +581,195 @@ export async function unskipTaskOccurrence(id: string, dateStr: string): Promise
   return updated;
 }
 
+function mergeRemovedTimestamps(existing: number[] | undefined, removed: number[]): number[] | undefined {
+  if (removed.length === 0) return existing;
+  const merged = Array.from(new Set([...(existing || []), ...removed])).sort((a, b) => a - b);
+  return merged.length > 0 ? merged : undefined;
+}
+
+export async function undoCompleteUndatedTask(id: string): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) return null;
+
+  const now = Date.now();
+  const compDate = task.completedAt ? formatDate(new Date(task.completedAt)) : null;
+  const prevHistory = task.completionHistory || [];
+  const removed: number[] = [];
+  const history = prevHistory.filter((ts) => {
+    const match =
+      ts === task.completedAt || (compDate != null && formatDate(new Date(ts)) === compDate);
+    if (match) removed.push(ts);
+    return !match;
+  });
+  const removedCompletions = mergeRemovedTimestamps(task.removedCompletions, removed);
+
+  const updated: Task = {
+    ...task,
+    dueAt: null,
+    completedAt: null,
+    completionHistory: history,
+    ...(removedCompletions ? { removedCompletions } : { removedCompletions: undefined }),
+    updatedAt: now,
+  };
+  await db.tasks.put(updated);
+  return updated;
+}
+
 export async function uncompleteTask(id: string, dateStr?: string): Promise<Task | null> {
   const task = await db.tasks.get(id);
   if (!task) return null;
 
   const now = Date.now();
   let history = task.completionHistory || [];
+  const removed: number[] = [];
+  let targetDateStr: string | undefined = dateStr;
 
-  if (isRecurring(task) && task.recurrence) {
-    const targetDateStr =
+  if (isWindowPeriodic(task)) {
+    targetDateStr = dateStr || formatDate(new Date(now));
+    history = history.filter((ts) => {
+      if (formatDate(new Date(ts)) === targetDateStr) {
+        removed.push(ts);
+        return false;
+      }
+      return true;
+    });
+  } else if (isFixedRecurring(task) && task.recurrence) {
+    targetDateStr =
       dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
-    history = history.filter((ts) => formatDate(new Date(ts)) !== targetDateStr);
+    history = history.filter((ts) => {
+      if (formatDate(new Date(ts)) === targetDateStr) {
+        removed.push(ts);
+        return false;
+      }
+      return true;
+    });
   } else if (dateStr) {
-    history = history.filter((ts) => formatDate(new Date(ts)) !== dateStr);
+    history = history.filter((ts) => {
+      if (formatDate(new Date(ts)) === dateStr) {
+        removed.push(ts);
+        return false;
+      }
+      return true;
+    });
   }
+
+  const todayStr = formatDate(new Date(now));
+  let nextRecurrence = task.recurrence;
+  if (
+    isFixedRecurring(task) &&
+    task.recurrence?.endOnDate &&
+    targetDateStr &&
+    targetDateStr < todayStr &&
+    task.recurrence.endOnDate === targetDateStr
+  ) {
+    const latestMs = getLatestCompletionMs({ completionHistory: history });
+    const fallbackBeforeStart = formatDate(addDays(parseDate(getRecurrenceAnchor(task)), -1));
+    nextRecurrence = {
+      ...task.recurrence,
+      endOnDate: latestMs != null ? formatDate(new Date(latestMs)) : fallbackBeforeStart,
+    };
+  }
+
+  const removedCompletions = mergeRemovedTimestamps(task.removedCompletions, removed);
 
   const updated: Task = {
     ...task,
+    ...(nextRecurrence !== undefined ? { recurrence: nextRecurrence } : {}),
     completedAt: null,
     completionHistory: history,
+    ...(removedCompletions ? { removedCompletions } : { removedCompletions: undefined }),
     updatedAt: now,
   };
   recordDiagEvent(
     'uncomplete',
     `id=${id} title=${task.title.slice(0, 30)} date=${dateStr ?? ''}`
   );
+  await db.tasks.put(updated);
+  return updated;
+}
+
+export async function logTaskCompletion(id: string, dateStr: string): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) return null;
+
+  const now = Date.now();
+  const ts = completionTimestampForDate(dateStr, now);
+  const alreadyDone = isCompletedOnDate(task, dateStr);
+  const history = alreadyDone
+    ? [...(task.completionHistory || [])]
+    : [...(task.completionHistory || []), ts].sort((a, b) => a - b);
+  const removed = (task.removedCompletions || []).filter((r) => r !== ts);
+
+  const updated: Task = {
+    ...task,
+    ...(isWindowPeriodic(task) ? { dueAt: null, startDate: null } : {}),
+    completionHistory: history,
+    ...(removed.length > 0 ? { removedCompletions: removed } : { removedCompletions: undefined }),
+    updatedAt: now,
+  };
+  await db.tasks.put(updated);
+  return updated;
+}
+
+export async function removeTaskCompletion(id: string, timestamp: number): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task) return null;
+
+  const now = Date.now();
+  const history = (task.completionHistory || []).filter((ts) => ts !== timestamp);
+  const removedCompletions = mergeRemovedTimestamps(task.removedCompletions, [timestamp]);
+
+  const updated: Task = {
+    ...task,
+    completionHistory: history,
+    ...(removedCompletions ? { removedCompletions } : {}),
+    updatedAt: now,
+  };
+  await db.tasks.put(updated);
+  return updated;
+}
+
+export async function stopRecurringTask(
+  id: string
+): Promise<{ task: Task; previousEndOnDate: string | null } | null> {
+  const task = await db.tasks.get(id);
+  if (!task || !task.recurrence) return null;
+
+  const now = Date.now();
+  const previousEndOnDate = task.recurrence.endOnDate ?? null;
+  const latestMs = getLatestCompletionMs(task);
+  const stopDate =
+    latestMs != null ? formatDate(new Date(latestMs)) : formatDate(addDays(new Date(now), -1));
+
+  const updated: Task = {
+    ...task,
+    recurrence: {
+      ...task.recurrence,
+      endOnDate: stopDate,
+    },
+    updatedAt: now,
+  };
+  await db.tasks.put(updated);
+  recordDiagEvent('stop_recurring', `id=${id} endOnDate=${stopDate}`);
+  return { task: updated, previousEndOnDate };
+}
+
+export async function setTaskEndOnDate(
+  id: string,
+  endOnDate: string | null
+): Promise<Task | null> {
+  const task = await db.tasks.get(id);
+  if (!task || !task.recurrence) return null;
+
+  const now = Date.now();
+  const updated: Task = {
+    ...task,
+    recurrence: {
+      ...task.recurrence,
+      endOnDate,
+    },
+    updatedAt: now,
+  };
   await db.tasks.put(updated);
   return updated;
 }

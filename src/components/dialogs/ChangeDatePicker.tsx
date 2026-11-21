@@ -12,6 +12,8 @@ export interface ChangeDatePickerHandle {
 export interface ChangeDatePickerProps {
   ref?: Ref<ChangeDatePickerHandle>;
   onSave: (taskId: string, newDueAt: string | null) => Promise<void> | void;
+  maxDate?: string;
+  ariaLabel?: string;
 }
 
 const VIEWPORT_MARGIN = 8;
@@ -20,7 +22,12 @@ const VIEWPORT_MARGIN = 8;
  * Imperative native `<input type="date">` trigger used by task swipe Change Date.
  * Opens the browser's native date picker synchronously on user activation and saves immediately on change.
  */
-export function ChangeDatePicker({ ref, onSave }: ChangeDatePickerProps) {
+export function ChangeDatePicker({
+  ref,
+  onSave,
+  maxDate,
+  ariaLabel = 'Change date',
+}: ChangeDatePickerProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef<{ id: string; existingTime: string | null } | null>(null);
   const onSaveRef = useRef(onSave);
@@ -102,8 +109,9 @@ export function ChangeDatePicker({ ref, onSave }: ChangeDatePickerProps) {
     <input
       ref={inputRef}
       type="date"
+      max={maxDate}
       tabIndex={-1}
-      aria-label="Change date"
+      aria-label={ariaLabel}
       data-testid="change-date-native-input"
       style={{
         position: 'fixed',

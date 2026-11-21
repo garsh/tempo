@@ -36,14 +36,14 @@ function task(partial: Partial<Task> & Pick<Task, 'id' | 'title' | 'dueAt'>): Ta
 }
 
 describe('long completion histories', () => {
-  it('keeps after-completion dates correct across a long history and a second pass', () => {
+  it('keeps fixed-interval dates correct across a long history and excludes window tasks from due dates', () => {
     const dates = everyNDays('2026-03-01', 3, 40);
     const completed = dates.slice(0, 39);
     const routine = task({
       id: 'every-3',
       title: 'Water plants',
       dueAt: dates[0],
-      recurrence: { type: 'after_completion', intervalValue: 3, intervalUnit: 'days' },
+      recurrence: { type: 'fixed_interval', intervalValue: 3, intervalUnit: 'days' },
       completionHistory: completed.map((d) => completionTimestampForDate(d)),
     });
 
@@ -66,6 +66,23 @@ describe('long completion histories', () => {
     expect(tasksDueOnDate([routine], dates[39]).map((t) => t.id)).toEqual(['every-3']);
     expect(tasksDueOnDate([routine], dates[10])).toEqual([]);
     expect(completedTasksOnDate([routine], dates[10]).map((t) => t.id)).toEqual(['every-3']);
+
+    const approx = task({
+      id: 'approx-3',
+      title: 'Water ferns',
+      dueAt: null,
+      recurrence: {
+        type: 'after_completion',
+        intervalValue: 3,
+        maxIntervalValue: 5,
+        intervalUnit: 'days',
+      },
+      completionHistory: completed.map((d) => completionTimestampForDate(d)),
+    });
+    expect(taskOccursOnDate(approx, dates[39])).toBe(false);
+    expect(getNextUncompletedOccurrenceDate(approx, new Date(y, m - 1, d, 15, 0))).toBeNull();
+    expect(tasksDueOnDate([approx], dates[39])).toEqual([]);
+    expect(completedTasksOnDate([approx], dates[10]).map((t) => t.id)).toEqual(['approx-3']);
 
     const sameIdWithoutHistory = { ...routine, completionHistory: [] as number[] };
     expect(getCompletedDateSet(sameIdWithoutHistory).size).toBe(0);

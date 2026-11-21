@@ -3,7 +3,7 @@ import type { Task } from '../types/task';
 import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from '../domain/calendar';
 import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek, type CalendarSwipeEvent } from '../domain/calendarUi';
 import { usePrefs } from '../prefs/prefs';
-import { formatDate, getDueDatePart, getRecurrenceAnchor, isCompleted, isCompletedOnDate, isRecurring, isSkippedOnDate, taskOccursOnDate } from '../domain/recurrence';
+import { formatDate, getDueDatePart, getRecurrenceAnchor, isCompleted, isCompletedOnDate, isFixedRecurring, isSkippedOnDate, taskOccursOnDate } from '../domain/recurrence';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -129,7 +129,7 @@ export function CalendarMonthView({
     const recurringTasks: Task[] = [];
     for (const t of tasks) {
       if (t.deletedAt) continue;
-      if (isRecurring(t)) {
+      if (isFixedRecurring(t)) {
         recurringTasks.push(t);
       } else if (!isCompleted(t) && t.dueAt) {
         set.add(getDueDatePart(t.dueAt));
@@ -524,6 +524,7 @@ export function CalendarMonthView({
             <button
               key={`${gridKey}-${cell.dateStr}`}
               data-date={cell.dateStr}
+              aria-current={isToday ? 'date' : undefined}
               type="button"
               style={{ height: `${CALENDAR_ROW_HEIGHT}px` }}
               onClick={() => {
@@ -543,7 +544,7 @@ export function CalendarMonthView({
                   selected
                     ? 'bg-tt-blue text-white'
                     : isToday
-                      ? 'text-tt-blue font-bold'
+                      ? 'bg-tt-blue-soft text-tt-blue dark:text-blue-300 ring-1 ring-inset ring-tt-blue/80 font-bold'
                       : muted
                         ? 'text-tt-muted'
                         : 'text-tt-text'

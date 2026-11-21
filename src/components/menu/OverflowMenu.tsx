@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Search, Settings } from 'lucide-react';
+import { RefreshCw, Search, Settings } from 'lucide-react';
 
 const ICON = {
   width: 20,
@@ -59,11 +59,13 @@ interface OverflowMenuProps {
   showDetails: boolean;
   hideCompleted: boolean;
   showOverdue: boolean;
+  showCalendarToggles?: boolean;
   onClose: () => void;
   onToggleDetails: () => void;
   onToggleHideCompleted: () => void;
   onToggleShowOverdue: () => void;
   onSearch?: () => void;
+  onRecurring?: () => void;
   onSettings: () => void;
   onUpdateApp?: () => void;
 }
@@ -121,18 +123,28 @@ export function OverflowMenu(props: OverflowMenuProps) {
             Search
           </button>
         )}
+        {props.onRecurring && (
+          <button type="button" role="menuitem" className={row} onClick={act(props.onRecurring)}>
+            <RefreshCw className="w-5 h-5 shrink-0" strokeWidth={1.8} />
+            Recurring
+          </button>
+        )}
         <button type="button" role="menuitem" className={row} onClick={act(props.onToggleDetails)}>
           <DetailsIcon />
           {props.showDetails ? 'Hide Details' : 'Show Details'}
         </button>
-        <button type="button" role="menuitem" className={row} onClick={act(props.onToggleHideCompleted)}>
-          <HideCompletedIcon />
-          {props.hideCompleted ? 'Show Completed' : 'Hide Completed'}
-        </button>
-        <button type="button" role="menuitem" className={row} onClick={act(props.onToggleShowOverdue)}>
-          <OverdueIcon />
-          {props.showOverdue ? 'Hide Overdue' : 'Show Overdue'}
-        </button>
+        {props.showCalendarToggles !== false && (
+          <>
+            <button type="button" role="menuitem" className={row} onClick={act(props.onToggleHideCompleted)}>
+              <HideCompletedIcon />
+              {props.hideCompleted ? 'Show Completed' : 'Hide Completed'}
+            </button>
+            <button type="button" role="menuitem" className={row} onClick={act(props.onToggleShowOverdue)}>
+              <OverdueIcon />
+              {props.showOverdue ? 'Hide Overdue' : 'Show Overdue'}
+            </button>
+          </>
+        )}
         <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
         <button type="button" role="menuitem" className={row} onClick={act(props.onUpdateApp)}>
           <UpdateAppIcon />

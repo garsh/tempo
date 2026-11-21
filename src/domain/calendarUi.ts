@@ -232,6 +232,40 @@ export function saveStoredCalendarExpanded(
   }
 }
 
+export type ActiveMainView = 'calendar' | 'tasks';
+
+export const ACTIVE_VIEW_STORAGE_KEY = 'tempo_active_view';
+
+/**
+ * Reads which primary view ('calendar' | 'tasks') was last active.
+ * Defaults to 'calendar' if unset or invalid.
+ */
+export function readStoredActiveView(storage?: Pick<Storage, 'getItem'>): ActiveMainView {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    const raw = s?.getItem(ACTIVE_VIEW_STORAGE_KEY);
+    if (raw === 'tasks' || raw === 'calendar') return raw;
+  } catch {
+    /* ignore storage access errors */
+  }
+  return 'calendar';
+}
+
+/**
+ * Persists which primary view ('calendar' | 'tasks') is currently active.
+ */
+export function saveStoredActiveView(
+  view: ActiveMainView,
+  storage?: Pick<Storage, 'setItem'>
+): void {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    s?.setItem(ACTIVE_VIEW_STORAGE_KEY, view);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 export type CalendarSwipeEvent =
   | { phase: 'drag'; progress: number }
   | { phase: 'snap'; target: -1 | 0 | 1; durationMs: number }

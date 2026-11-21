@@ -82,10 +82,31 @@ export function addInterval(baseDate: Date, value: number, unit: IntervalUnit): 
   const result = new Date(baseDate);
   if (unit === 'days') {
     result.setDate(result.getDate() + value);
-  } else if (unit === 'weeks') {
+    return result;
+  }
+  if (unit === 'weeks') {
     result.setDate(result.getDate() + value * 7);
-  } else if (unit === 'months') {
-    result.setMonth(result.getMonth() + value);
+    return result;
+  }
+  if (unit === 'months') {
+    const clamped = clampMonthDay(baseDate.getFullYear(), baseDate.getMonth() + value, baseDate.getDate());
+    clamped.setHours(
+      baseDate.getHours(),
+      baseDate.getMinutes(),
+      baseDate.getSeconds(),
+      baseDate.getMilliseconds()
+    );
+    return clamped;
+  }
+  if (unit === 'years') {
+    const clamped = clampMonthDay(baseDate.getFullYear() + value, baseDate.getMonth(), baseDate.getDate());
+    clamped.setHours(
+      baseDate.getHours(),
+      baseDate.getMinutes(),
+      baseDate.getSeconds(),
+      baseDate.getMilliseconds()
+    );
+    return clamped;
   }
   return result;
 }
@@ -266,17 +287,41 @@ export function willEndRecurrence(
  * Whether the recurrence has already ended (no more occurrences should be scheduled).
  */
 export function isRecurrenceFinished(
-  task: Pick<Task, 'recurrence' | 'completionHistory' | 'dueAt'>
+  task: Pick<Task, 'recurrence' | 'completionHistory' | 'dueAt'> &
+    Partial<Pick<Task, 'completedAt' | 'startDate' | 'createdAt' | 'deletedAt' | 'skippedDates'>>,
+  referenceDate: Date = new Date()
 ): boolean {
   if (!task.recurrence) return true;
+  if (isWindowPeriodic(task)) {
+    return isWindowStopped(task, referenceDate);
+  }
   const rule = task.recurrence;
   if (rule.endAfterCount != null && rule.endAfterCount > 0) {
     if ((task.completionHistory?.length ?? 0) >= rule.endAfterCount) return true;
   }
-  if (rule.endOnDate && task.dueAt) {
-    const end = parseDate(rule.endOnDate);
-    const due = parseDate(getDueDatePart(task.dueAt));
-    if (due > end) return true;
+  if (rule.endOnDate) {
+    if (task.dueAt) {
+      const end = parseDate(rule.endOnDate);
+      const due = parseDate(getDueDatePart(task.dueAt));
+      if (due > end) return true;
+    }
+    const synthetic: Task = {
+      id: '',
+      title: '',
+      listId: 'inbox',
+      createdAt: task.createdAt ?? 0,
+      updatedAt: 0,
+      completionHistory: task.completionHistory ?? [],
+      recurrence: task.recurrence,
+      dueAt: task.dueAt ?? null,
+      startDate: task.startDate ?? null,
+      completedAt: task.completedAt ?? null,
+      deletedAt: task.deletedAt ?? null,
+      skippedDates: task.skippedDates,
+    };
+    if (getNextUncompletedOccurrenceDate(synthetic, referenceDate) === null) {
+      return true;
+    }
   }
   return false;
 }
@@ -380,35 +425,27 @@ export function formatRecurrenceLabel(
   const unitSingular = unit.replace(/s$/, '');
   const unitText = value === 1 ? unitSingular : unit;
 
+  if (isWindowPeriodic({ recurrence: rule })) {
+    const { min, max } = getWindowBounds(rule);
+    const base =
+      min === max
+        ? min === 1
+          ? `Every ${unitSingular} (approx)`
+          : `Every ${min} ${unit} (approx)`
+        : `Every ${min}–${max} ${unit}`;
+    return rule.endOnDate ? `${base} (until ${rule.endOnDate})` : base;
+  }
+
   let base: string;
   if (rule.weekdays && rule.weekdays.length > 0) {
     const days = [...rule.weekdays]
       .sort((a, b) => a - b)
       .map((d) => WEEKDAY_LABELS[d])
       .join(', ');
-    if (rule.type === 'after_completion') {
-      base =
-        value === 1
-          ? `Weekdays ${days} after completion`
-          : `Every ${value} weeks on ${days} after completion`;
-    } else {
-      base = value === 1 ? `Every ${days}` : `Every ${value} weeks on ${days}`;
-    }
+    base = value === 1 ? `Every ${days}` : `Every ${value} weeks on ${days}`;
   } else if (rule.monthDay != null && unit === 'months') {
     const dom = rule.monthDay;
-    if (rule.type === 'after_completion') {
-      base =
-        value === 1
-          ? `Monthly on day ${dom} after completion`
-          : `Every ${value} months on day ${dom} after completion`;
-    } else {
-      base = value === 1 ? `Monthly on day ${dom}` : `Every ${value} months on day ${dom}`;
-    }
-  } else if (rule.type === 'after_completion') {
-    base =
-      value === 1
-        ? `1 ${unitSingular} after completion`
-        : `${value} ${unitText} after completion`;
+    base = value === 1 ? `Monthly on day ${dom}` : `Every ${value} months on day ${dom}`;
   } else {
     base = value === 1 ? `Every ${unitSingular}` : `Every ${value} ${unitText}`;
   }
@@ -422,6 +459,231 @@ export function formatRecurrenceLabel(
 
 export function isRecurring(task: Pick<Task, 'recurrence'>): boolean {
   return !!task.recurrence;
+}
+
+/**
+ * Window-based approximate periodic routine (shown in Tasks, off-calendar).
+ * Matches `type === 'after_completion'` (legacy normalized to [N, N]) or any rule with `maxIntervalValue >= intervalValue`.
+ */
+export function isWindowPeriodic(task: Pick<Task, 'recurrence'>): boolean {
+  const rule = task.recurrence;
+  if (!rule) return false;
+  if (rule.type === 'after_completion') return true;
+  return rule.maxIntervalValue != null && rule.maxIntervalValue >= rule.intervalValue;
+}
+
+/** Calendar-bound fixed-interval recurring task. */
+export function isFixedRecurring(task: Pick<Task, 'recurrence'>): boolean {
+  return !!task.recurrence && !isWindowPeriodic(task);
+}
+
+/** Undated one-time task belonging in Tasks > One-Time. */
+export function isUndatedOneTime(task: Pick<Task, 'dueAt' | 'recurrence'>): boolean {
+  return !task.dueAt && !task.recurrence;
+}
+
+export function getWindowBounds(rule: RecurrenceRule): {
+  min: number;
+  max: number;
+  unit: IntervalUnit;
+} {
+  const min = Math.max(1, Math.floor(rule.intervalValue || 1));
+  const rawMax = rule.maxIntervalValue;
+  const max =
+    rawMax != null && Number.isFinite(rawMax) && rawMax >= min ? Math.floor(rawMax) : min;
+  return { min, max, unit: rule.intervalUnit };
+}
+
+export function getLatestCompletionMs(task: Pick<Task, 'completionHistory'>): number | null {
+  const history = task.completionHistory;
+  if (!history || history.length === 0) return null;
+  let maxTs = history[0];
+  for (let i = 1; i < history.length; i++) {
+    if (history[i] > maxTs) maxTs = history[i];
+  }
+  return maxTs;
+}
+
+export function isWindowStopped(
+  task: Pick<Task, 'recurrence' | 'completionHistory'> &
+    Partial<Pick<Task, 'completedAt' | 'dueAt'>>,
+  now: Date = new Date()
+): boolean {
+  if (!isWindowPeriodic(task) || !task.recurrence?.endOnDate) return false;
+  const todayStr = formatDate(startOfDay(now));
+  const endOnDate = task.recurrence.endOnDate;
+  if (todayStr > endOnDate) return true;
+  if (todayStr === endOnDate && isCompletedOnDate(task, todayStr)) return true;
+  return false;
+}
+
+export type WindowStage =
+  | 'before_min'
+  | 'in_window'
+  | 'not_done_yet'
+  | 'at_or_past_max'
+  | 'stopped';
+
+export interface WindowProgress {
+  stage: WindowStage;
+  visibleInTasks: boolean;
+  sortScore: number;
+  /** 0..1 clockwise fill amount for the radial progress ring (steady, no pulsing). */
+  ringFill: number;
+  /** 0..1 escalation past max for smooth orange -> red color blending. */
+  overdueIntensity: number;
+  elapsedDays: number | null;
+  minDays: number;
+  maxDays: number;
+  lastDoneMs: number | null;
+  doneToday: boolean;
+  detailLabel: string;
+}
+
+const UNIT_SINGULAR: Record<IntervalUnit, string> = {
+  days: 'day',
+  weeks: 'week',
+  months: 'month',
+  years: 'year',
+};
+
+const UNIT_PLURAL: Record<IntervalUnit, string> = {
+  days: 'days',
+  weeks: 'weeks',
+  months: 'months',
+  years: 'years',
+};
+
+function formatExpandedPeriod(min: number, max: number, unit: IntervalUnit): string {
+  if (min === max) {
+    return min === 1 ? `every ${UNIT_SINGULAR[unit]}` : `every ${min} ${UNIT_PLURAL[unit]}`;
+  }
+  return `every ${min}–${max} ${UNIT_PLURAL[unit]}`;
+}
+
+function formatExpandedElapsed(days: number): string {
+  if (days <= 0) return 'Done today';
+  if (days === 1) return 'Last done yesterday';
+  if (days < 60) return `Last done ${days} days ago`;
+  if (days < 365) {
+    const months = Math.max(1, Math.round(days / 30.4375));
+    return `Last done ${months} ${months === 1 ? 'month' : 'months'} ago`;
+  }
+  const years = (days / 365).toFixed(1).replace(/\.0$/, '');
+  return `Last done ${years} ${years === '1' ? 'year' : 'years'} ago`;
+}
+
+function localDaysBetween(fromMidnight: Date, toMidnight: Date): number {
+  return Math.round((toMidnight.getTime() - fromMidnight.getTime()) / 86400000);
+}
+
+/**
+ * Compute continuous progress, visibility in Tasks, sort score, and radial ring fill
+ * for an approximate min–max periodic task. Returns null for non-window tasks.
+ */
+export function getWindowProgress(
+  task: Pick<Task, 'recurrence' | 'completionHistory'> &
+    Partial<Pick<Task, 'completedAt' | 'dueAt'>>,
+  now: Date = new Date()
+): WindowProgress | null {
+  if (!isWindowPeriodic(task) || !task.recurrence) return null;
+
+  const { min, max, unit } = getWindowBounds(task.recurrence);
+  const periodExpanded = formatExpandedPeriod(min, max, unit);
+  const today = startOfDay(now);
+  const todayStr = formatDate(today);
+  const lastDoneMs = getLatestCompletionMs(task);
+  const doneToday = isCompletedOnDate(task, todayStr);
+
+  if (isWindowStopped(task, now)) {
+    return {
+      stage: 'stopped',
+      visibleInTasks: false,
+      sortScore: -2,
+      ringFill: 0,
+      overdueIntensity: 0,
+      elapsedDays: lastDoneMs != null ? Math.max(0, localDaysBetween(startOfDay(new Date(lastDoneMs)), today)) : null,
+      minDays: 1,
+      maxDays: 1,
+      lastDoneMs,
+      doneToday,
+      detailLabel: `Stopped · ${periodExpanded}`,
+    };
+  }
+
+  if (lastDoneMs == null) {
+    const minDays = Math.max(1, localDaysBetween(today, addInterval(today, min, unit)));
+    const maxDays = Math.max(minDays, localDaysBetween(today, addInterval(today, max, unit)));
+    return {
+      stage: 'not_done_yet',
+      visibleInTasks: true,
+      sortScore: 1.0,
+      ringFill: 1.0,
+      overdueIntensity: 0,
+      elapsedDays: null,
+      minDays,
+      maxDays,
+      lastDoneMs: null,
+      doneToday: false,
+      detailLabel: `Not done yet · ${periodExpanded}`,
+    };
+  }
+
+  const anchor = startOfDay(new Date(lastDoneMs));
+  const minDate = addInterval(anchor, min, unit);
+  const maxDate = addInterval(anchor, max, unit);
+  const minDays = Math.max(1, localDaysBetween(anchor, minDate));
+  const maxDays = Math.max(minDays, localDaysBetween(anchor, maxDate));
+  const elapsedDays = Math.max(0, localDaysBetween(anchor, today));
+  const elapsedExpanded = formatExpandedElapsed(elapsedDays);
+
+  if (elapsedDays < minDays) {
+    return {
+      stage: 'before_min',
+      visibleInTasks: false,
+      sortScore: -1 + elapsedDays / minDays,
+      ringFill: elapsedDays / minDays,
+      overdueIntensity: 0,
+      elapsedDays,
+      minDays,
+      maxDays,
+      lastDoneMs,
+      doneToday,
+      detailLabel: `${elapsedExpanded} · ${periodExpanded}`,
+    };
+  }
+
+  if (elapsedDays < maxDays) {
+    const w = (elapsedDays - minDays) / Math.max(1, maxDays - minDays);
+    return {
+      stage: 'in_window',
+      visibleInTasks: true,
+      sortScore: w,
+      ringFill: Math.max(0.08, w),
+      overdueIntensity: 0,
+      elapsedDays,
+      minDays,
+      maxDays,
+      lastDoneMs,
+      doneToday,
+      detailLabel: `${elapsedExpanded} · ${periodExpanded}`,
+    };
+  }
+
+  const extra = (elapsedDays - maxDays) / Math.max(1, maxDays);
+  return {
+    stage: 'at_or_past_max',
+    visibleInTasks: true,
+    sortScore: 1.01 + extra,
+    ringFill: 1.0,
+    overdueIntensity: Math.min(1, extra),
+    elapsedDays,
+    minDays,
+    maxDays,
+    lastDoneMs,
+    doneToday,
+    detailLabel: `${elapsedExpanded} · ${periodExpanded}${extra > 0 ? ' (overdue)' : ''}`,
+  };
 }
 
 export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boolean {
@@ -618,6 +880,18 @@ function scheduleMatchesDate(
     return monthsDiff >= 0 && monthsDiff % interval === 0;
   }
 
+  if (rule.intervalUnit === 'years') {
+    const expected = clampMonthDay(targetDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    if (
+      targetDate.getMonth() !== expected.getMonth() ||
+      targetDate.getDate() !== expected.getDate()
+    ) {
+      return false;
+    }
+    const yearsDiff = targetDate.getFullYear() - baseDate.getFullYear();
+    return yearsDiff >= 0 && yearsDiff % interval === 0;
+  }
+
   return false;
 }
 
@@ -633,6 +907,9 @@ export function taskOccursOnDate(
   if (!task.recurrence) {
     return !!task.dueAt && getDueDatePart(task.dueAt) === dateStr;
   }
+  if (isWindowPeriodic(task)) {
+    return false;
+  }
 
   const rule = task.recurrence;
   const completedDates = getCompletedDateSet(task);
@@ -646,32 +923,15 @@ export function taskOccursOnDate(
   const anchorStr = getRecurrenceAnchor(task);
   if (dateStr < anchorStr) return false;
 
-  let baseStr = anchorStr;
-  if (rule.type === 'after_completion') {
-    let latestComp: string | null = null;
-    for (const c of completedDates) {
-      if (c >= anchorStr && c < dateStr && (!latestComp || c > latestComp)) {
-        latestComp = c;
-      }
-    }
-    if (latestComp) {
-      const nextAfterComp = formatDate(
-        computeRawNextDue({ recurrence: rule, dueAt: latestComp }, parseDate(latestComp))
-      );
-      if (dateStr < nextAfterComp) return false;
-      baseStr = nextAfterComp;
-    }
-  }
-
-  if (!scheduleMatchesDate(rule, baseStr, dateStr, anchorStr)) return false;
+  if (!scheduleMatchesDate(rule, anchorStr, dateStr, anchorStr)) return false;
 
   if (rule.endAfterCount != null && rule.endAfterCount > 0) {
     const targetDate = parseDate(dateStr);
     let uncompletedCount = 0;
-    let cursor = parseDate(baseStr);
+    let cursor = parseDate(anchorStr);
     while (cursor <= targetDate) {
       const dStr = formatDate(cursor);
-      if (!completedDates.has(dStr) && scheduleMatchesDate(rule, baseStr, dStr, anchorStr)) {
+      if (!completedDates.has(dStr) && scheduleMatchesDate(rule, anchorStr, dStr, anchorStr)) {
         uncompletedCount++;
         if (completedDates.size + uncompletedCount > rule.endAfterCount) {
           return false;
@@ -689,6 +949,14 @@ export function taskOccursOnDate(
  * and setting `completedAt` based on whether that particular day was completed.
  */
 export function projectTaskForDate(task: Task, dateStr: string): Task {
+  if (isWindowPeriodic(task)) {
+    const compTs = getCompletionTimestampOnDate(task, dateStr);
+    return {
+      ...task,
+      dueAt: null,
+      completedAt: compTs,
+    };
+  }
   const time = task.dueAt && hasDueTime(task.dueAt) ? splitDueAt(task.dueAt).time : null;
   const projectedDueAt = combineDueAt(dateStr, time);
   if (task.recurrence) {
@@ -698,6 +966,9 @@ export function projectTaskForDate(task: Task, dateStr: string): Task {
       dueAt: projectedDueAt,
       completedAt: compTs,
     };
+  }
+  if (!task.dueAt) {
+    return task;
   }
   return task.dueAt === projectedDueAt ? task : { ...task, dueAt: projectedDueAt };
 }
@@ -711,6 +982,7 @@ export function getNextUncompletedOccurrenceDate(
   fromDate: Date = new Date()
 ): string | null {
   if (task.deletedAt) return null;
+  if (isWindowPeriodic(task)) return null;
   if (!task.recurrence) {
     if (isCompleted(task) || !task.dueAt) return null;
     return getDueDatePart(task.dueAt);
@@ -798,7 +1070,7 @@ export function getSkipOccurrenceDate(
   task: Task,
   referenceDateStr?: string
 ): string | null {
-  if (!task.recurrence) return null;
+  if (!isFixedRecurring(task) || !task.recurrence) return null;
   const curDateStr =
     referenceDateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date()));
   const fromDate = parseDate(curDateStr);
@@ -819,7 +1091,7 @@ export function getSkipOccurrenceDate(
     }
   }
 
-  // Fallback for after_completion rules
+  // Fallback for long-interval schedules beyond the 1100-day forward scan
   try {
     const rawNext = computeRawNextDue({ ...task, recurrence: task.recurrence }, fromDate);
     const rawStr = formatDate(rawNext);

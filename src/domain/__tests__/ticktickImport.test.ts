@@ -131,12 +131,19 @@ describe('parseImportRepeat & recurring CSV import', () => {
     expect(parseImportRepeat('RRULE:FREQ=DAILY;INTERVAL=2;REPEATFROM=2')).toEqual({
       type: 'after_completion',
       intervalValue: 2,
+      maxIntervalValue: 2,
       intervalUnit: 'days',
     });
     expect(parseImportRepeat('ERULE:FREQ=WEEKLY;INTERVAL=1')).toEqual({
       type: 'after_completion',
       intervalValue: 1,
+      maxIntervalValue: 1,
       intervalUnit: 'weeks',
+    });
+    expect(parseImportRepeat('RRULE:FREQ=YEARLY;INTERVAL=1')).toEqual({
+      type: 'fixed_interval',
+      intervalValue: 1,
+      intervalUnit: 'years',
     });
     expect(parseImportRepeat('weekdays')).toEqual({
       type: 'fixed_interval',
@@ -211,5 +218,20 @@ describe('parseImportRepeat & recurring CSV import', () => {
       intervalValue: 1,
       intervalUnit: 'weeks',
     });
+  });
+
+  it('skips standalone open undated rows while keeping completed undated rows on their completion date', () => {
+    const csv = [
+      'Folder Name,List Name,Title,Tags,Content,Start Date,Due Date,Repeat,Priority,Status,Created Time,Completed Time',
+      ',Inbox,Stale undated one,,,,,,,0,2025-03-26T10:23:56+0000,',
+      ',Inbox,Stale undated two,,,,,,,0,2026-11-09T23:18:43+0000,',
+      ',Inbox,Done undated,,,,,,,2,2026-10-01T08:00:00+0000,2026-10-20T14:00:00+0000',
+    ].join('\n');
+
+    const result = importTasksFromCsv(csv, 1_700_000_000_000);
+    expect(result.skipped).toBe(2);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].title).toBe('Done undated');
+    expect(result.tasks[0].dueAt).toBe('2026-10-20');
   });
 });

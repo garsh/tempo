@@ -1,20 +1,25 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Check } from 'lucide-react';
 
-export type DatePreset = 'today' | 'tomorrow' | null;
+export type DatePreset = 'today' | 'tomorrow' | 'none' | null;
 
 interface DateChoiceMenuProps {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   active: DatePreset;
   dateValue: string;
+  mode?: 'due' | 'last_done';
+  allowNoDate?: boolean;
+  maxDate?: string;
   onClose: () => void;
   onToday: () => void;
-  onTomorrow: () => void;
+  onTomorrow?: () => void;
+  onNoDate?: () => void;
   onDatePicked: (value: string) => void;
 }
 
-const MENU_WIDTH = 188;
+const MENU_WIDTH = 196;
+const DEFAULT_MENU_WIDTH = 188;
 const MENU_HEIGHT = 44 * 3 + 19;
 const GAP = 6;
 const MARGIN = 8;
@@ -26,10 +31,12 @@ export interface ViewportBox {
   offsetLeft: number;
 }
 
-/** Fixed-position coordinates for the date menu, flipped above the anchor when the visible viewport is short. */
+/** Fixed-position coordinates for a choice menu, flipped above the anchor when the visible viewport is short. */
 export function dateChoiceMenuPosition(
   anchor: Pick<DOMRect, 'top' | 'bottom' | 'left'> | null,
   viewport: ViewportBox,
+  menuHeight: number = MENU_HEIGHT,
+  menuWidth: number = DEFAULT_MENU_WIDTH,
 ): { top: number; left: number } {
   if (!anchor) return { top: MARGIN, left: MARGIN };
 
@@ -42,16 +49,41 @@ export function dateChoiceMenuPosition(
   const spaceBelow = visibleBottom - anchorBottom;
   const spaceAbove = anchorTop - viewport.offsetTop;
   let top = anchorBottom + GAP;
-  if (spaceBelow < MENU_HEIGHT + MARGIN && spaceAbove > spaceBelow) {
-    top = anchorTop - MENU_HEIGHT - GAP;
+  if (spaceBelow < menuHeight + MARGIN && spaceAbove > spaceBelow) {
+    top = anchorTop - menuHeight - GAP;
   }
-  top = Math.max(viewport.offsetTop + MARGIN, Math.min(top, visibleBottom - MENU_HEIGHT - MARGIN));
+  top = Math.max(viewport.offsetTop + MARGIN, Math.min(top, visibleBottom - menuHeight - MARGIN));
 
   const left = Math.max(
     viewport.offsetLeft + MARGIN,
-    Math.min(anchorLeft, visibleRight - MENU_WIDTH - MARGIN),
+    Math.min(anchorLeft, visibleRight - menuWidth - MARGIN),
   );
   return { top, left };
+}
+
+export function handleMenuArrowKeyDown(
+  e: React.KeyboardEvent<HTMLDivElement>,
+  container: HTMLDivElement | null,
+) {
+  if (!container) return;
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+  const items = Array.from(
+    container.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]')
+  );
+  if (items.length === 0) return;
+  e.preventDefault();
+  const curIdx = items.indexOf(document.activeElement as HTMLElement);
+  let nextIdx = 0;
+  if (e.key === 'ArrowDown') {
+    nextIdx = curIdx >= 0 ? (curIdx + 1) % items.length : 0;
+  } else if (e.key === 'ArrowUp') {
+    nextIdx = curIdx >= 0 ? (curIdx - 1 + items.length) % items.length : items.length - 1;
+  } else if (e.key === 'Home') {
+    nextIdx = 0;
+  } else if (e.key === 'End') {
+    nextIdx = items.length - 1;
+  }
+  items[nextIdx]?.focus({ preventScroll: true });
 }
 
 function currentViewport(): ViewportBox {
@@ -72,19 +104,33 @@ export function DateChoiceMenu({
   anchorRef,
   active,
   dateValue,
+  mode = 'due',
+  allowNoDate = true,
+  maxDate,
   onClose,
   onToday,
   onTomorrow,
+  onNoDate,
   onDatePicked,
 }: DateChoiceMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: MARGIN, left: MARGIN });
+  const itemCount =
+    mode === 'last_done' ? 3 : allowNoDate && onNoDate ? 4 : 3;
+  const menuHeight = 44 * itemCount + 19;
 
   useLayoutEffect(() => {
     if (!open) return;
     const update = () => {
       const el = anchorRef.current;
-      setPos(dateChoiceMenuPosition(el ? el.getBoundingClientRect() : null, currentViewport()));
+      setPos(
+        dateChoiceMenuPosition(
+          el ? el.getBoundingClientRect() : null,
+          currentViewport(),
+          menuHeight,
+          MENU_WIDTH,
+        )
+      );
     };
     update();
     window.addEventListener('resize', update);
@@ -96,7 +142,7 @@ export function DateChoiceMenu({
       vv?.removeEventListener('resize', update);
       vv?.removeEventListener('scroll', update);
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, menuHeight]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -116,8 +162,8 @@ export function DateChoiceMenu({
 
   if (!open) return null;
 
-  const choose = (fn: () => void) => () => {
-    fn();
+  const choose = (fn?: () => void) => () => {
+    fn?.();
     onClose();
   };
 
@@ -127,45 +173,102 @@ export function DateChoiceMenu({
         ref={cardRef}
         role="menu"
         id="date-choice-menu"
-        aria-label="Choose a date"
+        aria-label={mode === 'last_done' ? 'Choose last done date' : 'Choose a date'}
         onClick={(e) => e.stopPropagation()}
-        className="absolute w-[188px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
+        onKeyDown={(e) => handleMenuArrowKeyDown(e, cardRef.current)}
+        className="absolute w-[196px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
         style={{ top: pos.top, left: pos.left }}
       >
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={active === 'today'}
-          className={row}
-          onClick={choose(onToday)}
-        >
-          Today
-          {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
-        </button>
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={active === 'tomorrow'}
-          className={row}
-          onClick={choose(onTomorrow)}
-        >
-          Tomorrow
-          {active === 'tomorrow' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
-        </button>
-        <label role="menuitem" className={`${row} relative`}>
-          <span className="pointer-events-none">Select</span>
-          <input
-            type="date"
-            aria-label="Select"
-            value={dateValue}
-            onChange={(e) => {
-              if (!e.target.value) return;
-              onDatePicked(e.target.value);
-              onClose();
-            }}
-            className="absolute inset-0 h-full w-full cursor-pointer text-[16px] opacity-0"
-          />
-        </label>
+        {mode === 'last_done' ? (
+          <>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'none'}
+              className={row}
+              onClick={choose(onNoDate)}
+            >
+              Not done yet
+              {active === 'none' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'today'}
+              className={row}
+              onClick={choose(onToday)}
+            >
+              Today
+              {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <label role="menuitem" className={`${row} relative`}>
+              <span className="pointer-events-none">Select</span>
+              <input
+                type="date"
+                aria-label="Select"
+                value={dateValue}
+                max={maxDate}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  onDatePicked(e.target.value);
+                  onClose();
+                }}
+                className="absolute inset-0 h-full w-full cursor-pointer text-[16px] opacity-0"
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'today'}
+              className={row}
+              onClick={choose(onToday)}
+            >
+              Today
+              {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            {onTomorrow && (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={active === 'tomorrow'}
+                className={row}
+                onClick={choose(onTomorrow)}
+              >
+                Tomorrow
+                {active === 'tomorrow' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+              </button>
+            )}
+            <label role="menuitem" className={`${row} relative`}>
+              <span className="pointer-events-none">Select</span>
+              <input
+                type="date"
+                aria-label="Select"
+                value={dateValue}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  onDatePicked(e.target.value);
+                  onClose();
+                }}
+                className="absolute inset-0 h-full w-full cursor-pointer text-[16px] opacity-0"
+              />
+            </label>
+            {allowNoDate && onNoDate && (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={active === 'none'}
+                className={row}
+                onClick={choose(onNoDate)}
+              >
+                No date
+                {active === 'none' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

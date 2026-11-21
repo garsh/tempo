@@ -1,5 +1,5 @@
 import type { Task, TaskList } from '../types/task';
-import { isCompleted, isRecurring } from './recurrence';
+import { isCompleted, isRecurring, isUndatedOneTime, isWindowPeriodic } from './recurrence';
 
 export const BUILD_ID = '2026-11-15-fix5';
 const DIAG_STORAGE_KEY = 'tempo_diag_log_v1';
@@ -19,6 +19,8 @@ export interface DiagnosticsSummary {
     activeTasks: number;
     openTasks: number;
     recurringTasks: number;
+    approximateTasks: number;
+    undatedOneTimeTasks: number;
     completedTasks: number;
     tombstonedTasks: number;
     activeLists: number;
@@ -191,6 +193,8 @@ export function buildDiagnosticsSummary(
   let activeTasks = 0;
   let openTasksCount = 0;
   let recurringTasks = 0;
+  let approximateTasks = 0;
+  let undatedOneTimeTasks = 0;
   let completedTasks = 0;
   let tombstonedTasks = 0;
 
@@ -201,6 +205,8 @@ export function buildDiagnosticsSummary(
     }
     activeTasks += 1;
     if (isRecurring(t)) recurringTasks += 1;
+    if (isWindowPeriodic(t)) approximateTasks += 1;
+    if (isUndatedOneTime(t) && !isCompleted(t)) undatedOneTimeTasks += 1;
     if (isCompleted(t)) completedTasks += 1;
     else openTasksCount += 1;
   }
@@ -215,6 +221,8 @@ export function buildDiagnosticsSummary(
       activeTasks,
       openTasks: openTasksCount,
       recurringTasks,
+      approximateTasks,
+      undatedOneTimeTasks,
       completedTasks,
       tombstonedTasks,
       activeLists: lists.filter((l) => !l.deletedAt).length,

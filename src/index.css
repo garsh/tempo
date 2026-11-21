@@ -76,6 +76,14 @@
   --tt-scrim: rgb(0 0 0 / 0.4);
   --tt-mark-bg: #fef08a;
   --tt-mark-text: #191919;
+
+  /* Radial progress ring tokens */
+  --tt-ring-track: #e2e4ea;
+  --tt-ring-muted: #9ca3af;
+  --tt-ring-green: #16a34a;
+  --tt-ring-amber: #d97706;
+  --tt-ring-orange: #ea580c;
+  --tt-ring-overdue: #e03131;
 }
 
 /* Dark: OS dark unless the user pinned Light; or the user pinned Dark. */
@@ -117,6 +125,13 @@
     --tt-scrim: rgb(0 0 0 / 0.6);
     --tt-mark-bg: #713f12;
     --tt-mark-text: #fef9c3;
+
+    --tt-ring-track: #2e2e32;
+    --tt-ring-muted: #6b7280;
+    --tt-ring-green: #22c55e;
+    --tt-ring-amber: #f59e0b;
+    --tt-ring-orange: #fb923c;
+    --tt-ring-overdue: #f87171;
   }
 }
 
@@ -160,6 +175,13 @@
   --tt-mark-bg: #713f12;
   --tt-mark-text: #fef9c3;
 
+  --tt-ring-track: #2e2e32;
+  --tt-ring-muted: #6b7280;
+  --tt-ring-green: #22c55e;
+  --tt-ring-amber: #f59e0b;
+  --tt-ring-orange: #fb923c;
+  --tt-ring-overdue: #f87171;
+
 }
 
 :root[data-theme="light"] {
@@ -200,6 +222,12 @@
   --color-tt-icon-green: var(--tt-icon-green);
   --color-tt-icon-amber: var(--tt-icon-amber);
   --color-tt-scrim: var(--tt-scrim);
+  --color-tt-ring-track: var(--tt-ring-track);
+  --color-tt-ring-muted: var(--tt-ring-muted);
+  --color-tt-ring-green: var(--tt-ring-green);
+  --color-tt-ring-amber: var(--tt-ring-amber);
+  --color-tt-ring-orange: var(--tt-ring-orange);
+  --color-tt-ring-overdue: var(--tt-ring-overdue);
 }
 
 @layer base {
@@ -297,5 +325,28 @@ dialog::backdrop {
   color: var(--tt-mark-text);
   border-radius: 3px;
   padding: 0 1px;
+}
+
+[interestfor] {
+  --interest-delay-start: 0.15s;
+  interest-delay-start: var(--interest-delay-start);
+  --interest-delay-end: 0.15s;
+  interest-delay-end: var(--interest-delay-end);
+}
+
+.tt-ring-tooltip[popover] {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+@supports (position-area: top span-left) {
+  .tt-ring-tooltip[popover] {
+    position-area: top span-left;
+    position-try-fallbacks: flip-block, flip-inline;
+    margin: 0 0 8px 0;
+  }
 }
 

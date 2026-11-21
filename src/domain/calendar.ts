@@ -4,8 +4,9 @@ import {
   getDayBoundsMs,
   getDueDatePart,
   isCompletedOnDate,
-  isRecurring,
+  isFixedRecurring,
   isSkippedOnDate,
+  isWindowPeriodic,
   projectTaskForDate,
   startOfDay,
   taskOccursOnDate,
@@ -61,11 +62,11 @@ export function startOfWeek(date: Date, weekStart: number = 0): Date {
   return d;
 }
 
-/** Open tasks due on a given YYYY-MM-DD (including recurring occurrences not completed on that day). */
+/** Open tasks due on a given YYYY-MM-DD (including scheduled recurring occurrences not completed on that day). */
 export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
   return tasks
     .filter((t) => {
-      if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (t.deletedAt || isWindowPeriodic(t) || (!t.dueAt && !isFixedRecurring(t))) return false;
       if (!t.recurrence && t.completedAt) return false;
       if (isSkippedOnDate(t, dateStr)) return false;
       if (!taskOccursOnDate(t, dateStr)) return false;
@@ -74,12 +75,23 @@ export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
     .map((t) => projectTaskForDate(t, dateStr));
 }
 
-/** Tasks completed on a given YYYY-MM-DD (including recurring occurrences completed on that day). */
+/** Tasks completed on a given YYYY-MM-DD (including recurring and approximate completions on that day). */
 export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
   const [dayStartMs, dayEndMs] = getDayBoundsMs(dateStr);
   return tasks
     .filter((t) => {
-      if (t.deletedAt || (!t.dueAt && !isRecurring(t))) return false;
+      if (t.deletedAt) return false;
+      if (isWindowPeriodic(t)) {
+        return isCompletedOnDate(t, dateStr);
+      }
+      if (!t.dueAt && !isFixedRecurring(t)) {
+        return (
+          !t.recurrence &&
+          !!t.completedAt &&
+          t.completedAt >= dayStartMs &&
+          t.completedAt < dayEndMs
+        );
+      }
       if (!t.recurrence) {
         if (!t.completedAt) return false;
         const dueMatches = !!t.dueAt && getDueDatePart(t.dueAt) === dateStr;

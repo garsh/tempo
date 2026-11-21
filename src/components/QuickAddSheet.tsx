@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
+  Clock,
   Plus,
   RefreshCw,
+  Trash2,
   X,
 } from 'lucide-react';
 import type {
@@ -17,19 +19,28 @@ import type {
 import { INBOX_LIST_ID, WEEKDAY_LABELS } from '../types/task';
 import {
   addDays,
+  addInterval,
+  completionTimestampForDate,
   formatDate,
   getDueDatePart,
+  getLatestCompletionMs,
+  getWindowBounds,
+  isWindowPeriodic,
+  parseDate,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
 import { DateChoiceMenu, type DatePreset } from './menu/DateChoiceMenu';
+import { RepeatChoiceMenu } from './menu/RepeatChoiceMenu';
 
 export interface QuickAddSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (task: TaskInput) => void | Promise<void>;
   initialTask?: Task | null;
-  /** Pre-filled due date (YYYY-MM-DD). Calendar FAB passes the selected day. */
+  /** Pre-filled due date (YYYY-MM-DD). Calendar passes selected day; Tasks passes null. */
   defaultDueAt?: string | null;
+  onLogCompletionDate?: (taskId: string, dateStr: string) => Promise<void> | void;
+  onRemoveCompletionTimestamp?: (taskId: string, timestamp: number) => Promise<void> | void;
 }
 
 const ALL_WEEKDAYS: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
@@ -116,15 +127,20 @@ export function QuickAddSheet({
   onClose,
   onSave,
   initialTask = null,
-  defaultDueAt = null,
+  defaultDueAt,
+  onLogCompletionDate,
+  onRemoveCompletionTimestamp,
 }: QuickAddSheetProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
+  const repeatButtonRef = useRef<HTMLButtonElement>(null);
+  const historySectionRef = useRef<HTMLDivElement>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'repeat'>('none');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const [repeatMenuOpen, setRepeatMenuOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Preserve the last measured virtual keyboard height across focus shifts
@@ -154,6 +170,9 @@ export function QuickAddSheet({
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('fixed_interval');
   const [intervalValue, setIntervalValue] = useState(1);
+  const [maxIntervalValue, setMaxIntervalValue] = useState(2);
+  const [minInput, setMinInput] = useState('1');
+  const [maxInput, setMaxInput] = useState('2');
   const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('days');
   const [weekdays, setWeekdays] = useState<Weekday[]>([]);
   const [useMonthDay, setUseMonthDay] = useState(false);
@@ -161,6 +180,8 @@ export function QuickAddSheet({
   const [endMode, setEndMode] = useState<EndMode>('never');
   const [endOnDate, setEndOnDate] = useState('');
   const [endAfterCount, setEndAfterCount] = useState('');
+  const [initialLastDoneDate, setInitialLastDoneDate] = useState<string | null>(null);
+  const [localHistory, setLocalHistory] = useState<number[]>([]);
 
   const todayStr = formatDate(new Date());
   const tomorrowStr = formatDate(addDays(new Date(), 1));
@@ -221,10 +242,13 @@ export function QuickAddSheet({
   const resetForm = useCallback(() => {
     setTitle('');
     setNotes('');
-    setDueAt(dueAtForSelectedDay(defaultDueAt, todayStr));
+    setDueAt(defaultDueAt === null ? null : dueAtForSelectedDay(defaultDueAt, todayStr));
     setIsRecurring(false);
     setRecurrenceType('fixed_interval');
     setIntervalValue(1);
+    setMaxIntervalValue(2);
+    setMinInput('1');
+    setMaxInput('2');
     setIntervalUnit('days');
     setWeekdays([]);
     setUseMonthDay(false);
@@ -232,8 +256,11 @@ export function QuickAddSheet({
     setEndMode('never');
     setEndOnDate('');
     setEndAfterCount('');
+    setInitialLastDoneDate(null);
+    setLocalHistory([]);
     setPanel('none');
     setDateMenuOpen(false);
+    setRepeatMenuOpen(false);
     titleRef.current?.focus({ preventScroll: true });
     window.requestAnimationFrame(() => {
       titleRef.current?.focus({ preventScroll: true });
@@ -247,33 +274,66 @@ export function QuickAddSheet({
     if (initialTask) {
       setTitle(initialTask.title);
       setNotes(initialTask.notes || '');
-      setDueAt(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : null);
       const hasRecurrence = !!initialTask.recurrence;
+      const isApprox = isWindowPeriodic(initialTask);
       setIsRecurring(hasRecurrence);
+      setLocalHistory([...(initialTask.completionHistory || [])]);
+      setInitialLastDoneDate(null);
+
       if (initialTask.recurrence) {
         const r = initialTask.recurrence;
-        setRecurrenceType(r.type);
-        setIntervalValue(r.intervalValue);
-        setIntervalUnit(r.intervalUnit);
-        setWeekdays(r.weekdays ? [...r.weekdays] : []);
-        setUseMonthDay(r.monthDay != null);
-        setMonthDay(r.monthDay ?? 1);
-        if (r.endOnDate) {
-          setEndMode('on_date');
-          setEndOnDate(r.endOnDate);
+        if (isApprox) {
+          const { min, max, unit } = getWindowBounds(r);
+          setRecurrenceType('after_completion');
+          setDueAt(null);
+          setIntervalValue(min);
+          setMaxIntervalValue(max);
+          setMinInput(String(min));
+          setMaxInput(String(max));
+          setIntervalUnit(unit);
+          setWeekdays([]);
+          setUseMonthDay(false);
+          setMonthDay(1);
+          if (r.endOnDate) {
+            setEndMode('on_date');
+            setEndOnDate(r.endOnDate);
+          } else {
+            setEndMode('never');
+            setEndOnDate('');
+          }
           setEndAfterCount('');
-        } else if (r.endAfterCount != null && r.endAfterCount > 0) {
-          setEndMode('after_count');
-          setEndAfterCount(String(r.endAfterCount));
-          setEndOnDate('');
         } else {
-          setEndMode('never');
-          setEndOnDate('');
-          setEndAfterCount('');
+          setRecurrenceType('fixed_interval');
+          setDueAt(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : null);
+          setIntervalValue(r.intervalValue);
+          setMaxIntervalValue(Math.max(r.intervalValue, r.intervalValue + 1));
+          setMinInput(String(r.intervalValue));
+          setMaxInput(String(Math.max(r.intervalValue, r.intervalValue + 1)));
+          setIntervalUnit(r.intervalUnit);
+          setWeekdays(r.weekdays ? [...r.weekdays] : []);
+          setUseMonthDay(r.monthDay != null);
+          setMonthDay(r.monthDay ?? 1);
+          if (r.endOnDate) {
+            setEndMode('on_date');
+            setEndOnDate(r.endOnDate);
+            setEndAfterCount('');
+          } else if (r.endAfterCount != null && r.endAfterCount > 0) {
+            setEndMode('after_count');
+            setEndAfterCount(String(r.endAfterCount));
+            setEndOnDate('');
+          } else {
+            setEndMode('never');
+            setEndOnDate('');
+            setEndAfterCount('');
+          }
         }
       } else {
+        setDueAt(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : null);
         setRecurrenceType('fixed_interval');
         setIntervalValue(1);
+        setMaxIntervalValue(2);
+        setMinInput('1');
+        setMaxInput('2');
         setIntervalUnit('days');
         setWeekdays([]);
         setUseMonthDay(false);
@@ -286,8 +346,14 @@ export function QuickAddSheet({
       resetForm();
     }
 
-    setPanel('none');
+    const openRepeatByDefault = !!initialTask?.recurrence;
+    setPanel(openRepeatByDefault ? 'repeat' : 'none');
     setDateMenuOpen(false);
+    setRepeatMenuOpen(false);
+    if (openRepeatByDefault) {
+      setKeyboardInset(0);
+      return;
+    }
     const t = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 60);
     return () => clearTimeout(t);
   }, [isOpen, initialTask, resetForm]);
@@ -295,30 +361,95 @@ export function QuickAddSheet({
   if (!isOpen) return null;
 
   const canSubmit = title.trim().length > 0;
+  const isApproxMode = isRecurring && recurrenceType === 'after_completion';
+  const latestHistoryMs = getLatestCompletionMs({ completionHistory: localHistory });
+  const latestHistoryDateStr = latestHistoryMs != null ? formatDate(new Date(latestHistoryMs)) : null;
+
+  const formatShortDate = (dStr: string) => {
+    const [y, m, d] = dStr.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
   const datePart = dueAt ? dueAt.slice(0, 10) : '';
-  const datePreset: DatePreset = !dueAt
-    ? null
-    : datePart === todayStr
+  const datePreset: DatePreset = isApproxMode
+    ? initialLastDoneDate === todayStr
       ? 'today'
-      : datePart === tomorrowStr
-        ? 'tomorrow'
-        : null;
-  const dateChipLabel = !dueAt
-    ? 'No date'
-    : datePreset === 'today'
-      ? 'Today'
-      : datePreset === 'tomorrow'
-        ? 'Tomorrow'
-        : (() => {
-            const [y, m, d] = datePart.split('-').map(Number);
-            const dt = new Date(y, m - 1, d);
-            return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-          })();
+      : initialLastDoneDate
+        ? null
+        : 'none'
+    : !dueAt
+      ? 'none'
+      : datePart === todayStr
+        ? 'today'
+        : datePart === tomorrowStr
+          ? 'tomorrow'
+          : null;
+
+  const dateChipLabel = isApproxMode
+    ? initialTask?.id && latestHistoryDateStr
+      ? `Last done: ${latestHistoryDateStr === todayStr ? 'Today' : formatShortDate(latestHistoryDateStr)}`
+      : initialLastDoneDate
+        ? `Last done: ${initialLastDoneDate === todayStr ? 'Today' : formatShortDate(initialLastDoneDate)}`
+        : 'Not done yet'
+    : !dueAt
+      ? 'No date'
+      : datePreset === 'today'
+        ? 'Today'
+        : datePreset === 'tomorrow'
+          ? 'Tomorrow'
+          : formatShortDate(datePart);
 
   const toggleWeekday = (d: Weekday) => {
+    if (intervalUnit === 'days') {
+      setIntervalUnit('weeks');
+    }
     setWeekdays((prev) =>
       prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
     );
+  };
+
+  const handleSelectFixed = () => {
+    const wasApprox = isRecurring && recurrenceType === 'after_completion';
+    setIsRecurring(true);
+    setRecurrenceType('fixed_interval');
+    setPanel('repeat');
+    if (wasApprox || !dueAt) {
+      const anchorStr = latestHistoryDateStr ?? initialLastDoneDate;
+      if (anchorStr) {
+        const nextStr = formatDate(addInterval(parseDate(anchorStr), intervalValue, intervalUnit));
+        setDueAt(nextStr < todayStr ? todayStr : nextStr);
+      } else {
+        setDueAt(dueAtForSelectedDay(defaultDueAt, todayStr));
+      }
+    }
+  };
+
+  const handleSelectApproximate = () => {
+    const wasOff = !isRecurring;
+    setIsRecurring(true);
+    setRecurrenceType('after_completion');
+    setPanel('repeat');
+    setDueAt(null);
+    if (endMode === 'after_count') {
+      setEndMode('never');
+      setEndAfterCount('');
+    }
+    if (wasOff && dueAt == null && intervalValue === 1 && intervalUnit === 'days') {
+      setIntervalValue(1);
+      setMaxIntervalValue(2);
+      setMinInput('1');
+      setMaxInput('2');
+      setIntervalUnit('weeks');
+    } else {
+      const clampedMax = Math.max(intervalValue, maxIntervalValue);
+      setMaxIntervalValue(clampedMax);
+      setMaxInput(String(clampedMax));
+    }
+  };
+
+  const handleClearRepeat = () => {
+    setIsRecurring(false);
+    setPanel('none');
   };
 
   const handleSubmit = async () => {
@@ -327,37 +458,59 @@ export function QuickAddSheet({
     setIsSubmitting(true);
     try {
       let recurrence: RecurrenceRule | null = null;
+      const safeMin = Math.min(999, Math.max(1, intervalValue));
+      const safeMax = Math.min(999, Math.max(safeMin, maxIntervalValue));
+
       if (isRecurring) {
         let parsedEndOnDate: string | null = null;
-        let parsedEndAfterCount: number | null = null;
-
         if (endMode === 'on_date' && endOnDate.trim()) {
           parsedEndOnDate = endOnDate.trim();
-        } else if (endMode === 'after_count' && endAfterCount.trim()) {
-          const countNum = parseInt(endAfterCount, 10);
-          if (!Number.isNaN(countNum) && countNum > 0) {
-            parsedEndAfterCount = countNum;
-          }
         }
 
-        recurrence = {
-          type: recurrenceType,
-          intervalValue: Math.max(1, intervalValue),
-          intervalUnit,
-          weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
-          monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
-          endOnDate: parsedEndOnDate,
-          endAfterCount: parsedEndAfterCount,
-        };
+        if (recurrenceType === 'after_completion') {
+          recurrence = {
+            type: 'after_completion',
+            intervalValue: safeMin,
+            maxIntervalValue: safeMax,
+            intervalUnit,
+            endOnDate: parsedEndOnDate,
+          };
+        } else {
+          let parsedEndAfterCount: number | null = null;
+          if (endMode === 'after_count' && endAfterCount.trim()) {
+            const countNum = parseInt(endAfterCount, 10);
+            if (!Number.isNaN(countNum) && countNum > 0) {
+              parsedEndAfterCount = countNum;
+            }
+          }
+
+          recurrence = {
+            type: 'fixed_interval',
+            intervalValue: safeMin,
+            intervalUnit,
+            weekdays: intervalUnit === 'weeks' && weekdays.length > 0 ? weekdays : undefined,
+            monthDay: intervalUnit === 'months' && useMonthDay ? monthDay : undefined,
+            endOnDate: parsedEndOnDate,
+            endAfterCount: parsedEndAfterCount,
+          };
+        }
       }
+
+      const seededHistory =
+        recurrence?.type === 'after_completion' &&
+        localHistory.length === 0 &&
+        initialLastDoneDate
+          ? [completionTimestampForDate(initialLastDoneDate)]
+          : undefined;
 
       await onSave({
         id: initialTask?.id,
         title: title.trim(),
         notes: notes.trim() || undefined,
         listId: initialTask?.listId || INBOX_LIST_ID,
-        dueAt: dueAt || null,
+        dueAt: recurrence?.type === 'after_completion' ? null : dueAt || null,
         recurrence,
+        ...(seededHistory ? { completionHistory: seededHistory } : {}),
       });
 
       if (initialTask) {
@@ -387,7 +540,7 @@ export function QuickAddSheet({
     child: React.ReactNode,
     extraClass = '',
     customStyles?: { active?: string; inactive?: string },
-    popup?: { expanded: boolean; buttonRef: React.Ref<HTMLButtonElement> },
+    popup?: { expanded: boolean; controlsId: string; buttonRef: React.Ref<HTMLButtonElement> },
   ) => (
     <button
       ref={popup?.buttonRef}
@@ -397,7 +550,7 @@ export function QuickAddSheet({
       aria-pressed={active}
       aria-expanded={popup ? popup.expanded : undefined}
       aria-haspopup={popup ? 'menu' : undefined}
-      aria-controls={popup ? 'date-choice-menu' : undefined}
+      aria-controls={popup ? popup.controlsId : undefined}
       onClick={onClick}
       className={`h-10 min-w-10 px-2.5 flex items-center justify-center rounded-xl transition-all text-sm font-semibold cursor-pointer ${
         active
@@ -524,43 +677,65 @@ export function QuickAddSheet({
         {/* Toolbar */}
         <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 flex-nowrap min-w-0">
           {toolBtn(
-            'Date',
-            dateMenuOpen || !!dueAt,
-            () => setDateMenuOpen((open) => !open),
+            isApproxMode ? 'Last done' : 'Date',
+            isApproxMode
+              ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
+              : dateMenuOpen || !!dueAt,
+            () => {
+              setRepeatMenuOpen(false);
+              if (isApproxMode && initialTask?.id && localHistory.length > 0) {
+                setDateMenuOpen(false);
+                setPanel('repeat');
+                window.requestAnimationFrame(() => {
+                  historySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                });
+              } else {
+                setDateMenuOpen((open) => !open);
+              }
+            },
             <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
-              <Calendar className="w-4 h-4 stroke-[2.2]" />
+              {isApproxMode ? (
+                <Clock className="w-4 h-4 stroke-[2.2]" />
+              ) : (
+                <Calendar className="w-4 h-4 stroke-[2.2]" />
+              )}
               <span>{dateChipLabel}</span>
             </span>,
             'shrink-0',
             undefined,
-            { expanded: dateMenuOpen, buttonRef: dateButtonRef },
+            isApproxMode && initialTask?.id && localHistory.length > 0
+              ? undefined
+              : { expanded: dateMenuOpen, controlsId: 'date-choice-menu', buttonRef: dateButtonRef },
           )}
 
           {toolBtn(
             'Repeat',
-            panel === 'repeat' || isRecurring,
+            panel === 'repeat' || isRecurring || repeatMenuOpen,
             () => {
               setDateMenuOpen(false);
-              if (panel === 'repeat') {
-                setIsRecurring(false);
-                setPanel('none');
-              } else {
+              if (!isRecurring) {
+                setRepeatMenuOpen((open) => !open);
+              } else if (panel !== 'repeat') {
                 titleRef.current?.blur();
                 setKeyboardInset(0);
-                setIsRecurring(true);
                 setPanel('repeat');
+              } else {
+                setRepeatMenuOpen((open) => !open);
               }
             },
             <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
               <RefreshCw className="w-4 h-4 stroke-[2.2]" />
-              <span>Repeat</span>
+              <span>
+                {!isRecurring ? 'Repeat' : recurrenceType === 'after_completion' ? 'Approx' : 'Fixed'}
+              </span>
             </span>,
             'shrink-0',
             {
               active: 'bg-tt-blue text-white border border-tt-blue shadow-sm shadow-tt-blue/25',
               inactive:
                 'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
-            }
+            },
+            { expanded: repeatMenuOpen, controlsId: 'repeat-choice-menu', buttonRef: repeatButtonRef },
           )}
 
           <div className="flex-1 min-w-1" />
@@ -588,209 +763,403 @@ export function QuickAddSheet({
         {panel === 'repeat' && (
           <div className="px-4 pb-4 space-y-3.5 border-t border-tt-border/80 pt-3 animate-in fade-in duration-150">
             <div className="space-y-3.5 p-3.5 sm:p-4 rounded-2xl bg-tt-sidebar/60 border border-tt-border">
-              {/* Repeat Every & Unit at the top */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="repeat-interval-input"
-                    className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
-                  >
-                    Repeat Every
-                  </label>
-                  <input
-                    id="repeat-interval-input"
-                    type="number"
-                    min="1"
-                    value={intervalValue}
-                    onChange={(e) =>
-                      setIntervalValue(Math.max(1, parseInt(e.target.value, 10) || 1))
-                    }
-                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="repeat-unit-select"
-                    className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
-                  >
-                    Unit
-                  </label>
-                  <select
-                    id="repeat-unit-select"
-                    value={intervalUnit}
-                    onChange={(e) => {
-                      const u = e.target.value as IntervalUnit;
-                      setIntervalUnit(u);
-                      if (u !== 'weeks') setWeekdays([]);
-                      if (u !== 'months') setUseMonthDay(false);
-                    }}
-                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
-                  >
-                    <option value="days">Days</option>
-                    <option value="weeks">Weeks</option>
-                    <option value="months">Months</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Weekdays selection */}
-              {intervalUnit === 'weeks' && (
-                <div>
-                  <label className="block text-base sm:text-[17px] font-bold text-tt-text mb-1.5">
-                    On Weekdays (Optional)
-                  </label>
-                  <div className="grid grid-cols-7 gap-1.5">
-                    {ALL_WEEKDAYS.map((d) => {
-                      const sel = weekdays.includes(d);
-                      return (
-                        <button
-                          key={d}
-                          type="button"
-                          aria-pressed={sel}
-                          onClick={() => toggleWeekday(d)}
-                          className={`h-10 sm:h-11 rounded-xl text-sm sm:text-base font-bold border transition-all flex items-center justify-center cursor-pointer ${
-                            sel
-                              ? 'bg-tt-blue text-white border-tt-blue shadow-sm shadow-tt-blue/25 ring-1 ring-tt-blue'
-                              : 'bg-tt-elevated text-tt-text border-tt-border hover:bg-tt-hover active:scale-95'
-                          }`}
-                        >
-                          {WEEKDAY_LABELS[d]}
-                        </button>
-                      );
-                    })}
+              {recurrenceType === 'fixed_interval' ? (
+                <>
+                  {/* Repeat Every & Unit at the top */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="repeat-interval-input"
+                        className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                      >
+                        Repeat Every
+                      </label>
+                      <input
+                        id="repeat-interval-input"
+                        type="number"
+                        min="1"
+                        max="999"
+                        value={minInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMinInput(v);
+                          const n = parseInt(v, 10);
+                          if (!Number.isNaN(n) && n >= 1) {
+                            setIntervalValue(Math.min(999, n));
+                          }
+                        }}
+                        onBlur={() => setMinInput(String(intervalValue))}
+                        className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="repeat-unit-select"
+                        className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                      >
+                        Unit
+                      </label>
+                      <select
+                        id="repeat-unit-select"
+                        value={intervalUnit}
+                        onChange={(e) => {
+                          const u = e.target.value as IntervalUnit;
+                          setIntervalUnit(u);
+                          if (u !== 'weeks') setWeekdays([]);
+                          if (u !== 'months') setUseMonthDay(false);
+                        }}
+                        className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                      >
+                        <option value="days">Days</option>
+                        <option value="weeks">Weeks</option>
+                        <option value="months">Months</option>
+                        <option value="years">Years</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {/* Month Day selection */}
-              {intervalUnit === 'months' && (
-                <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-tt-elevated border border-tt-border">
-                  <label className="inline-flex items-center gap-2.5 text-base sm:text-[17px] font-semibold text-tt-text cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useMonthDay}
-                      onChange={(e) => setUseMonthDay(e.target.checked)}
-                      className="w-5 h-5 rounded border-tt-border accent-tt-blue cursor-pointer"
-                    />
-                    On Day of Month
-                  </label>
-                  {useMonthDay && (
-                    <div className="inline-flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
-                        value={monthDay}
-                        aria-label="Day of month"
-                        onChange={(e) =>
-                          setMonthDay(
-                            Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1))
-                          )
-                        }
-                        className="w-20 h-10 px-3 bg-tt-sidebar border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
-                      />
-                      <span className="text-sm sm:text-base text-tt-text/90 font-medium">
-                        of each month
-                      </span>
+                  {/* Weekdays selection (for Weeks, or quick M/W/F pick when every 1 day) */}
+                  {(intervalUnit === 'weeks' ||
+                    (intervalUnit === 'days' && intervalValue === 1)) && (
+                    <div>
+                      <label className="block text-base sm:text-[17px] font-bold text-tt-text mb-1.5">
+                        On Weekdays (Optional)
+                      </label>
+                      <div className="grid grid-cols-7 gap-1.5">
+                        {ALL_WEEKDAYS.map((d) => {
+                          const sel = weekdays.includes(d);
+                          return (
+                            <button
+                              key={d}
+                              type="button"
+                              aria-pressed={sel}
+                              onClick={() => toggleWeekday(d)}
+                              className={`h-10 sm:h-11 rounded-xl text-sm sm:text-base font-bold border transition-all flex items-center justify-center cursor-pointer ${
+                                sel
+                                  ? 'bg-tt-blue text-white border-tt-blue shadow-sm shadow-tt-blue/25 ring-1 ring-tt-blue'
+                                  : 'bg-tt-elevated text-tt-text border-tt-border hover:bg-tt-hover active:scale-95'
+                              }`}
+                            >
+                              {WEEKDAY_LABELS[d]}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* Recurrence Logic Selection Box */}
-              <div>
-                <label
-                  htmlFor="recurrence-logic-select"
-                  className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
-                >
-                  Recurrence Logic
-                </label>
-                <select
-                  id="recurrence-logic-select"
-                  value={recurrenceType}
-                  onChange={(e) => setRecurrenceType(e.target.value as RecurrenceType)}
-                  className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
-                >
-                  <option value="fixed_interval">
-                    Fixed Schedule (repeats on set calendar days)
-                  </option>
-                  <option value="after_completion">
-                    After Completion (reschedules after done)
-                  </option>
-                </select>
-              </div>
-
-              {/* Compact End Recurrence Selection */}
-              <div className="pt-2 border-t border-tt-border/80">
-                <label
-                  htmlFor="end-mode-select"
-                  className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
-                >
-                  Ends
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
-                  <select
-                    id="end-mode-select"
-                    value={endMode}
-                    onChange={(e) => {
-                      const mode = e.target.value as EndMode;
-                      setEndMode(mode);
-                      if (mode === 'never') {
-                        setEndOnDate('');
-                        setEndAfterCount('');
-                      }
-                    }}
-                    className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
-                  >
-                    <option value="never">Never (repeats indefinitely)</option>
-                    <option value="on_date">On specific date</option>
-                    <option value="after_count">After number of occurrences</option>
-                  </select>
-
-                  {endMode === 'on_date' && (
-                    <input
-                      id="end-on-date-input"
-                      type="date"
-                      aria-label="End date"
-                      value={endOnDate}
-                      onChange={(e) => setEndOnDate(e.target.value)}
-                      className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
-                    />
-                  )}
-
-                  {endMode === 'after_count' && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="end-after-count-input"
-                        type="number"
-                        min="1"
-                        aria-label="Number of occurrences"
-                        placeholder="e.g. 10"
-                        value={endAfterCount}
-                        onChange={(e) => setEndAfterCount(e.target.value)}
-                        className="w-28 h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
-                      />
-                      <span className="text-sm sm:text-base font-semibold text-tt-text/80">
-                        occurrences
-                      </span>
+                  {/* Month Day selection */}
+                  {intervalUnit === 'months' && (
+                    <div className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-tt-elevated border border-tt-border">
+                      <label className="inline-flex items-center gap-2.5 text-base sm:text-[17px] font-semibold text-tt-text cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useMonthDay}
+                          onChange={(e) => setUseMonthDay(e.target.checked)}
+                          className="w-5 h-5 rounded border-tt-border accent-tt-blue cursor-pointer"
+                        />
+                        On Day of Month
+                      </label>
+                      {useMonthDay && (
+                        <div className="inline-flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            max="31"
+                            value={monthDay}
+                            aria-label="Day of month"
+                            onChange={(e) =>
+                              setMonthDay(
+                                Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1))
+                              )
+                            }
+                            className="w-20 h-10 px-3 bg-tt-sidebar border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
+                          />
+                          <span className="text-sm sm:text-base text-tt-text/90 font-medium">
+                            of each month
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              </div>
 
-              {/* Remove repeat action */}
-              <div className="pt-2 flex justify-end border-t border-tt-border/60">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsRecurring(false);
-                    setPanel('none');
-                  }}
-                  className="text-xs sm:text-sm font-semibold text-tt-secondary hover:text-red-500 transition-colors cursor-pointer py-1 px-2"
-                >
-                  Remove repeat
-                </button>
-              </div>
+                  {/* End Recurrence Selection */}
+                  <div className="pt-2 border-t border-tt-border/80">
+                    <label
+                      htmlFor="end-mode-select"
+                      className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                    >
+                      Ends
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
+                      <select
+                        id="end-mode-select"
+                        value={endMode}
+                        onChange={(e) => {
+                          const mode = e.target.value as EndMode;
+                          setEndMode(mode);
+                          if (mode === 'never') {
+                            setEndOnDate('');
+                            setEndAfterCount('');
+                          }
+                        }}
+                        className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                      >
+                        <option value="never">Never (repeats indefinitely)</option>
+                        <option value="on_date">On specific date</option>
+                        <option value="after_count">After number of occurrences</option>
+                      </select>
+
+                      {endMode === 'on_date' && (
+                        <input
+                          id="end-on-date-input"
+                          type="date"
+                          aria-label="End date"
+                          value={endOnDate}
+                          onChange={(e) => setEndOnDate(e.target.value)}
+                          className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
+                        />
+                      )}
+
+                      {endMode === 'after_count' && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="end-after-count-input"
+                            type="number"
+                            min="1"
+                            aria-label="Number of occurrences"
+                            placeholder="e.g. 10"
+                            value={endAfterCount}
+                            onChange={(e) => setEndAfterCount(e.target.value)}
+                            className="w-28 h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
+                          />
+                          <span className="text-sm sm:text-base font-semibold text-tt-text/80">
+                            occurrences
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Approximately: Min, Max, Unit */}
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label
+                        htmlFor="repeat-min-input"
+                        className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                      >
+                        Min
+                      </label>
+                      <input
+                        id="repeat-min-input"
+                        type="number"
+                        min="1"
+                        max="999"
+                        value={minInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMinInput(v);
+                          const n = parseInt(v, 10);
+                          if (!Number.isNaN(n) && n >= 1) {
+                            setIntervalValue(Math.min(999, n));
+                          }
+                        }}
+                        onBlur={() => {
+                          setMinInput(String(intervalValue));
+                          if (maxIntervalValue < intervalValue) {
+                            setMaxIntervalValue(intervalValue);
+                            setMaxInput(String(intervalValue));
+                          }
+                        }}
+                        className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="repeat-max-input"
+                        className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                      >
+                        Max
+                      </label>
+                      <input
+                        id="repeat-max-input"
+                        type="number"
+                        min={intervalValue}
+                        max="999"
+                        value={maxInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setMaxInput(v);
+                          const n = parseInt(v, 10);
+                          if (!Number.isNaN(n) && n >= 1) {
+                            setMaxIntervalValue(Math.min(999, Math.max(intervalValue, n)));
+                          }
+                        }}
+                        onBlur={() => {
+                          const clamped = Math.max(intervalValue, maxIntervalValue);
+                          setMaxIntervalValue(clamped);
+                          setMaxInput(String(clamped));
+                        }}
+                        className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="repeat-unit-select"
+                        className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                      >
+                        Unit
+                      </label>
+                      <select
+                        id="repeat-unit-select"
+                        value={intervalUnit}
+                        onChange={(e) => setIntervalUnit(e.target.value as IntervalUnit)}
+                        className="w-full h-11 sm:h-12 px-2.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                      >
+                        <option value="days">Days</option>
+                        <option value="weeks">Weeks</option>
+                        <option value="months">Months</option>
+                        <option value="years">Years</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Ends (Never or On specific date) */}
+                  <div className="pt-2 border-t border-tt-border/80">
+                    <label
+                      htmlFor="end-mode-select"
+                      className="block text-base sm:text-[17px] font-bold text-tt-text mb-1"
+                    >
+                      Ends
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center">
+                      <select
+                        id="end-mode-select"
+                        value={endMode === 'on_date' ? 'on_date' : 'never'}
+                        onChange={(e) => {
+                          const mode = e.target.value as 'never' | 'on_date';
+                          setEndMode(mode);
+                          if (mode === 'never') {
+                            setEndOnDate('');
+                          }
+                        }}
+                        className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                      >
+                        <option value="never">Never (repeats indefinitely)</option>
+                        <option value="on_date">On specific date</option>
+                      </select>
+
+                      {endMode === 'on_date' && (
+                        <input
+                          id="end-on-date-input"
+                          type="date"
+                          aria-label="End date"
+                          value={endOnDate}
+                          onChange={(e) => setEndOnDate(e.target.value)}
+                          className="w-full h-11 sm:h-12 px-3.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-[17px] font-semibold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Completion History Panel (when editing) */}
+                  {initialTask?.id && (
+                    <div
+                      ref={historySectionRef}
+                      data-testid="completion-history-panel"
+                      className="pt-2.5 border-t border-tt-border/80 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs sm:text-sm font-semibold text-tt-secondary">
+                          {(() => {
+                            const count = localHistory.length;
+                            const sortedAsc = [...localHistory].sort((a, b) => a - b);
+                            let avgText = '';
+                            if (sortedAsc.length >= 2) {
+                              const firstDay = parseDate(formatDate(new Date(sortedAsc[0])));
+                              const lastDay = parseDate(
+                                formatDate(new Date(sortedAsc[sortedAsc.length - 1]))
+                              );
+                              const span = Math.max(
+                                0,
+                                Math.round((lastDay.getTime() - firstDay.getTime()) / 86400000)
+                              );
+                              const avg = Math.round(span / (sortedAsc.length - 1));
+                              avgText = ` · Avg every ${avg}d`;
+                            }
+                            return `Done ${count} ${count === 1 ? 'time' : 'times'}${avgText}`;
+                          })()}
+                        </div>
+                        {onLogCompletionDate && (
+                          <label className="relative inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-tt-blue hover:text-tt-blue-hover cursor-pointer px-2 py-1 rounded-lg hover:bg-tt-blue-soft/60">
+                            <span>+ Log date</span>
+                            <input
+                              type="date"
+                              aria-label="Log past completion date"
+                              max={todayStr}
+                              value=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val || !initialTask.id) return;
+                                const ts = completionTimestampForDate(val);
+                                setLocalHistory((prev) =>
+                                  prev.some((p) => formatDate(new Date(p)) === val)
+                                    ? prev
+                                    : [...prev, ts].sort((a, b) => a - b)
+                                );
+                                void onLogCompletionDate(initialTask.id, val);
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      {localHistory.length > 0 && (
+                        <ul className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                          {[...localHistory]
+                            .sort((a, b) => b - a)
+                            .map((ts) => {
+                              const dStr = formatDate(new Date(ts));
+                              const label =
+                                dStr === todayStr
+                                  ? 'Today'
+                                  : parseDate(dStr).toLocaleDateString(undefined, {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      year: 'numeric',
+                                    });
+                              return (
+                                <li
+                                  key={ts}
+                                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-tt-elevated border border-tt-border/70 text-sm text-tt-text"
+                                >
+                                  <span>{label}</span>
+                                  {onRemoveCompletionTimestamp && (
+                                    <button
+                                      type="button"
+                                      aria-label={`Remove completion on ${dStr}`}
+                                      onClick={() => {
+                                        if (!initialTask.id) return;
+                                        setLocalHistory((prev) => prev.filter((p) => p !== ts));
+                                        void onRemoveCompletionTimestamp(initialTask.id, ts);
+                                      }}
+                                      className="p-1 text-tt-muted hover:text-red-500 rounded cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
@@ -799,11 +1168,33 @@ export function QuickAddSheet({
         open={dateMenuOpen}
         anchorRef={dateButtonRef}
         active={datePreset}
-        dateValue={datePart}
+        mode={isApproxMode ? 'last_done' : 'due'}
+        allowNoDate={!isRecurring}
+        maxDate={isApproxMode ? todayStr : undefined}
+        dateValue={isApproxMode ? (initialLastDoneDate ?? '') : datePart}
         onClose={() => setDateMenuOpen(false)}
-        onToday={() => setDueAt(todayStr)}
-        onTomorrow={() => setDueAt(tomorrowStr)}
-        onDatePicked={setDueAt}
+        onToday={() => {
+          if (isApproxMode) setInitialLastDoneDate(todayStr);
+          else setDueAt(todayStr);
+        }}
+        onTomorrow={isApproxMode ? undefined : () => setDueAt(tomorrowStr)}
+        onNoDate={() => {
+          if (isApproxMode) setInitialLastDoneDate(null);
+          else setDueAt(null);
+        }}
+        onDatePicked={(val) => {
+          if (isApproxMode) setInitialLastDoneDate(val);
+          else setDueAt(val);
+        }}
+      />
+      <RepeatChoiceMenu
+        open={repeatMenuOpen}
+        anchorRef={repeatButtonRef}
+        active={isRecurring ? recurrenceType : null}
+        onClose={() => setRepeatMenuOpen(false)}
+        onSelectFixed={handleSelectFixed}
+        onSelectApproximate={handleSelectApproximate}
+        onClearRepeat={handleClearRepeat}
       />
     </div>
   );

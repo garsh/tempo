@@ -33,6 +33,7 @@ export interface TaskSearchViewProps {
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
   onRequestChangeDate: (task: Task, anchorRect?: DOMRect) => void;
+  onRequestLogDate?: (task: Task, anchorRect?: DOMRect) => void;
   onRequestSkipOccurrence: (task: Task) => void;
   onRequestDelete: (task: Task) => void;
   inputRef?: RefObject<HTMLInputElement | null>;
@@ -54,6 +55,7 @@ export function TaskSearchView({
   onEdit,
   onDelete,
   onRequestChangeDate,
+  onRequestLogDate,
   onRequestSkipOccurrence,
   onRequestDelete,
   inputRef,
@@ -196,6 +198,7 @@ export function TaskSearchView({
         onComplete={item.completable ? onComplete : NOOP_COMPLETE}
         onUncomplete={item.completable ? onUncomplete : undefined}
         onRequestChangeDate={onRequestChangeDate}
+        onRequestLogDate={onRequestLogDate}
         onRequestSkipOccurrence={isCompletedItem ? undefined : onRequestSkipOccurrence}
         onRequestDelete={onRequestDelete}
         onDelete={onDelete}

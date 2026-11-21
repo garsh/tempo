@@ -96,15 +96,38 @@ describe('QuickAddSheet date menu', () => {
     const choices = Array.from(menu!.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')).map((el) =>
       el.textContent?.trim(),
     );
-    expect(choices).toEqual(['Today', 'Tomorrow', 'Select']);
+    expect(choices).toEqual(['Today', 'Tomorrow', 'Select', 'No date']);
     expect(menu!.querySelector('select')).toBeNull();
-    expect(menu!.textContent).not.toContain('No date');
-    expect(view.container.textContent).not.toContain('No date');
 
     const dateInput = menu!.querySelector('input[type="date"]');
     expect(dateInput?.getAttribute('aria-label')).toBe('Select');
     expect(dateButton(view.container).getAttribute('aria-expanded')).toBe('true');
     expect(dateButton(view.container).getAttribute('aria-haspopup')).toBe('menu');
+
+    view.unmount();
+  });
+
+  it('hides No date while On fixed interval repeat is active', () => {
+    const view = mount(<QuickAddSheet isOpen={true} onSave={vi.fn()} onClose={vi.fn()} />);
+
+    act(() => {
+      view.container.querySelector<HTMLButtonElement>('button[aria-label="Repeat"]')!.click();
+    });
+    const fixedOption = Array.from(view.container.querySelectorAll('[role="menuitemradio"]')).find(
+      (el) => el.textContent?.includes('On fixed interval'),
+    ) as HTMLButtonElement | undefined;
+    expect(fixedOption).toBeTruthy();
+    act(() => {
+      fixedOption!.click();
+    });
+
+    openDateMenu(view.container);
+    const menu = view.container.querySelector('#date-choice-menu');
+    const choices = Array.from(menu!.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(choices).toEqual(['Today', 'Tomorrow', 'Select']);
+    expect(menu!.textContent).not.toContain('No date');
 
     view.unmount();
   });
@@ -176,7 +199,7 @@ describe('QuickAddSheet date menu', () => {
     view.unmount();
   });
 
-  it('leaves No date off the menu when the routine has no due day', () => {
+  it('includes No date on the menu and marks it checked when editing an undated routine', () => {
     const view = mount(
       <QuickAddSheet isOpen={true} onSave={vi.fn()} onClose={vi.fn()} initialTask={undatedTask()} />,
     );
@@ -187,7 +210,11 @@ describe('QuickAddSheet date menu', () => {
     const choices = Array.from(menu!.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')).map((el) =>
       el.textContent?.trim(),
     );
-    expect(choices).toEqual(['Today', 'Tomorrow', 'Select']);
+    expect(choices).toEqual(['Today', 'Tomorrow', 'Select', 'No date']);
+    const noDateItem = Array.from(menu!.querySelectorAll('[role="menuitemradio"]')).find(
+      (el) => el.textContent?.trim() === 'No date',
+    );
+    expect(noDateItem?.getAttribute('aria-checked')).toBe('true');
 
     view.unmount();
   });

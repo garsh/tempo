@@ -1,6 +1,6 @@
 export type RecurrenceType = 'after_completion' | 'fixed_interval';
 
-export type IntervalUnit = 'days' | 'weeks' | 'months';
+export type IntervalUnit = 'days' | 'weeks' | 'months' | 'years';
 
 /** 0 = Sunday … 6 = Saturday (matches Date#getDay). */
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -32,6 +32,8 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
 export interface RecurrenceRule {
   type: RecurrenceType;
   intervalValue: number;
+  /** Optional upper bound (>= intervalValue) defining an approximate min–max window in Tasks. */
+  maxIntervalValue?: number | null;
   intervalUnit: IntervalUnit;
   weekdays?: Weekday[];
   monthDay?: number;
@@ -64,6 +66,8 @@ export interface Task {
   recurrence?: RecurrenceRule | null;
   completedAt?: number | null;
   completionHistory: number[];
+  /** Completion timestamps explicitly deleted by the user (CRDT tombstones subtracted during merge). */
+  removedCompletions?: number[];
   /** Local calendar dates (YYYY-MM-DD) where scheduled occurrences were skipped. */
   skippedDates?: string[];
   sortOrder?: number;
@@ -107,6 +111,7 @@ export type TaskInput = Omit<
   id?: string;
   listId?: string;
   completedAt?: number | null;
+  completionHistory?: number[];
 };
 
 export type TaskListInput = Omit<TaskList, 'id' | 'createdAt' | 'updatedAt'> & {

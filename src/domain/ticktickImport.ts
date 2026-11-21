@@ -281,8 +281,8 @@ export function parseImportRepeat(raw: string | undefined): RecurrenceRule | nul
     } else if (freq === 'MONTHLY') {
       intervalUnit = 'months';
     } else if (freq === 'YEARLY') {
-      intervalUnit = 'months';
-      intervalValue = interval * 12;
+      intervalUnit = 'years';
+      intervalValue = interval;
     } else {
       return null;
     }
@@ -290,36 +290,45 @@ export function parseImportRepeat(raw: string | undefined): RecurrenceRule | nul
     return {
       type,
       intervalValue,
+      ...(type === 'after_completion' ? { maxIntervalValue: intervalValue } : {}),
       intervalUnit,
-      ...(ruleWeekdays ? { weekdays: ruleWeekdays } : {}),
-      ...(monthDay !== undefined && intervalUnit === 'months' ? { monthDay } : {}),
+      ...(ruleWeekdays && type !== 'after_completion' ? { weekdays: ruleWeekdays } : {}),
+      ...(monthDay !== undefined && intervalUnit === 'months' && type !== 'after_completion'
+        ? { monthDay }
+        : {}),
       ...(endOnDate ? { endOnDate } : {}),
-      ...(endAfterCount ? { endAfterCount } : {}),
+      ...(endAfterCount && type !== 'after_completion' ? { endAfterCount } : {}),
     };
   }
 
   const lower = s.toLowerCase();
+  const approxExtra = (val: number) =>
+    type === 'after_completion' ? { maxIntervalValue: val } : {};
   if (lower === 'daily' || lower === 'every day') {
-    return { type, intervalValue: 1, intervalUnit: 'days' };
+    return { type, intervalValue: 1, ...approxExtra(1), intervalUnit: 'days' };
   }
   if (lower === 'weekly' || lower === 'every week') {
-    return { type, intervalValue: 1, intervalUnit: 'weeks' };
+    return { type, intervalValue: 1, ...approxExtra(1), intervalUnit: 'weeks' };
   }
   if (lower === 'weekdays' || lower === 'every weekday') {
-    return { type, intervalValue: 1, intervalUnit: 'weeks', weekdays: [1, 2, 3, 4, 5] };
+    return type === 'after_completion'
+      ? { type, intervalValue: 1, maxIntervalValue: 1, intervalUnit: 'weeks' }
+      : { type, intervalValue: 1, intervalUnit: 'weeks', weekdays: [1, 2, 3, 4, 5] };
   }
   if (lower === 'monthly' || lower === 'every month') {
-    return { type, intervalValue: 1, intervalUnit: 'months' };
+    return { type, intervalValue: 1, ...approxExtra(1), intervalUnit: 'months' };
   }
   if (lower === 'yearly' || lower === 'annually' || lower === 'every year') {
-    return { type, intervalValue: 12, intervalUnit: 'months' };
+    return { type, intervalValue: 1, ...approxExtra(1), intervalUnit: 'years' };
   }
   const everyMatch = lower.match(/^every\s+(\d+)\s+(day|week|month|year)s?$/);
   if (everyMatch) {
     const n = Math.max(1, parseInt(everyMatch[1], 10) || 1);
     const unit = everyMatch[2];
-    if (unit === 'year') return { type, intervalValue: n * 12, intervalUnit: 'months' };
-    return { type, intervalValue: n, intervalUnit: `${unit}s` as IntervalUnit };
+    if (unit === 'year') {
+      return { type, intervalValue: n, ...approxExtra(n), intervalUnit: 'years' };
+    }
+    return { type, intervalValue: n, ...approxExtra(n), intervalUnit: `${unit}s` as IntervalUnit };
   }
 
   return null;
@@ -433,6 +442,26 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
     const createdAt = parseTimestampMs(createdRaw, now);
     const completedAt = isDone ? parseTimestampMs(completedRaw, now) : null;
 
+    // Ignore open undated non-recurring rows (artifacts of cleared/abandoned TickTick tasks)
+    if (!isDone && !parsedRecurrence && !dueAt) {
+      skipped += 1;
+      continue;
+    }
+
+    const resolvedDueAt =
+      !isDone && parsedRecurrence
+        ? parsedRecurrence.type === 'after_completion'
+          ? null
+          : dueAt ?? formatDate(new Date(createdAt))
+        : isDone && !parsedRecurrence && !dueAt && completedAt !== null
+          ? formatDate(new Date(completedAt))
+          : dueAt;
+
+    if (isDone && !parsedRecurrence && !resolvedDueAt) {
+      skipped += 1;
+      continue;
+    }
+
     const titleLower = title.trim().toLowerCase();
     const repeatKey = parsedRecurrence
       ? `${listId}::${titleLower}::${repeatRaw.trim()}`
@@ -444,7 +473,7 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       title: title.trim(),
       notes: notes || undefined,
       listId,
-      dueAt: !isDone && parsedRecurrence ? dueAt ?? formatDate(new Date(createdAt)) : dueAt,
+      dueAt: resolvedDueAt,
       priority,
       pinned: false,
       tags: tags.length ? tags : undefined,
@@ -457,7 +486,7 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       deletedAt: null,
     };
 
-    if (identityKey && (parsedRecurrence || dueAt || isDone)) {
+    if (identityKey && (parsedRecurrence || resolvedDueAt || isDone)) {
       identitiesWithDatedOrRecurringOrDone.add(identityKey);
     }
 
@@ -468,12 +497,12 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       if (identityKey && !activeRecurringByIdentity.has(identityKey)) {
         activeRecurringByIdentity.set(identityKey, task);
       }
-    } else if (!isDone && !parsedRecurrence && !dueAt && identityKey) {
+    } else if (!isDone && !parsedRecurrence && !resolvedDueAt && identityKey) {
       orphanOpenCandidates.push({ index: tasks.length, identityKey });
     } else if (isDone && (repeatKey || identityKey)) {
       let compTs = completedAt ?? now;
-      if (!completedRaw && dueAt) {
-        const [y, m, d] = dueAt.slice(0, 10).split('-').map(Number);
+      if (!completedRaw && resolvedDueAt) {
+        const [y, m, d] = resolvedDueAt.slice(0, 10).split('-').map(Number);
         compTs = new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
       }
       completedRecurringCandidates.push({

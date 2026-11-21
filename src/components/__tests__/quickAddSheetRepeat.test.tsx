@@ -3,6 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickAddSheet } from '../QuickAddSheet';
+import { INBOX_LIST_ID, type Task } from '../../types/task';
 
 function mount(ui: ReactElement) {
   const container = document.createElement('div');
@@ -29,8 +30,25 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+function openRepeatChoice(container: HTMLElement, label: 'On fixed interval' | 'Approximately' | 'No repeat') {
+  const btn = container.querySelector<HTMLButtonElement>('button[aria-label="Repeat"]');
+  expect(btn).toBeTruthy();
+  act(() => {
+    btn!.click();
+  });
+  const menu = container.querySelector('#repeat-choice-menu');
+  expect(menu).toBeTruthy();
+  const option = Array.from(
+    menu!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"], [role="menuitem"]')
+  ).find((el) => el.textContent?.includes(label));
+  expect(option).toBeTruthy();
+  act(() => {
+    option!.click();
+  });
+}
+
 describe('QuickAddSheet recurrence UI', () => {
-  it('Repeat button starts greyed out on white background, touching highlights blue and opens repeat dialog', async () => {
+  it('Repeat button starts greyed out, opens RepeatChoiceMenu, and opens Fixed panel cleanly', async () => {
     const onSave = vi.fn();
     const onClose = vi.fn();
     const view = mount(
@@ -52,16 +70,29 @@ describe('QuickAddSheet recurrence UI', () => {
     expect(repeatToolbarBtn!.className).toContain('bg-white');
     expect(repeatToolbarBtn!.className).toContain('text-zinc-400');
 
-    // Tap Repeat toolbar button: highlights blue and opens repeat dialog
+    // Tap Repeat toolbar button: opens RepeatChoiceMenu with On fixed interval / Approximately
     act(() => {
       repeatToolbarBtn!.click();
+    });
+    const choiceMenu = view.container.querySelector('#repeat-choice-menu');
+    expect(choiceMenu).toBeTruthy();
+    expect(choiceMenu!.textContent).toContain('On fixed interval');
+    expect(choiceMenu!.textContent).toContain('Approximately');
+    expect(choiceMenu!.textContent).not.toContain('No repeat');
+
+    // Choose On fixed interval
+    const fixedBtn = Array.from(choiceMenu!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find(
+      (b) => b.textContent?.includes('On fixed interval')
+    );
+    act(() => {
+      fixedBtn!.click();
     });
 
     expect(repeatToolbarBtn!.getAttribute('aria-pressed')).toBe('true');
     expect(repeatToolbarBtn!.className).toContain('bg-tt-blue');
     expect(repeatToolbarBtn!.className).toContain('text-white');
+    expect(repeatToolbarBtn!.textContent?.trim()).toBe('Fixed');
 
-    // Check that repeat panel is now open directly with interval and unit inputs
     const intervalInput = view.container.querySelector<HTMLInputElement>('#repeat-interval-input');
     expect(intervalInput).toBeTruthy();
     expect(intervalInput!.value).toBe('1');
@@ -69,25 +100,24 @@ describe('QuickAddSheet recurrence UI', () => {
     const unitSelect = view.container.querySelector<HTMLSelectElement>('#repeat-unit-select');
     expect(unitSelect).toBeTruthy();
     expect(unitSelect!.value).toBe('days');
+    expect(Array.from(unitSelect!.options).map((o) => o.value)).toEqual([
+      'days',
+      'weeks',
+      'months',
+      'years',
+    ]);
 
-    // Check recurrence logic selection box defaults to fixed_interval
-    const logicSelect = view.container.querySelector<HTMLSelectElement>('#recurrence-logic-select');
-    expect(logicSelect).toBeTruthy();
-    expect(logicSelect!.value).toBe('fixed_interval');
+    // Recurrence Logic dropdown was removed under S2
+    expect(view.container.querySelector('#recurrence-logic-select')).toBeNull();
 
-    // Check ends mode selection box defaults to never
     const endModeSelect = view.container.querySelector<HTMLSelectElement>('#end-mode-select');
     expect(endModeSelect).toBeTruthy();
     expect(endModeSelect!.value).toBe('never');
 
-    // Redundant header, enable switch, and "Every day" banner should NOT exist
-    expect(view.container.textContent).not.toContain('Repeat routine');
-    expect(view.container.querySelector('button[role="switch"]')).toBeNull();
-
     view.unmount();
   });
 
-  it('allows toggling recurrence off by tapping the highlighted Repeat toolbar button or Remove repeat', async () => {
+  it('toggles recurrence off via RepeatChoiceMenu No repeat without rendering a Remove repeat button', async () => {
     const onSave = vi.fn();
     const onClose = vi.fn();
     const view = mount(
@@ -101,45 +131,59 @@ describe('QuickAddSheet recurrence UI', () => {
     const repeatToolbarBtn = view.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Repeat"]'
     );
-    // Open repeat panel
-    act(() => {
-      repeatToolbarBtn!.click();
-    });
+    openRepeatChoice(view.container, 'On fixed interval');
 
     expect(repeatToolbarBtn!.getAttribute('aria-pressed')).toBe('true');
-    expect(view.container.querySelector('#repeat-interval-input')).toBeTruthy();
-
-    // Tap highlighted Repeat button again: turns off repeat and closes panel
-    act(() => {
-      repeatToolbarBtn!.click();
-    });
-
-    expect(repeatToolbarBtn!.getAttribute('aria-pressed')).toBe('false');
-    expect(repeatToolbarBtn!.className).toContain('bg-white');
-    expect(view.container.querySelector('#repeat-interval-input')).toBeNull();
-
-    // Re-open and test "Remove repeat" button
-    act(() => {
-      repeatToolbarBtn!.click();
-    });
     expect(view.container.querySelector('#repeat-interval-input')).toBeTruthy();
 
     const removeRepeatBtn = Array.from(view.container.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('Remove repeat')
     );
-    expect(removeRepeatBtn).toBeTruthy();
+    expect(removeRepeatBtn).toBeUndefined();
 
-    act(() => {
-      removeRepeatBtn!.click();
-    });
+    // Tap Repeat again while panel is open -> RepeatChoiceMenu -> No repeat
+    openRepeatChoice(view.container, 'No repeat');
 
     expect(repeatToolbarBtn!.getAttribute('aria-pressed')).toBe('false');
+    expect(repeatToolbarBtn!.className).toContain('bg-white');
     expect(view.container.querySelector('#repeat-interval-input')).toBeNull();
 
     view.unmount();
   });
 
-  it('updates recurrence parameters and saves with the configured recurrence rule', async () => {
+  it('opens the recurring section automatically when editing an existing recurring task', () => {
+    const existingFixedTask: Task = {
+      id: 'rec-fixed-1',
+      title: 'Water plants',
+      listId: INBOX_LIST_ID,
+      dueAt: '2026-05-20',
+      startDate: '2026-05-01',
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 3,
+        intervalUnit: 'days',
+      },
+      completionHistory: [],
+      createdAt: 1000,
+      updatedAt: 1000,
+    };
+
+    const view = mount(
+      <QuickAddSheet
+        isOpen={true}
+        initialTask={existingFixedTask}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    const repeatInput = view.container.querySelector<HTMLInputElement>('#repeat-interval-input');
+    expect(repeatInput).toBeTruthy();
+    expect(repeatInput!.value).toBe('3');
+    view.unmount();
+  });
+
+  it('configures On fixed interval with weekdays and endAfterCount', async () => {
     const onSave = vi.fn();
     const onClose = vi.fn();
     const view = mount(
@@ -150,69 +194,35 @@ describe('QuickAddSheet recurrence UI', () => {
       />
     );
 
-    // Type title
     const titleInput = view.container.querySelector<HTMLInputElement>('input[aria-label="Routine title"]');
-    expect(titleInput).toBeTruthy();
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(titleInput, 'Water the plants');
+      setter?.call(titleInput, 'Gym workout');
       titleInput!.dispatchEvent(new Event('input', { bubbles: true }));
       titleInput!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    // Open repeat panel
-    const repeatToolbarBtn = view.container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Repeat"]'
-    );
-    act(() => {
-      repeatToolbarBtn!.click();
-    });
+    openRepeatChoice(view.container, 'On fixed interval');
 
-    // Change unit to weeks
-    const unitSelect = view.container.querySelector<HTMLSelectElement>('#repeat-unit-select');
-    expect(unitSelect).toBeTruthy();
-    act(() => {
-      unitSelect!.value = 'weeks';
-      unitSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    // Change interval to 2
-    const intervalInput = view.container.querySelector<HTMLInputElement>('#repeat-interval-input');
-    expect(intervalInput).toBeTruthy();
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(intervalInput, '2');
-      intervalInput!.dispatchEvent(new Event('input', { bubbles: true }));
-      intervalInput!.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    // Select Mon (1) and Fri (5)
+    // Tapping Mon/Wed/Fri while on 1 Day auto-switches unit to weeks
     const weekdayBtns = Array.from(view.container.querySelectorAll('button')).filter((b) =>
-      ['Mon', 'Fri'].includes(b.textContent?.trim() || '')
+      ['Mon', 'Wed', 'Fri'].includes(b.textContent?.trim() || '')
     );
-    expect(weekdayBtns.length).toBe(2);
+    expect(weekdayBtns.length).toBe(3);
     act(() => {
       weekdayBtns.forEach((btn) => btn.click());
     });
 
-    // Recurrence logic is fixed_interval by default; switch to after_completion to test selection box
-    const logicSelect = view.container.querySelector<HTMLSelectElement>('#recurrence-logic-select');
-    expect(logicSelect).toBeTruthy();
-    act(() => {
-      logicSelect!.value = 'after_completion';
-      logicSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const unitSelect = view.container.querySelector<HTMLSelectElement>('#repeat-unit-select');
+    expect(unitSelect!.value).toBe('weeks');
 
-    // Set end mode to after occurrences
     const endModeSelect = view.container.querySelector<HTMLSelectElement>('#end-mode-select');
-    expect(endModeSelect).toBeTruthy();
     act(() => {
       endModeSelect!.value = 'after_count';
       endModeSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
     const endCountInput = view.container.querySelector<HTMLInputElement>('#end-after-count-input');
-    expect(endCountInput).toBeTruthy();
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
       setter?.call(endCountInput, '10');
@@ -220,26 +230,89 @@ describe('QuickAddSheet recurrence UI', () => {
       endCountInput!.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    // Submit form
     const createBtn = view.container.querySelector<HTMLButtonElement>('button[aria-label="Create routine"]');
-    expect(createBtn).toBeTruthy();
-    expect(createBtn!.disabled).toBe(false);
-
     await act(async () => {
       createBtn!.click();
     });
 
     expect(onSave).toHaveBeenCalledTimes(1);
     const savedTask = onSave.mock.calls[0][0];
-    expect(savedTask.title).toBe('Water the plants');
+    expect(savedTask.title).toBe('Gym workout');
     expect(savedTask.recurrence).toEqual({
-      type: 'after_completion',
-      intervalValue: 2,
+      type: 'fixed_interval',
+      intervalValue: 1,
       intervalUnit: 'weeks',
-      weekdays: [1, 5],
+      weekdays: [1, 3, 5],
       monthDay: undefined,
       endOnDate: null,
       endAfterCount: 10,
+    });
+
+    view.unmount();
+  });
+
+  it('configures Approximately with min/max window, clears due date, and supports optional endOnDate', async () => {
+    const onSave = vi.fn();
+    const view = mount(
+      <QuickAddSheet
+        isOpen={true}
+        onSave={onSave}
+        onClose={vi.fn()}
+        defaultDueAt={null}
+      />
+    );
+
+    const titleInput = view.container.querySelector<HTMLInputElement>('input[aria-label="Routine title"]');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(titleInput, 'Mow lawn');
+      titleInput!.dispatchEvent(new Event('input', { bubbles: true }));
+      titleInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    openRepeatChoice(view.container, 'Approximately');
+    expect(view.container.querySelector('button[aria-label="Last done"]')?.textContent).toContain('Not done yet');
+
+    const minInput = view.container.querySelector<HTMLInputElement>('#repeat-min-input')!;
+    const maxInput = view.container.querySelector<HTMLInputElement>('#repeat-max-input')!;
+    const unitSelect = view.container.querySelector<HTMLSelectElement>('#repeat-unit-select')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(minInput, '7');
+      minInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter?.call(maxInput, '10');
+      maxInput.dispatchEvent(new Event('input', { bubbles: true }));
+      unitSelect.value = 'days';
+      unitSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const endModeSelect = view.container.querySelector<HTMLSelectElement>('#end-mode-select')!;
+    act(() => {
+      endModeSelect.value = 'on_date';
+      endModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const endDateInput = view.container.querySelector<HTMLInputElement>('#end-on-date-input')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(endDateInput, '2026-10-31');
+      endDateInput.dispatchEvent(new Event('input', { bubbles: true }));
+      endDateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const createBtn = view.container.querySelector<HTMLButtonElement>('button[aria-label="Create routine"]')!;
+    await act(async () => {
+      createBtn.click();
+    });
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.dueAt).toBeNull();
+    expect(saved.recurrence).toEqual({
+      type: 'after_completion',
+      intervalValue: 7,
+      maxIntervalValue: 10,
+      intervalUnit: 'days',
+      endOnDate: '2026-10-31',
     });
 
     view.unmount();

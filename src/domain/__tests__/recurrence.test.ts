@@ -155,14 +155,23 @@ describe('Recurrence Engine', () => {
 
     it('formats human friendly recurrence labels', () => {
       expect(formatRecurrenceLabel('fixed_interval', 1, 'days')).toBe('Every day');
-      expect(formatRecurrenceLabel('after_completion', 5, 'days')).toBe('5 days after completion');
+      expect(formatRecurrenceLabel('fixed_interval', 1, 'years')).toBe('Every year');
+      expect(formatRecurrenceLabel('after_completion', 5, 'days')).toBe('Every 5 days (approx)');
       expect(
         formatRecurrenceLabel({
           type: 'after_completion',
           intervalValue: 2,
           intervalUnit: 'weeks',
         })
-      ).toBe('2 weeks after completion');
+      ).toBe('Every 2 weeks (approx)');
+      expect(
+        formatRecurrenceLabel({
+          type: 'after_completion',
+          intervalValue: 2,
+          maxIntervalValue: 3,
+          intervalUnit: 'months',
+        })
+      ).toBe('Every 2–3 months');
     });
 
     it('detects recurring vs completed one-off', () => {

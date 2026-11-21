@@ -94,20 +94,33 @@ function resolveConflict<T extends Mergeable>(
 
 export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
   return mergeEntities(localTasks, remoteTasks, (local, remote, winner) => {
+    const allRemoved = capTail(
+      Array.from(
+        new Set([...(local.removedCompletions || []), ...(remote.removedCompletions || [])])
+      ).sort((a, b) => a - b)
+    );
+    const removedSet = new Set(allRemoved);
+
     const allCompletions = capTail(
-      Array.from(new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])])).sort(
-        (a, b) => a - b
-      )
+      Array.from(new Set([...(local.completionHistory || []), ...(remote.completionHistory || [])]))
+        .filter((ts) => !removedSet.has(ts))
+        .sort((a, b) => a - b)
     );
 
     const allSkipped = capTail(
       Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])).sort()
     );
 
+    const isWindow =
+      winner.recurrence?.type === 'after_completion' ||
+      (winner.recurrence?.maxIntervalValue != null &&
+        winner.recurrence.maxIntervalValue >= winner.recurrence.intervalValue);
+
     return {
       ...winner,
-      startDate: winner.startDate || local.startDate || remote.startDate || null,
+      startDate: isWindow ? null : winner.startDate || local.startDate || remote.startDate || null,
       completionHistory: allCompletions,
+      ...(allRemoved.length > 0 ? { removedCompletions: allRemoved } : { removedCompletions: undefined }),
       skippedDates: allSkipped,
     };
   });

@@ -6,7 +6,7 @@ import {
   formatDueLabel,
   getDueDatePart,
   getSkipOccurrenceDate,
-  isRecurring,
+  isFixedRecurring,
 } from '../../domain/recurrence';
 import { usePrefs } from '../../prefs/prefs';
 
@@ -39,7 +39,7 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
 
   if (!isOpen || !task) return null;
 
-  const recurring = isRecurring(task);
+  const recurring = isFixedRecurring(task);
   const curDateStr = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date());
   const nextOccurrenceDueAt = recurring ? getSkipOccurrenceDate(task, curDateStr) : null;
 

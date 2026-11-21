@@ -4,11 +4,16 @@ import {
   completeTask,
   db,
   initDatabase,
+  logTaskCompletion,
+  removeTaskCompletion,
   reorderTasks,
   saveTask,
+  setTaskEndOnDate,
   skipTaskOccurrence,
   softDeleteTask,
+  stopRecurringTask,
   uncompleteTask,
+  undoCompleteUndatedTask,
 } from './db/db';
 import type { Task, TaskInput } from './types/task';
 import {
@@ -16,11 +21,18 @@ import {
   formatDate,
   getDueDatePart,
   getNextUncompletedOccurrenceDate,
+  getWindowProgress,
   isCompleted,
-  isRecurring,
+  isFixedRecurring,
+  isUndatedOneTime,
+  isWindowPeriodic,
   projectTaskForDate,
 } from './domain/recurrence';
-import { sortTasksForDailyView } from './domain/sorting';
+import {
+  sortTasksForDailyView,
+  sortUndatedOneTimeTasks,
+  sortWindowTasks,
+} from './domain/sorting';
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, shiftMonth, tasksDueOnDate } from './domain/calendar';
 import {
@@ -30,10 +42,13 @@ import {
   commitCalendarExpanded,
   defaultDateForMonth,
   jumpToToday,
+  readStoredActiveView,
   readStoredCalendarExpanded,
+  saveStoredActiveView,
   saveStoredCalendarExpanded,
   shiftWeek,
   stepCalendarView,
+  type ActiveMainView,
   type CalendarSwipeEvent,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
@@ -64,12 +79,16 @@ import { InstallPrompt } from './components/InstallPrompt';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { TaskSearchView } from './components/search/TaskSearchView';
+import { TasksView } from './components/TasksView';
+import { RecurringTasksView } from './components/RecurringTasksView';
 import { triggerAppUpdate } from './components/PwaUpdatePrompt';
 import {
+  Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Keyboard,
+  ListChecks,
   MoreVertical,
   Plus,
   X,
@@ -114,6 +133,15 @@ export function App() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeView, setActiveView] = useState<ActiveMainView>(readStoredActiveView);
+  const [isRecurringOpen, setIsRecurringOpen] = useState(false);
+  const [undoToast, setUndoToast] = useState<{
+    id: number;
+    message: string;
+    onUndo: () => Promise<void> | void;
+  } | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
+  const toastPopoverRef = useRef<HTMLDivElement>(null);
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -136,6 +164,10 @@ export function App() {
   useEffect(() => {
     saveStoredCalendarExpanded(calExpanded);
   }, [calExpanded]);
+
+  useEffect(() => {
+    saveStoredActiveView(activeView);
+  }, [activeView]);
 
   const calAreaRef = useRef<HTMLDivElement>(null);
   const monthViewRef = useRef<CalendarMonthHandle>(null);
@@ -219,6 +251,7 @@ export function App() {
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
   const [overflowAnchor, setOverflowAnchor] = useState<DOMRect | null>(null);
   const changeDatePickerRef = useRef<ChangeDatePickerHandle | null>(null);
+  const logDatePickerRef = useRef<ChangeDatePickerHandle | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -303,12 +336,12 @@ export function App() {
     const overdue: Task[] = [];
     for (const t of activeTasks) {
       if (t.deletedAt || isCompleted(t)) continue;
-      if (isRecurring(t)) {
+      if (isFixedRecurring(t)) {
         const nextDate = getNextUncompletedOccurrenceDate(t, new Date());
         if (nextDate && nextDate < todayStr) {
           overdue.push(projectTaskForDate(t, nextDate));
         }
-      } else if (t.dueAt && getDueDatePart(t.dueAt) < todayStr) {
+      } else if (!t.recurrence && t.dueAt && getDueDatePart(t.dueAt) < todayStr) {
         overdue.push(t);
       }
     }
@@ -317,6 +350,46 @@ export function App() {
       overdue.filter((t) => !displayedKeys.has(`${t.id}:${t.dueAt || ''}`))
     );
   }, [prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks]);
+
+  const { visiblePeriodicTasks, tasksDotTone, undatedOneTimeTasks } = useMemo(() => {
+    const refNow = new Date();
+    const periodic: Task[] = [];
+    const oneTime: Task[] = [];
+    let hasOverdue = false;
+    let hasAmber = false;
+    let hasInWindow = false;
+
+    for (const t of activeTasks) {
+      if (t.deletedAt) continue;
+      if (isWindowPeriodic(t)) {
+        const prog = getWindowProgress(t, refNow);
+        if (prog?.visibleInTasks) {
+          periodic.push(t);
+          if (prog.stage === 'at_or_past_max' && prog.overdueIntensity > 0) {
+            hasOverdue = true;
+          } else if (prog.stage === 'at_or_past_max' || prog.stage === 'not_done_yet') {
+            hasAmber = true;
+          } else {
+            hasInWindow = true;
+          }
+        }
+      } else if (isUndatedOneTime(t) && !isCompleted(t)) {
+        oneTime.push(t);
+      }
+    }
+
+    return {
+      visiblePeriodicTasks: sortWindowTasks(periodic, refNow),
+      tasksDotTone: hasOverdue
+        ? ('overdue' as const)
+        : hasAmber
+          ? ('amber' as const)
+          : hasInWindow
+            ? ('green' as const)
+            : null,
+      undatedOneTimeTasks: sortUndatedOneTimeTasks(oneTime),
+    };
+  }, [activeTasks]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
     const todayStr = formatDate(new Date());
@@ -405,7 +478,48 @@ export function App() {
       area.removeEventListener('touchend', finishDrag);
       area.removeEventListener('touchcancel', finishDrag);
     };
-  }, [calExpanded, isSearchOpen]);
+  }, [calExpanded, isSearchOpen, isRecurringOpen, activeView]);
+
+  const dismissUndoToast = useCallback(() => {
+    if (undoTimerRef.current != null) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndoToast(null);
+  }, []);
+
+  const showUndoToast = useCallback((message: string, onUndo: () => Promise<void> | void) => {
+    if (undoTimerRef.current != null) {
+      window.clearTimeout(undoTimerRef.current);
+    }
+    setUndoToast({ id: Date.now(), message, onUndo });
+    undoTimerRef.current = window.setTimeout(() => {
+      undoTimerRef.current = null;
+      setUndoToast(null);
+    }, 5000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current != null) {
+        window.clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = toastPopoverRef.current;
+    if (!el || !undoToast) return;
+    if (typeof el.showPopover === 'function') {
+      try {
+        if (!el.matches(':popover-open')) {
+          el.showPopover();
+        }
+      } catch {
+        // Ignore environments without popover support
+      }
+    }
+  }, [undoToast]);
 
   const openSearch = useCallback(() => {
     calGestureRef.current = null;
@@ -425,6 +539,8 @@ export function App() {
       savedCalScrollTopRef.current = null;
       restoreMoreFocusRef.current = false;
       setIsSearchOpen(false);
+      setIsRecurringOpen(false);
+      setActiveView('calendar');
       setSearchQuery('');
       if (expandCompleted) {
         setCollapsedGroups((prev) =>
@@ -457,9 +573,22 @@ export function App() {
   }, []);
 
   const handleComplete = useCallback(async (id: string, dateStr?: string) => {
+    const target = activeTasks.find((t) => t.id === id) ?? (await db.tasks.get(id));
     await completeTask(id, dateStr);
     scheduleSync();
-  }, [scheduleSync]);
+    if (target && isUndatedOneTime(target)) {
+      showUndoToast(`Completed "${target.title}"`, async () => {
+        await undoCompleteUndatedTask(id);
+        scheduleSync();
+      });
+    } else if (target && isWindowPeriodic(target)) {
+      const targetDate = dateStr ?? formatDate(new Date());
+      showUndoToast(`Logged "${target.title}"`, async () => {
+        await uncompleteTask(id, targetDate);
+        scheduleSync();
+      });
+    }
+  }, [activeTasks, scheduleSync, showUndoToast]);
 
   const handleUncomplete = useCallback(async (id: string, dateStr?: string) => {
     await uncompleteTask(id, dateStr);
@@ -475,6 +604,17 @@ export function App() {
     await softDeleteTask(id);
     scheduleSync();
   }, [scheduleSync]);
+
+  const handleStopRepeating = useCallback(async (task: Task) => {
+    const res = await stopRecurringTask(task.id);
+    scheduleSync();
+    if (res) {
+      showUndoToast(`Stopped "${task.title}"`, async () => {
+        await setTaskEndOnDate(task.id, res.previousEndOnDate);
+        scheduleSync();
+      });
+    }
+  }, [scheduleSync, showUndoToast]);
 
   const handleSave = async (taskData: TaskInput) => {
     await saveTask(taskData);
@@ -508,9 +648,24 @@ export function App() {
     changeDatePickerRef.current?.open(task, anchorRect);
   }, []);
 
+  const handleRequestLogDate = useCallback((task: Task, anchorRect?: DOMRect) => {
+    logDatePickerRef.current?.open(task, anchorRect);
+  }, []);
+
   const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
     await handlePatchTask(taskId, { dueAt: newDueAt });
   };
+
+  const handleConfirmLogDate = useCallback(async (taskId: string, pickedDate: string | null) => {
+    if (!pickedDate) return;
+    await logTaskCompletion(taskId, pickedDate);
+    scheduleSync();
+  }, [scheduleSync]);
+
+  const handleRemoveCompletionTimestamp = useCallback(async (taskId: string, ts: number) => {
+    await removeTaskCompletion(taskId, ts);
+    scheduleSync();
+  }, [scheduleSync]);
 
   const handleConfirmSkipOccurrence = async (task: Task, dateToSkip: string) => {
     await skipTaskOccurrence(task.id, dateToSkip);
@@ -525,6 +680,7 @@ export function App() {
 
   const canOpenSearch =
     !isSearchOpen &&
+    !isRecurringOpen &&
     !isTaskModalOpen &&
     !isSettingsModalOpen &&
     !overflowAnchor &&
@@ -556,6 +712,10 @@ export function App() {
         }
         if (isSettingsModalOpen) {
           setIsSettingsModalOpen(false);
+          return;
+        }
+        if (isRecurringOpen) {
+          setIsRecurringOpen(false);
           return;
         }
         if (isSearchOpen) {
@@ -607,7 +767,12 @@ export function App() {
     setOverflowAnchor(e.currentTarget.getBoundingClientRect());
   };
 
-  const renderTaskRows = (tasks: Task[], dense: boolean, reorderEnabled = false) => {
+  const renderTaskRows = (
+    tasks: Task[],
+    dense: boolean,
+    reorderEnabled = false,
+    occurrenceDateStr?: string,
+  ) => {
     return (
       <ReorderableTaskList
         tasks={tasks}
@@ -623,12 +788,14 @@ export function App() {
             task={t}
             dense={dense}
             showDetails={prefs.showDetails}
+            occurrenceDateStr={occurrenceDateStr}
             onSelect={handleEdit}
             onComplete={handleComplete}
             onUncomplete={handleUncomplete}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onRequestChangeDate={handleRequestChangeDate}
+            onRequestLogDate={handleRequestLogDate}
             onRequestSkipOccurrence={setSkipOccurrenceTask}
             onRequestDelete={setDeleteConfirmTask}
             {...dragProps}
@@ -653,74 +820,130 @@ export function App() {
           onEdit={handleEdit}
           onDelete={handleDelete}
           onRequestChangeDate={handleRequestChangeDate}
+          onRequestLogDate={handleRequestLogDate}
           onRequestSkipOccurrence={setSkipOccurrenceTask}
           onRequestDelete={setDeleteConfirmTask}
           inputRef={searchInputRef}
+        />
+      ) : isRecurringOpen ? (
+        <RecurringTasksView
+          tasks={activeTasks}
+          showDetails={prefs.showDetails}
+          onClose={() => setIsRecurringOpen(false)}
+          onComplete={handleComplete}
+          onUncomplete={handleUncomplete}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onRequestChangeDate={handleRequestChangeDate}
+          onRequestLogDate={handleRequestLogDate}
+          onRequestSkipOccurrence={setSkipOccurrenceTask}
+          onRequestDelete={setDeleteConfirmTask}
         />
       ) : (
         <>
           {/* Header */}
           <header className="shrink-0 flex items-center justify-between gap-1 sm:gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
             <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
-              <SwipeableMonthTitle
-                ref={monthTitleRef}
-                prevTitle={prevCalHeaderTitle}
-                currentTitle={calHeaderTitle}
-                nextTitle={nextCalHeaderTitle}
-                canSwipePrev={canSwipePrevTitle}
-                canSwipeNext={canSwipeNextTitle}
-                expanded={calExpanded}
-                onClick={() => setCalExpanded((prev) => !prev)}
-              />
               <button
                 type="button"
-                onClick={() => setIsMonthYearPickerOpen(true)}
-                aria-label="Choose month and year"
-                aria-expanded={isMonthYearPickerOpen}
-                title="Choose month and year"
-                className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+                onClick={() => setActiveView((v) => (v === 'calendar' ? 'tasks' : 'calendar'))}
+                aria-label={activeView === 'calendar' ? 'Switch to Tasks view' : 'Switch to Calendar view'}
+                title={activeView === 'calendar' ? 'Tasks' : 'Calendar'}
+                className="relative shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg text-tt-blue hover:bg-tt-blue-soft transition-colors cursor-pointer"
               >
-                <ChevronDown
-                  className={`w-4 h-4 transition-transform duration-200 ${
-                    isMonthYearPickerOpen ? 'rotate-180' : ''
-                  }`}
-                  strokeWidth={2.2}
-                />
+                {activeView === 'calendar' ? (
+                  <>
+                    <ListChecks className="w-5 h-5" strokeWidth={2} />
+                    {tasksDotTone && (
+                      <span
+                        data-testid="tasks-nav-dot"
+                        aria-hidden="true"
+                        className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-tt-bg xl:ring-tt-surface ${
+                          tasksDotTone === 'overdue'
+                            ? 'bg-tt-overdue'
+                            : tasksDotTone === 'amber'
+                              ? 'bg-amber-500'
+                              : 'bg-tt-ring-green'
+                        }`}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <Calendar className="w-5 h-5" strokeWidth={2} />
+                )}
               </button>
+
+              {activeView === 'calendar' ? (
+                <>
+                  <SwipeableMonthTitle
+                    ref={monthTitleRef}
+                    prevTitle={prevCalHeaderTitle}
+                    currentTitle={calHeaderTitle}
+                    nextTitle={nextCalHeaderTitle}
+                    canSwipePrev={canSwipePrevTitle}
+                    canSwipeNext={canSwipeNextTitle}
+                    expanded={calExpanded}
+                    onClick={() => setCalExpanded((prev) => !prev)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIsMonthYearPickerOpen(true)}
+                    aria-label="Choose month and year"
+                    aria-expanded={isMonthYearPickerOpen}
+                    title="Choose month and year"
+                    className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+                  >
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform duration-200 ${
+                        isMonthYearPickerOpen ? 'rotate-180' : ''
+                      }`}
+                      strokeWidth={2.2}
+                    />
+                  </button>
+                </>
+              ) : (
+                <h1 className="px-1 text-[20px] sm:text-[22px] font-bold tracking-tight text-tt-text">
+                  Tasks
+                </h1>
+              )}
             </div>
 
             <div className="shrink-0 flex items-center gap-0.5 sm:gap-1">
-              <button
-                type="button"
-                onClick={handleJumpToToday}
-                aria-label="Today"
-                title="Today"
-                className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
-                  isOnToday
-                    ? 'text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar'
-                    : 'text-tt-blue hover:bg-tt-blue-soft'
-                }`}
-              >
-                <TodayCalendarIcon day={now.getDate()} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleStepCalendar(-1)}
-                aria-label={calExpanded ? 'Previous month' : 'Previous week'}
-                title={calExpanded ? 'Previous month' : 'Previous week'}
-                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
-              >
-                <ChevronLeft className="w-5 h-5" strokeWidth={2} />
-              </button>
-              <button
-                type="button"
-                onClick={() => handleStepCalendar(1)}
-                aria-label={calExpanded ? 'Next month' : 'Next week'}
-                title={calExpanded ? 'Next month' : 'Next week'}
-                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
-              >
-                <ChevronRight className="w-5 h-5" strokeWidth={2} />
-              </button>
+              {activeView === 'calendar' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleJumpToToday}
+                    aria-label="Today"
+                    title="Today"
+                    className={`w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                      isOnToday
+                        ? 'text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar'
+                        : 'text-tt-blue hover:bg-tt-blue-soft'
+                    }`}
+                  >
+                    <TodayCalendarIcon day={now.getDate()} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStepCalendar(-1)}
+                    aria-label={calExpanded ? 'Previous month' : 'Previous week'}
+                    title={calExpanded ? 'Previous month' : 'Previous week'}
+                    className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft className="w-5 h-5" strokeWidth={2} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStepCalendar(1)}
+                    aria-label={calExpanded ? 'Next month' : 'Next week'}
+                    title={calExpanded ? 'Next month' : 'Next week'}
+                    className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar rounded-lg transition-colors cursor-pointer"
+                  >
+                    <ChevronRight className="w-5 h-5" strokeWidth={2} />
+                  </button>
+                </>
+              )}
               {/* More / Overflow */}
               <button
                 ref={moreButtonRef}
@@ -740,8 +963,30 @@ export function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0 relative">
         <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
-          <div
-            ref={calAreaRef}
+          {activeView === 'tasks' ? (
+            <TasksView
+              periodicTasks={visiblePeriodicTasks}
+              oneTimeTasks={undatedOneTimeTasks}
+              showDetails={prefs.showDetails}
+              collapsedGroups={collapsedGroups}
+              onToggleGroup={toggleGroup}
+              onDragActiveChange={handleDragActiveChange}
+              onReorderOneTime={(taskIds) => {
+                void reorderTasks(taskIds);
+                scheduleSync();
+              }}
+              onSelect={handleEdit}
+              onComplete={handleComplete}
+              onUncomplete={handleUncomplete}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onRequestChangeDate={handleRequestChangeDate}
+              onRequestLogDate={handleRequestLogDate}
+              onRequestDelete={setDeleteConfirmTask}
+            />
+          ) : (
+            <div
+              ref={calAreaRef}
             onPointerDown={(e) => {
               if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
               const startProgress = calExpanded ? 1 : 0;
@@ -873,7 +1118,8 @@ export function App() {
                             onToggle={() => toggleGroup('cal-completed')}
                             sticky={false}
                           />
-                          {!collapsedGroups['cal-completed'] && renderTaskRows(calCompletedTasks, false)}
+                          {!collapsedGroups['cal-completed'] &&
+                            renderTaskRows(calCompletedTasks, false, false, calSelectedDate ?? undefined)}
                         </div>
                       )}
                     </>
@@ -882,9 +1128,50 @@ export function App() {
               )}
             </div>
           </div>
+          )}
         </main>
       </div>
         </>
+      )}
+
+      {undoToast && (
+        <div
+          ref={toastPopoverRef}
+          key={undoToast.id}
+          role="status"
+          aria-live="polite"
+          data-testid="undo-toast"
+          {...(typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype
+            ? { popover: 'manual' as const }
+            : {})}
+          className="fixed top-auto left-4 right-20 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 m-0 p-0 border-0 bg-transparent z-50"
+          style={{ bottom: 'calc(20px + env(safe-area-inset-bottom))' }}
+        >
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-tt-rail text-white shadow-xl border border-white/10">
+            <span className="text-sm font-medium truncate">{undoToast.message}</span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = undoToast.onUndo;
+                  dismissUndoToast();
+                  void fn();
+                }}
+                className="px-2.5 py-1 text-sm font-bold text-blue-300 hover:text-blue-200 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                onClick={dismissUndoToast}
+                aria-label="Dismiss notification"
+                className="p-1 text-white/60 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* FAB */}
@@ -907,7 +1194,9 @@ export function App() {
         }}
         onSave={handleSave}
         initialTask={editingTask}
-        defaultDueAt={calSelectedDate ?? undefined}
+        defaultDueAt={activeView === 'tasks' ? null : (calSelectedDate ?? undefined)}
+        onLogCompletionDate={handleConfirmLogDate}
+        onRemoveCompletionTimestamp={handleRemoveCompletionTimestamp}
       />
 
       <SettingsPage
@@ -934,8 +1223,13 @@ export function App() {
         showDetails={prefs.showDetails}
         hideCompleted={prefs.hideCompleted}
         showOverdue={prefs.showOverdue}
+        showCalendarToggles={activeView === 'calendar' && !isRecurringOpen}
         onClose={() => setOverflowAnchor(null)}
         onSearch={openSearch}
+        onRecurring={() => {
+          setOverflowAnchor(null);
+          setIsRecurringOpen(true);
+        }}
         onToggleDetails={() => updatePrefs({ showDetails: !prefs.showDetails })}
         onToggleHideCompleted={() => updatePrefs({ hideCompleted: !prefs.hideCompleted })}
         onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
@@ -985,6 +1279,12 @@ export function App() {
         ref={changeDatePickerRef}
         onSave={handleConfirmChangeDate}
       />
+      <ChangeDatePicker
+        ref={logDatePickerRef}
+        maxDate={todayDateStr}
+        ariaLabel="Log completion date"
+        onSave={handleConfirmLogDate}
+      />
 
       <SkipOccurrenceDialog
         isOpen={!!skipOccurrenceTask}
@@ -998,6 +1298,7 @@ export function App() {
         task={deleteConfirmTask}
         onClose={() => setDeleteConfirmTask(null)}
         onConfirm={handleConfirmDelete}
+        onStopRepeating={handleStopRepeating}
       />
 
       <MonthYearPickerDialog

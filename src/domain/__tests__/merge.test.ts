@@ -10,7 +10,7 @@ describe('Merge & Conflict Resolution Engine', () => {
     listId: INBOX_LIST_ID,
     dueAt: '2026-09-25',
     recurrence: {
-      type: 'after_completion',
+      type: 'fixed_interval',
       intervalValue: 3,
       intervalUnit: 'days',
     },
@@ -184,5 +184,44 @@ describe('Merge & Conflict Resolution Engine', () => {
     const merged = mergeFolders([a], [b]);
     expect(merged).toHaveLength(1);
     expect(merged[0].name).toBe('Personal Renamed');
+  });
+
+  it('unions removedCompletions CRDT tombstones, subtracts deleted entries, and clears startDate on window tasks', () => {
+    const ts1 = new Date(2026, 4, 1, 12, 0, 0).getTime();
+    const ts2 = new Date(2026, 4, 10, 12, 0, 0).getTime();
+    const ts3 = new Date(2026, 4, 18, 12, 0, 0).getTime();
+
+    const windowBase: Task = {
+      id: 'approx-1',
+      title: 'Vacuum rug',
+      listId: INBOX_LIST_ID,
+      dueAt: null,
+      startDate: '2026-05-01',
+      recurrence: {
+        type: 'after_completion',
+        intervalValue: 5,
+        maxIntervalValue: 8,
+        intervalUnit: 'days',
+      },
+      completionHistory: [ts1],
+      removedCompletions: [ts2],
+      createdAt: 1000,
+      updatedAt: 2000,
+    };
+
+    // Device B still has ts2 in history and also completed ts3, while removing ts1
+    const remote: Task = {
+      ...windowBase,
+      startDate: '2026-04-20',
+      completionHistory: [ts1, ts2, ts3],
+      removedCompletions: [ts1],
+      updatedAt: 3000,
+    };
+
+    const merged = mergeTasks([windowBase], [remote]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].removedCompletions).toEqual([ts1, ts2].sort((a, b) => a - b));
+    expect(merged[0].completionHistory).toEqual([ts3]);
+    expect(merged[0].startDate).toBeNull();
   });
 });

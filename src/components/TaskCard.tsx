@@ -4,8 +4,11 @@ import {
   formatDueLabel,
   getDueDatePart,
   getTaskUrgency,
+  getWindowProgress,
   isCompleted,
+  isFixedRecurring,
   isRecurring,
+  isWindowPeriodic,
 } from '../domain/recurrence';
 import {
   Check,
@@ -14,6 +17,7 @@ import {
   SkipForward,
   Trash2,
 } from 'lucide-react';
+import { RadialProgressRingWithTooltip } from './RadialProgressRing';
 import { SwipeActionButton } from './SwipeActionButton';
 import { globalSwipeCoordinator } from '../domain/swipeCoordinator';
 import { splitHighlightSegments } from '../domain/search';
@@ -31,8 +35,12 @@ interface TaskCardProps {
   onDelete?: (id: string) => void;
   /** ⋮ › Show Details: notes preview under the title. */
   showDetails?: boolean;
+  /** Optional metadata subtitle (e.g., recurrence label in Recurring view). */
+  subtitle?: string;
   /** Search match snippet overriding `showDetails` preview when provided. */
   notesSnippet?: string;
+  /** Occurrence calendar date (YYYY-MM-DD) when rendered inside a specific Calendar date section. */
+  occurrenceDateStr?: string;
   /** Normalized search tokens highlighted inside title and notes preview. */
   highlightTokens?: string[];
   /** Long-press drag-to-reorder support. */
@@ -48,6 +56,7 @@ interface TaskCardProps {
   onRowContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   /** Swipe action triggers */
   onRequestChangeDate?: (task: Task, anchorRect?: DOMRect) => void;
+  onRequestLogDate?: (task: Task, anchorRect?: DOMRect) => void;
   onRequestSkipOccurrence?: (task: Task) => void;
   onRequestDelete?: (task: Task) => void;
   isSwipedOpen?: boolean;
@@ -95,7 +104,9 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   onEdit,
   onDelete,
   showDetails = false,
+  subtitle,
   notesSnippet,
+  occurrenceDateStr,
   highlightTokens,
   reorderEnabled = false,
   isDragging = false,
@@ -108,18 +119,24 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   onRowClickCapture,
   onRowContextMenu,
   onRequestChangeDate,
+  onRequestLogDate,
   onRequestSkipOccurrence,
   onRequestDelete,
   isSwipedOpen,
   onSwipeChange,
 }) => {
   const [justCompleted, setJustCompleted] = useState(false);
-  const completed = isCompleted(task);
+  const windowPeriodic = isWindowPeriodic(task);
+  const fixedRecurring = isFixedRecurring(task);
   const recurring = isRecurring(task);
-  const canSkip = recurring && !!onRequestSkipOccurrence;
+  const progress = windowPeriodic ? getWindowProgress(task) : null;
+  const completed = windowPeriodic
+    ? task.completedAt != null || (occurrenceDateStr == null && progress?.doneToday === true)
+    : isCompleted(task);
+  const canSkip = fixedRecurring && !!onRequestSkipOccurrence;
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
-  const dueLabel = formatRowDue(task.dueAt);
+  const dueLabel = windowPeriodic ? null : formatRowDue(task.dueAt);
 
   useEffect(() => {
     if (completed && justCompleted) {
@@ -138,7 +155,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const handleCheck = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (justCompleted) return;
-    const dateStr = task.dueAt ? getDueDatePart(task.dueAt) : undefined;
+    const dateStr = occurrenceDateStr ?? (task.dueAt ? getDueDatePart(task.dueAt) : undefined);
     if (completed) {
       onUncomplete?.(task.id, dateStr);
       return;
@@ -438,26 +455,42 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         onPointerDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        <SwipeActionButton
-          icon={<Calendar className="w-4 h-4" />}
-          label="Change Date"
-          explanation="Change Date: Pick a new date for this task"
-          colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
-          onClick={(anchorEl) => {
-            const rect = anchorEl?.getBoundingClientRect();
-            closeSwipe();
-            onRequestChangeDate?.(task, rect);
-          }}
-        />
+        {windowPeriodic && onRequestLogDate ? (
+          <SwipeActionButton
+            icon={<Calendar className="w-4 h-4" />}
+            label="Log Date"
+            explanation="Log Date: Record a completion date for this routine"
+            colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
+            onClick={(anchorEl) => {
+              const rect = anchorEl?.getBoundingClientRect();
+              closeSwipe();
+              onRequestLogDate(task, rect);
+            }}
+          />
+        ) : (
+          <SwipeActionButton
+            icon={<Calendar className="w-4 h-4" />}
+            label="Change Date"
+            explanation="Change Date: Pick a new date for this task"
+            colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
+            onClick={(anchorEl) => {
+              const rect = anchorEl?.getBoundingClientRect();
+              closeSwipe();
+              onRequestChangeDate?.(task, rect);
+            }}
+          />
+        )}
         <SwipeActionButton
           icon={<SkipForward className="w-4 h-4" />}
           label="Skip Occurrence"
           explanation={
             canSkip
               ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
-              : recurring
-                ? 'Skip Occurrence: Not available for ended series'
-                : 'Skip Occurrence: Only available for recurring tasks'
+              : windowPeriodic
+                ? 'Skip Occurrence: Not used for approximate window routines'
+                : recurring
+                  ? 'Skip Occurrence: Not available for ended series'
+                  : 'Skip Occurrence: Only available for recurring tasks'
           }
           disabled={!canSkip}
           colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
@@ -523,6 +556,11 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
             {renderHighlighted(task.title, highlightTokens)}
           </span>
         </div>
+        {subtitle && (
+          <p className="mt-0.5 text-[13px] leading-snug text-tt-secondary truncate">
+            {subtitle}
+          </p>
+        )}
         {notesPreview && (
           <p className="mt-0.5 text-[13px] leading-snug text-tt-secondary truncate" data-testid="task-notes-preview">
             {renderHighlighted(notesPreview, highlightTokens)}
@@ -531,14 +569,20 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px]">
-        {recurring && (
-          <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
-        )}
+        {windowPeriodic && progress && task.completedAt == null ? (
+          <RadialProgressRingWithTooltip progress={progress} />
+        ) : (
+          <>
+            {recurring && (
+              <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
+            )}
 
-        {dueLabel && (
-          <span className={`tabular-nums font-medium ${dueTextClass(urgency)}`}>
-            {dueLabel}
-          </span>
+            {dueLabel && (
+              <span className={`tabular-nums font-medium ${dueTextClass(urgency)}`}>
+                {dueLabel}
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>
