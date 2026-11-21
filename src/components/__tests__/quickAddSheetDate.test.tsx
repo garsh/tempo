@@ -163,9 +163,9 @@ describe('QuickAddSheet date menu', () => {
       view.container.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="false"]')!.click();
     });
 
-    const title = view.container.querySelector<HTMLInputElement>('input[aria-label="Routine title"]');
+    const title = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]');
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       setter?.call(title, 'Water plants');
       title!.dispatchEvent(new Event('input', { bubbles: true }));
     });

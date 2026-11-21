@@ -129,7 +129,7 @@ export function QuickAddSheet({
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
 }: QuickAddSheetProps) {
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
   const repeatButtonRef = useRef<HTMLButtonElement>(null);
   const historySectionRef = useRef<HTMLDivElement>(null);
@@ -519,10 +519,12 @@ export function QuickAddSheet({
     }
   };
 
-  const onTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const onTitleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void handleSubmit();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       onClose();
@@ -641,33 +643,44 @@ export function QuickAddSheet({
         )}
 
         <div className={`px-4 sm:px-5 ${expanded ? 'pt-4 flex-1' : 'pt-2'}`}>
-          <input
-            ref={titleRef}
-            type="search"
-            role="textbox"
-            name="routine_title"
-            id="routine_title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={onTitleKeyDown}
-            enterKeyHint="done"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
-            aria-label="Routine title"
-            className="w-full bg-transparent text-[20px] sm:text-[22px] font-semibold text-tt-text placeholder:text-tt-muted outline-none py-1.5 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
-          />
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            autoComplete="off"
-            autoCorrect="off"
-            placeholder="Description (optional)"
-            aria-label="Description"
-            rows={expanded ? 6 : 1}
-            className="w-full bg-transparent text-[15px] sm:text-[16px] text-tt-text placeholder:text-tt-muted/70 outline-none resize-none py-1 leading-relaxed"
-          />
+          <div
+            className="tt-autogrow-field w-full py-1.5 text-[20px] sm:text-[22px] font-semibold leading-snug text-tt-text"
+            data-replicated-value={title || (initialTask ? 'Routine title' : 'What would you like to do?')}
+            style={{ '--tt-autogrow-min': '1lh', '--tt-autogrow-max': '8lh' } as React.CSSProperties}
+          >
+            <textarea
+              ref={titleRef}
+              name="routine_title"
+              id="routine_title"
+              rows={1}
+              value={title}
+              onChange={(e) => setTitle(e.target.value.replace(/[\r\n]+/g, ' '))}
+              onKeyDown={onTitleKeyDown}
+              enterKeyHint="done"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
+              aria-label="Routine title"
+              className="w-full bg-transparent text-tt-text placeholder:text-tt-muted outline-none resize-none wrap-break-word"
+            />
+          </div>
+          <div
+            className="tt-autogrow-field w-full py-1 text-[15px] sm:text-[16px] leading-relaxed text-tt-text"
+            data-replicated-value={notes || 'Description (optional)'}
+            style={{ '--tt-autogrow-min': expanded ? '6lh' : '1lh' } as React.CSSProperties}
+          >
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              placeholder="Description (optional)"
+              aria-label="Description"
+              rows={expanded ? 6 : 1}
+              className="w-full bg-transparent text-tt-text placeholder:text-tt-muted/70 outline-none resize-none wrap-break-word"
+            />
+          </div>
         </div>
 
         {/* Toolbar */}

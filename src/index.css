@@ -270,3 +270,53 @@ dialog::backdrop {
   }
 }
 
+.tt-autogrow-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tt-autogrow-field > textarea {
+  field-sizing: content;
+  align-self: start;
+  width: 100%;
+  height: auto;
+  min-inline-size: 0;
+  min-block-size: var(--tt-autogrow-min, 1lh);
+  max-block-size: var(--tt-autogrow-max, none);
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  border: 0;
+  resize: none;
+}
+
+@supports not (field-sizing: content) {
+  .tt-autogrow-field::after,
+  .tt-autogrow-field > textarea {
+    grid-area: 1 / 1 / 2 / 2;
+    align-self: stretch;
+    font: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
+    padding: 0;
+    border: 0;
+    min-inline-size: 0;
+    min-block-size: var(--tt-autogrow-min, 1lh);
+    max-block-size: var(--tt-autogrow-max, none);
+  }
+
+  .tt-autogrow-field::after {
+    content: attr(data-replicated-value) " ";
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .tt-autogrow-field > textarea {
+    overflow-y: auto;
+  }
+}
+

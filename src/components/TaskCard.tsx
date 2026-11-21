@@ -30,7 +30,7 @@ interface TaskCardProps {
   onSelect?: (task: Task) => void;
   onEdit?: (task: Task) => void;
   onDelete?: (id: string) => void;
-  /** ⋮ › Show Details: notes preview under the title. */
+  /** ⋮ › Show Details: displays full wrapped descriptions (and wraps subtitles) under the title. */
   showDetails?: boolean;
   /** Optional metadata subtitle (e.g., recurrence label in Recurring view). */
   subtitle?: string;
@@ -164,7 +164,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     notesSnippet !== undefined
       ? notesSnippet
       : showDetails
-        ? task.notes?.trim().split('\n').find((l) => l.trim())
+        ? task.notes?.trim() || undefined
         : undefined;
   const activate = () => onSelect?.(task);
 
@@ -499,7 +499,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
           touchAction: 'pan-y',
         }}
-        className={`relative z-10 w-full flex items-center gap-3 px-3 sm:px-4 ${
+        className={`relative z-10 w-full flex items-start gap-3 px-3 sm:px-4 ${
           selected
             ? 'bg-tt-blue-soft'
             : 'bg-tt-surface hover:bg-tt-hover'
@@ -512,7 +512,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           onTouchStart={(e) => e.stopPropagation()}
           disabled={completed && !onUncomplete}
           title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-          className="relative flex-shrink-0 w-[21px] h-[21px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
+          className="relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
           style={{
             borderColor: completed || justCompleted ? '#34C759' : borderColor,
             backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
@@ -525,7 +525,8 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`text-[19px] leading-snug truncate ${
+            data-testid="task-title"
+            className={`text-[19px] leading-snug min-w-0 wrap-break-word text-pretty ${
               completed ? 'text-tt-secondary line-through' : 'text-tt-text'
             }`}
           >
@@ -533,18 +534,27 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           </span>
         </div>
         {subtitle && (
-          <p className="mt-0.5 text-[13px] leading-snug text-tt-secondary truncate">
+          <p
+            className={`mt-0.5 text-[13px] leading-snug text-tt-secondary ${
+              showDetails ? 'wrap-break-word text-pretty' : 'truncate'
+            }`}
+          >
             {subtitle}
           </p>
         )}
         {notesPreview && (
-          <p className="mt-0.5 text-[13px] leading-snug text-tt-secondary truncate" data-testid="task-notes-preview">
+          <p
+            className={`mt-0.5 text-[13px] leading-snug text-tt-secondary ${
+              showDetails ? 'whitespace-pre-wrap wrap-break-word' : 'truncate'
+            }`}
+            data-testid="task-notes-preview"
+          >
             {renderHighlighted(notesPreview, highlightTokens)}
           </p>
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px]">
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px] min-h-[26px]">
         {windowPeriodic && progress && task.completedAt == null ? (
           <RadialProgressRingWithTooltip progress={progress} />
         ) : (

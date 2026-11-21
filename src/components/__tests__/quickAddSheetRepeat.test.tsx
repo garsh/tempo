@@ -194,9 +194,9 @@ describe('QuickAddSheet recurrence UI', () => {
       />
     );
 
-    const titleInput = view.container.querySelector<HTMLInputElement>('input[aria-label="Routine title"]');
+    const titleInput = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]');
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       setter?.call(titleInput, 'Gym workout');
       titleInput!.dispatchEvent(new Event('input', { bubbles: true }));
       titleInput!.dispatchEvent(new Event('change', { bubbles: true }));
@@ -262,9 +262,9 @@ describe('QuickAddSheet recurrence UI', () => {
       />
     );
 
-    const titleInput = view.container.querySelector<HTMLInputElement>('input[aria-label="Routine title"]');
+    const titleInput = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]');
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       setter?.call(titleInput, 'Mow lawn');
       titleInput!.dispatchEvent(new Event('input', { bubbles: true }));
       titleInput!.dispatchEvent(new Event('change', { bubbles: true }));

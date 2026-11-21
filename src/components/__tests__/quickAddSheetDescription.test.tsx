@@ -140,4 +140,80 @@ describe('QuickAddSheet description auto-expand', () => {
 
     view.unmount();
   });
+
+  it('renders Routine title as a wrapping auto-grow textarea inside .tt-autogrow-field', () => {
+    const view = mount(<QuickAddSheet isOpen={true} onSave={vi.fn()} onClose={vi.fn()} />);
+
+    expect(view.container.querySelector('input[aria-label="Routine title"]')).toBeNull();
+    const titleTextarea = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]');
+    expect(titleTextarea).toBeTruthy();
+    expect(Number(titleTextarea!.rows)).toBe(1);
+    expect(titleTextarea!.className).toContain('wrap-break-word');
+
+    const wrapper = titleTextarea!.closest<HTMLElement>('.tt-autogrow-field');
+    expect(wrapper).toBeTruthy();
+    expect(wrapper!.dataset.replicatedValue).toBe('What would you like to do?');
+    expect(wrapper!.style.getPropertyValue('--tt-autogrow-min')).toBe('1lh');
+    expect(wrapper!.style.getPropertyValue('--tt-autogrow-max')).toBe('8lh');
+
+    const longTitle =
+      'Call regional HVAC contractor about annual maintenance plan and filter replacement schedule';
+    act(() => {
+      setDescription(titleTextarea!, longTitle);
+    });
+    expect(titleTextarea!.value).toBe(longTitle);
+    expect(wrapper!.dataset.replicatedValue).toBe(longTitle);
+
+    view.unmount();
+  });
+
+  it('strips newlines in Routine title, prevents Shift+Enter newline, and submits on Enter', async () => {
+    const onSave = vi.fn();
+    const view = mount(<QuickAddSheet isOpen={true} onSave={onSave} onClose={vi.fn()} />);
+
+    const titleTextarea = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]')!;
+    act(() => {
+      setDescription(titleTextarea, 'First line\nSecond line\r\nThird');
+    });
+    expect(titleTextarea.value).toBe('First line Second line Third');
+
+    let shiftEnterEvent: KeyboardEvent;
+    act(() => {
+      shiftEnterEvent = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
+      titleTextarea.dispatchEvent(shiftEnterEvent);
+    });
+    expect(shiftEnterEvent!.defaultPrevented).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+
+    let enterEvent: KeyboardEvent;
+    await act(async () => {
+      enterEvent = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      titleTextarea.dispatchEvent(enterEvent);
+    });
+    expect(enterEvent!.defaultPrevented).toBe(true);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ title: 'First line Second line Third' }));
+
+    view.unmount();
+  });
+
+  it('wraps Description textarea in .tt-autogrow-field and tracks replicated value and min-block-size', () => {
+    const view = mount(<QuickAddSheet isOpen={true} onSave={vi.fn()} onClose={vi.fn()} />);
+
+    const notesTextarea = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Description"]')!;
+    expect(notesTextarea.className).toContain('wrap-break-word');
+
+    const wrapper = notesTextarea.closest<HTMLElement>('.tt-autogrow-field');
+    expect(wrapper).toBeTruthy();
+    expect(wrapper!.dataset.replicatedValue).toBe('Description (optional)');
+    expect(wrapper!.style.getPropertyValue('--tt-autogrow-min')).toBe('1lh');
+
+    act(() => {
+      setDescription(notesTextarea, 'Line one\nLine two');
+    });
+    expect(wrapper!.dataset.replicatedValue).toBe('Line one\nLine two');
+    expect(wrapper!.style.getPropertyValue('--tt-autogrow-min')).toBe('6lh');
+
+    view.unmount();
+  });
 });

@@ -157,7 +157,7 @@ export function RecurringTasksView({
                         <TaskCard
                           key={raw.id}
                           task={projected}
-                          showDetails={false}
+                          showDetails={showDetails}
                           subtitle={label}
                           occurrenceDateStr={nextDate ?? undefined}
                           onSelect={() => onEdit(raw)}
