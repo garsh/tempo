@@ -1,5 +1,24 @@
 import type { Task } from '../types/task';
-import { getDueDeadline, getWindowProgress } from './recurrence';
+import { getDueDeadline, getWindowProgress, type WindowProgress } from './recurrence';
+
+function compareManualOrder(a: Task, b: Task): number {
+  const hasOrderA = a.sortOrder != null;
+  const hasOrderB = b.sortOrder != null;
+  if (hasOrderA && hasOrderB) {
+    return a.sortOrder! - b.sortOrder!;
+  }
+  if (hasOrderA !== hasOrderB) {
+    return hasOrderA ? -1 : 1;
+  }
+  return 0;
+}
+
+function compareCreatedThenTitle(a: Task, b: Task): number {
+  const createdA = a.createdAt ?? 0;
+  const createdB = b.createdAt ?? 0;
+  if (createdA !== createdB) return createdA - createdB;
+  return a.title.localeCompare(b.title);
+}
 
 /**
  * Sort for daily-driver views:
@@ -8,25 +27,19 @@ import { getDueDeadline, getWindowProgress } from './recurrence';
  * 3. Creation order (oldest / first-added first)
  * 4. Title A–Z
  */
-export function sortTasksForDailyView(tasks: Task[], _now: Date = new Date()): Task[] {
+export function sortTasksForDailyView(tasks: Task[]): Task[] {
+  const dueMsByTask = new Map<Task, number>();
+  for (const t of tasks) {
+    dueMsByTask.set(t, t.dueAt ? getDueDeadline(t.dueAt).getTime() : Number.POSITIVE_INFINITY);
+  }
   return [...tasks].sort((a, b) => {
-    const hasOrderA = a.sortOrder != null;
-    const hasOrderB = b.sortOrder != null;
-    if (hasOrderA && hasOrderB) {
-      if (a.sortOrder !== b.sortOrder) return a.sortOrder! - b.sortOrder!;
-    } else if (hasOrderA !== hasOrderB) {
-      return hasOrderA ? -1 : 1;
-    }
+    const orderDiff = compareManualOrder(a, b);
+    if (orderDiff !== 0) return orderDiff;
 
-    const dueA = a.dueAt ? getDueDeadline(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
-    const dueB = b.dueAt ? getDueDeadline(b.dueAt).getTime() : Number.POSITIVE_INFINITY;
-    if (dueA !== dueB) return dueA - dueB;
+    const dueDiff = dueMsByTask.get(a)! - dueMsByTask.get(b)!;
+    if (dueDiff !== 0) return dueDiff;
 
-    const createdA = a.createdAt ?? 0;
-    const createdB = b.createdAt ?? 0;
-    if (createdA !== createdB) return createdA - createdB;
-
-    return a.title.localeCompare(b.title);
+    return compareCreatedThenTitle(a, b);
   });
 }
 
@@ -34,8 +47,13 @@ export function sortTasksForDailyView(tasks: Task[], _now: Date = new Date()): T
  * Sort approximate window periodic tasks by urgency (`sortScore` descending),
  * then elapsed days descending, then creation order / title.
  */
-export function sortWindowTasks(tasks: Task[], now: Date = new Date()): Task[] {
-  const progressById = new Map(tasks.map((t) => [t.id, getWindowProgress(t, now)]));
+export function sortWindowTasks(
+  tasks: Task[],
+  now: Date = new Date(),
+  precomputedProgress?: ReadonlyMap<string, WindowProgress | null>
+): Task[] {
+  const progressById =
+    precomputedProgress ?? new Map(tasks.map((t) => [t.id, getWindowProgress(t, now)]));
   return [...tasks].sort((a, b) => {
     const pa = progressById.get(a.id);
     const pb = progressById.get(b.id);
@@ -47,11 +65,7 @@ export function sortWindowTasks(tasks: Task[], now: Date = new Date()): Task[] {
     const elapsedB = pb?.elapsedDays ?? -1;
     if (elapsedA !== elapsedB) return elapsedB - elapsedA;
 
-    const createdA = a.createdAt ?? 0;
-    const createdB = b.createdAt ?? 0;
-    if (createdA !== createdB) return createdA - createdB;
-
-    return a.title.localeCompare(b.title);
+    return compareCreatedThenTitle(a, b);
   });
 }
 
@@ -61,18 +75,9 @@ export function sortWindowTasks(tasks: Task[], now: Date = new Date()): Task[] {
  */
 export function sortUndatedOneTimeTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
-    const hasOrderA = a.sortOrder != null;
-    const hasOrderB = b.sortOrder != null;
-    if (hasOrderA && hasOrderB) {
-      if (a.sortOrder !== b.sortOrder) return a.sortOrder! - b.sortOrder!;
-    } else if (hasOrderA !== hasOrderB) {
-      return hasOrderA ? -1 : 1;
-    }
+    const orderDiff = compareManualOrder(a, b);
+    if (orderDiff !== 0) return orderDiff;
 
-    const createdA = a.createdAt ?? 0;
-    const createdB = b.createdAt ?? 0;
-    if (createdA !== createdB) return createdA - createdB;
-
-    return a.title.localeCompare(b.title);
+    return compareCreatedThenTitle(a, b);
   });
 }

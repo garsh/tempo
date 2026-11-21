@@ -9,16 +9,12 @@ import {
   buildWeekCells,
   calendarExpandProgress,
   calendarHeaderTitle,
-  calendarRowDueLabel,
   classifyCalendarPull,
   commitCalendarExpanded,
   computeMonthTitleSwipeState,
-  dayCardTitle,
   defaultDateForMonth,
   dueAtForSelectedDay,
   jumpToToday,
-  monthContains,
-  monthName,
   pickerDefaultScrollYear,
   readStoredActiveView,
   readStoredCalendarExpanded,
@@ -37,24 +33,7 @@ describe('jump to today', () => {
   });
 });
 
-describe('day card + row labels', () => {
-  it('titles Today vs a short date', () => {
-    expect(dayCardTitle('2026-10-06', '2026-10-06', 'en-US')).toBe('Today');
-    expect(dayCardTitle('2026-10-07', '2026-10-06', 'en-US')).toMatch(/Oct/);
-    expect(dayCardTitle('2026-10-07', '2026-10-06', 'en-US')).toMatch(/7/);
-  });
-
-  it('row due label is Today or short date', () => {
-    expect(calendarRowDueLabel('2026-10-06T09:00', '2026-10-06')).toBe('Today');
-    expect(calendarRowDueLabel('2026-10-06', '2026-10-06')).toBe('Today');
-    expect(calendarRowDueLabel('2026-10-08', '2026-10-06')).toMatch(/Oct/);
-  });
-
-  it('month name has no year', () => {
-    expect(monthName(2026, 9, 'en-US')).toBe('October');
-    expect(monthName(2026, 0, 'en-US')).toBe('January');
-  });
-
+describe('calendar header & due labels', () => {
   it('calendarHeaderTitle always includes the month and year', () => {
     expect(calendarHeaderTitle(2026, 10, 'en-US')).toBe('November 2026');
     expect(calendarHeaderTitle(2027, 0, 'en-US')).toBe('January 2027');
@@ -66,22 +45,6 @@ describe('quick-add dueDate = selected day', () => {
   it('uses the selected calendar day (date-only)', () => {
     expect(dueAtForSelectedDay('2026-10-09')).toBe('2026-10-09');
     expect(dueAtForSelectedDay(null, '2026-10-06')).toBe('2026-10-06');
-  });
-
-  it('monthContains', () => {
-    expect(monthContains('2026-10-06', 2026, 9)).toBe(true);
-    expect(monthContains('2026-11-01', 2026, 9)).toBe(false);
-  });
-});
-
-describe('empty day card', () => {
-  it('uses Today title and free-day copy for an empty selected today', async () => {
-    const { tasksDueOnDate } = await import('../calendar');
-    const today = '2026-10-06';
-    expect(tasksDueOnDate([], today)).toEqual([]);
-    expect(dayCardTitle(today, today)).toBe('Today');
-    // Copy for EmptyCalendarDay (component text — keep in sync)
-    expect(['You have a free day', 'Take it easy']).toHaveLength(2);
   });
 });
 

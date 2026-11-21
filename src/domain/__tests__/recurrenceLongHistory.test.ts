@@ -127,4 +127,40 @@ describe('long completion histories', () => {
     const [y, m, d] = dates[9].split('-').map(Number);
     expect(getNextUncompletedOccurrenceDate(limited, new Date(y, m - 1, d, 9, 0))).toBeNull();
   });
+
+  it('keeps endAfterCount progressive cache accurate across out-of-order queries and history mutations', () => {
+    const partial = task({
+      id: 'course-partial',
+      title: 'Course Partial',
+      dueAt: '2026-01-01',
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 2,
+        intervalUnit: 'days',
+        endAfterCount: 4,
+      },
+      completionHistory: [completionTimestampForDate('2026-01-01')],
+    });
+
+    // Scheduled days: Jan 1 (done), Jan 3 (#1 open), Jan 5 (#2 open), Jan 7 (#3 open), Jan 9 (exceeds 4)
+    expect(taskOccursOnDate(partial, '2026-01-05')).toBe(true);
+    expect(taskOccursOnDate(partial, '2026-01-03')).toBe(true);
+    expect(taskOccursOnDate(partial, '2026-01-07')).toBe(true);
+    expect(taskOccursOnDate(partial, '2026-01-09')).toBe(false);
+    expect(taskOccursOnDate(partial, '2026-01-25')).toBe(false);
+    expect(taskOccursOnDate(partial, '2026-01-07')).toBe(true);
+
+    // Mutate history in-place (like a task update or test harness) and ensure cache invalidates
+    const updated: Task = {
+      ...partial,
+      completionHistory: [...partial.completionHistory, completionTimestampForDate('2026-01-03')],
+    };
+    expect(taskOccursOnDate(updated, '2026-01-07')).toBe(true);
+    expect(taskOccursOnDate(updated, '2026-01-09')).toBe(false);
+
+    partial.completionHistory.push(completionTimestampForDate('2026-01-03'));
+    partial.completionHistory.push(completionTimestampForDate('2026-01-05'));
+    partial.completionHistory.push(completionTimestampForDate('2026-01-07'));
+    expect(taskOccursOnDate(partial, '2026-01-09')).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import type React from 'react';
 import { SkipForward, X, ArrowRight, AlertCircle } from 'lucide-react';
 import type { Task } from '../../types/task';
 import {
@@ -9,6 +9,7 @@ import {
   isFixedRecurring,
 } from '../../domain/recurrence';
 import { usePrefs } from '../../prefs/prefs';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface SkipOccurrenceDialogProps {
   isOpen: boolean;
@@ -25,17 +26,7 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
 }) => {
   const [{ timeFormat }] = usePrefs();
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  useEscapeKey(isOpen, onClose, { preventDefault: true });
 
   if (!isOpen || !task) return null;
 

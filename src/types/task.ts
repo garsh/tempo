@@ -12,13 +12,6 @@ export type TaskUrgency = 'overdue' | 'due_today' | 'upcoming' | 'later' | 'none
 /** Built-in Inbox list id — always present, never deleted. */
 export const INBOX_LIST_ID = 'inbox';
 
-export const PRIORITY_ORDER: Record<TaskPriority, number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-  none: 3,
-};
-
 export const WEEKDAY_LABELS: Record<Weekday, string> = {
   0: 'Sun',
   1: 'Mon',
@@ -112,12 +105,4 @@ export type TaskInput = Omit<
   listId?: string;
   completedAt?: number | null;
   completionHistory?: number[];
-};
-
-export type TaskListInput = Omit<TaskList, 'id' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
-};
-
-export type FolderInput = Omit<Folder, 'id' | 'createdAt' | 'updatedAt'> & {
-  id?: string;
 };

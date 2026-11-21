@@ -92,12 +92,16 @@ export function PwaUpdatePrompt() {
   useEffect(() => {
     let timerId: ReturnType<typeof setTimeout> | null = null;
 
+    const showError = (message: string) => {
+      setStatus({ type: 'error', message });
+      timerId = setTimeout(() => setStatus(null), 3000);
+    };
+
     const handleForceUpdate = async () => {
       if (timerId) clearTimeout(timerId);
 
       if (!navigator.onLine) {
-        setStatus({ type: 'error', message: 'Cannot update while offline' });
-        timerId = setTimeout(() => setStatus(null), 3000);
+        showError('Cannot update while offline');
         return;
       }
 
@@ -128,33 +132,31 @@ export function PwaUpdatePrompt() {
           timerId = setTimeout(() => window.location.reload(), 1000);
         };
 
+        const watchInstallingWorker = (worker: ServiceWorker) => {
+          setStatus({ type: 'downloading', message: 'Downloading update...' });
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed') {
+              applyWorker(worker);
+            }
+          });
+        };
+
         if (reg.waiting) {
           applyWorker(reg.waiting);
           return;
         }
 
         if (reg.installing) {
-          setStatus({ type: 'downloading', message: 'Downloading update...' });
-          const worker = reg.installing;
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed') {
-              applyWorker(worker);
-            }
-          });
+          watchInstallingWorker(reg.installing);
           return;
         }
 
         let updateFound = false;
         const onUpdateFound = () => {
           updateFound = true;
-          const newWorker = reg.installing;
-          if (!newWorker) return;
-          setStatus({ type: 'downloading', message: 'Downloading update...' });
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed') {
-              applyWorker(newWorker);
-            }
-          });
+          if (reg.installing) {
+            watchInstallingWorker(reg.installing);
+          }
         };
 
         reg.addEventListener('updatefound', onUpdateFound, { once: true });
@@ -169,8 +171,7 @@ export function PwaUpdatePrompt() {
           }
         }, 2500);
       } catch {
-        setStatus({ type: 'error', message: 'Update check failed' });
-        timerId = setTimeout(() => setStatus(null), 3000);
+        showError('Update check failed');
       }
     };
 

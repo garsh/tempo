@@ -3,6 +3,7 @@ import {
   formatDate,
   getDueDatePart,
   getDueDeadline,
+  getLatestCompletionMs,
   getNextUncompletedOccurrenceDate,
   isRecurring,
   isWindowPeriodic,
@@ -47,16 +48,40 @@ export function createNextOccurrenceCache(): NextOccurrenceCache {
   return { todayStr: '', map: new Map() };
 }
 
+const DIACRITIC_RE = /\p{Diacritic}/gu;
+const WHITESPACE_RE = /\s+/;
+
+const normalizedTaskTextCache = new WeakMap<
+  Task,
+  { title: string; notes: string; normTitle: string; normNotes: string }
+>();
+
 /** Case-fold and strip combining diacritical marks after NFD decomposition. */
 export function normalizeSearchText(input: string): string {
-  return input.normalize('NFD').toLowerCase().replace(/\p{Diacritic}/gu, '');
+  return input.normalize('NFD').toLowerCase().replace(DIACRITIC_RE, '');
 }
 
 /** Split a trimmed, normalized query into whitespace-delimited search tokens. */
 export function tokenizeSearchQuery(query: string): string[] {
   const normalized = normalizeSearchText(query).trim();
   if (!normalized) return [];
-  return normalized.split(/\s+/);
+  return normalized.split(WHITESPACE_RE);
+}
+
+function getNormalizedTaskText(task: Task): { normTitle: string; normNotes: string } {
+  const notes = task.notes ?? '';
+  const cached = normalizedTaskTextCache.get(task);
+  if (cached && cached.title === task.title && cached.notes === notes) {
+    return cached;
+  }
+  const entry = {
+    title: task.title,
+    notes,
+    normTitle: normalizeSearchText(task.title),
+    normNotes: notes ? normalizeSearchText(notes) : '',
+  };
+  normalizedTaskTextCache.set(task, entry);
+  return entry;
 }
 
 /**
@@ -74,7 +99,7 @@ function buildNormalizedIndexMap(raw: string): NormalizedIndexMap {
     const end = start + ch.length;
     utf16Offset = end;
 
-    const norm = ch.normalize('NFD').toLowerCase().replace(/\p{Diacritic}/gu, '');
+    const norm = ch.normalize('NFD').toLowerCase().replace(DIACRITIC_RE, '');
     if (norm.length === 0) {
       // Absorb trailing combining marks into the preceding base character's span.
       if (endMap.length > 0) {
@@ -256,20 +281,38 @@ function getCachedNextOccurrence(
   return nextDate;
 }
 
-function latestTimestamp(values: number[]): number | null {
-  if (values.length === 0) return null;
-  let max = values[0];
-  for (let i = 1; i < values.length; i++) {
-    if (values[i] > max) max = values[i];
-  }
-  return max;
-}
-
 interface RankedSearchEntry {
   item: SearchResultItem;
   titleBoost: 0 | 1;
   dueMs: number;
   completedSortTs: number;
+}
+
+function makeEndedSeriesEntry(
+  task: Task,
+  dueAt: string | null | undefined,
+  latestCompDate: string | null,
+  completedTs: number,
+  titleBoost: 0 | 1,
+  notesSnippet?: string
+): RankedSearchEntry {
+  return {
+    item: {
+      task: {
+        ...task,
+        dueAt,
+        completedAt: completedTs,
+      },
+      id: task.id,
+      status: 'completed',
+      completable: false,
+      jumpDateStr: latestCompDate,
+      notesSnippet,
+    },
+    titleBoost,
+    dueMs: Number.POSITIVE_INFINITY,
+    completedSortTs: completedTs,
+  };
 }
 
 /**
@@ -283,7 +326,7 @@ export function searchTasks(
   cache?: NextOccurrenceCache
 ): SearchTasksResult {
   const normalizedQuery = normalizeSearchText(query).trim();
-  const tokens = normalizedQuery ? normalizedQuery.split(/\s+/) : [];
+  const tokens = normalizedQuery ? normalizedQuery.split(WHITESPACE_RE) : [];
   if (tokens.length === 0) {
     return { query, tokens: [], active: [], completed: [] };
   }
@@ -295,8 +338,7 @@ export function searchTasks(
   for (const task of tasks) {
     if (task.deletedAt) continue;
 
-    const normTitle = normalizeSearchText(task.title);
-    const normNotes = task.notes ? normalizeSearchText(task.notes) : '';
+    const { normTitle, normNotes } = getNormalizedTaskText(task);
 
     let allTokensMatched = true;
     const notesOnlyTokens: string[] = [];
@@ -360,26 +402,18 @@ export function searchTasks(
 
     if (isWindowPeriodic(task)) {
       if (isWindowStopped(task, now)) {
-        const latestCompTs = latestTimestamp(task.completionHistory || []);
+        const latestCompTs = getLatestCompletionMs(task);
         const latestCompDate = latestCompTs != null ? formatDate(new Date(latestCompTs)) : null;
-        const completedTs = latestCompTs ?? task.updatedAt;
-        completedEntries.push({
-          item: {
-            task: {
-              ...task,
-              dueAt: latestCompDate,
-              completedAt: completedTs,
-            },
-            id: task.id,
-            status: 'completed',
-            completable: false,
-            jumpDateStr: latestCompDate,
-            notesSnippet,
-          },
-          titleBoost,
-          dueMs: Number.POSITIVE_INFINITY,
-          completedSortTs: completedTs,
-        });
+        completedEntries.push(
+          makeEndedSeriesEntry(
+            task,
+            latestCompDate,
+            latestCompDate,
+            latestCompTs ?? task.updatedAt,
+            titleBoost,
+            notesSnippet
+          )
+        );
       } else {
         activeEntries.push({
           item: {
@@ -417,27 +451,18 @@ export function searchTasks(
         completedSortTs: 0,
       });
     } else {
-      const latestCompTs = latestTimestamp(task.completionHistory || []);
+      const latestCompTs = getLatestCompletionMs(task);
       const latestCompDate = latestCompTs != null ? formatDate(new Date(latestCompTs)) : null;
-      const completedTs = latestCompTs ?? task.updatedAt;
-      const endedDisplayTask: Task = {
-        ...task,
-        dueAt: latestCompDate ?? task.dueAt,
-        completedAt: completedTs,
-      };
-      completedEntries.push({
-        item: {
-          task: endedDisplayTask,
-          id: task.id,
-          status: 'completed',
-          completable: false,
-          jumpDateStr: latestCompDate,
-          notesSnippet,
-        },
-        titleBoost,
-        dueMs: Number.POSITIVE_INFINITY,
-        completedSortTs: completedTs,
-      });
+      completedEntries.push(
+        makeEndedSeriesEntry(
+          task,
+          latestCompDate ?? task.dueAt,
+          latestCompDate,
+          latestCompTs ?? task.updatedAt,
+          titleBoost,
+          notesSnippet
+        )
+      );
     }
   }
 

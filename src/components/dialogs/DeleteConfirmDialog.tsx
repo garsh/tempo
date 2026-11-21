@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import type React from 'react';
 import { Trash2, X, AlertTriangle, PauseCircle } from 'lucide-react';
 import type { Task } from '../../types/task';
 import { isRecurring } from '../../domain/recurrence';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface DeleteConfirmDialogProps {
   isOpen: boolean;
@@ -18,17 +19,7 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
   onConfirm,
   onStopRepeating,
 }) => {
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  useEscapeKey(isOpen, onClose, { preventDefault: true });
 
   if (!isOpen || !task) return null;
 

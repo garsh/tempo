@@ -2,16 +2,6 @@
 const B = 'var(--tt-blue)';
 const box = { width: 20, height: 20, viewBox: '0 0 20 20', 'aria-hidden': true } as const;
 
-export function TabBarIcon() {
-  return (
-    <svg {...box} fill={B}>
-      <rect x="1" y="1" width="8" height="8" rx="2.4" />
-      <circle cx="15" cy="5" r="4.1" />
-      <rect x="1" y="11" width="8" height="8" rx="2.4" />
-      <rect x="11" y="11" width="8" height="8" rx="2.4" />
-    </svg>
-  );
-}
 export function AppearanceIcon() {
   return (
     <svg {...box} fill={B}>
@@ -25,13 +15,6 @@ export function DateTimeIcon() {
     <svg {...box}>
       <circle cx="10" cy="10" r="9" fill={B} />
       <path d="M10 5v5.4l3.4 2" stroke="var(--tt-elevated)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-    </svg>
-  );
-}
-export function SoundsIcon() {
-  return (
-    <svg {...box} fill={B}>
-      <path d="M7 3.6 17.5 1v12.4h-.02A2.9 2.9 0 1 1 15.6 10.9V5.2L8.9 6.8v8.6h-.02A2.9 2.9 0 1 1 7 12.9Z" />
     </svg>
   );
 }

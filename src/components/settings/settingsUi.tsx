@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { ArrowLeft, Check, ChevronRight } from 'lucide-react';
 import { sanitizePhotoUrl, type GoogleAccount } from '../../sync/googleAccount';
 
 export function Avatar({ account, size }: { account: GoogleAccount | null; size: number }) {
+  const clipId = useId();
   const photoUrl = sanitizePhotoUrl(account?.photoUrl);
   if (photoUrl) {
     return (
@@ -20,12 +21,12 @@ export function Avatar({ account, size }: { account: GoogleAccount | null; size:
   return (
     <svg width={size} height={size} viewBox="0 0 34 34" aria-hidden className="shrink-0">
       <defs>
-        <clipPath id="tempo-avatar-clip">
+        <clipPath id={clipId}>
           <circle cx="17" cy="17" r="17" />
         </clipPath>
       </defs>
       <circle cx="17" cy="17" r="17" fill="#ededed" />
-      <g clipPath="url(#tempo-avatar-clip)" fill="#d6d6d6">
+      <g clipPath={`url(#${clipId})`} fill="#d6d6d6">
         <circle cx="17" cy="13.2" r="6" />
         <ellipse cx="17" cy="31" rx="11.5" ry="8.5" />
       </g>
@@ -123,8 +124,4 @@ export function RadioRow({ label, checked, onSelect, sub }: { label: ReactNode; 
       {checked && <Check className="w-5 h-5 text-tt-blue" strokeWidth={2.4} />}
     </button>
   );
-}
-
-export function Divider() {
-  return <div className="ml-[48px] h-px bg-tt-border/60" />;
 }

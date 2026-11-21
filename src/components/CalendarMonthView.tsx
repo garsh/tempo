@@ -3,7 +3,17 @@ import type { Task } from '../types/task';
 import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from '../domain/calendar';
 import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek, type CalendarSwipeEvent } from '../domain/calendarUi';
 import { usePrefs } from '../prefs/prefs';
-import { formatDate, getDueDatePart, getRecurrenceAnchor, isCompleted, isCompletedOnDate, isFixedRecurring, isSkippedOnDate, taskOccursOnDate } from '../domain/recurrence';
+import {
+  formatDate,
+  getCompletedDateSet,
+  getDueDatePart,
+  getRecurrenceAnchor,
+  isCompleted,
+  isCompletedOnDate,
+  isFixedRecurring,
+  isSkippedOnDate,
+  taskOccursOnDate,
+} from '../domain/recurrence';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -136,23 +146,35 @@ export function CalendarMonthView({
       }
     }
     if (recurringTasks.length > 0) {
-      const allGrids = [prevCells, currentCells, nextCells];
-      const maxDateStr = nextCells[nextCells.length - 1]?.dateStr;
+      const uniqueDateSet = new Set<string>();
+      for (const grid of [prevCells, currentCells, nextCells]) {
+        for (const cell of grid) uniqueDateSet.add(cell.dateStr);
+      }
+      const uniqueDates = Array.from(uniqueDateSet).sort();
+      const minDateStr = uniqueDates[0];
+      const maxDateStr = uniqueDates[uniqueDates.length - 1];
 
-      for (const t of recurringTasks) {
-        const anchor = getRecurrenceAnchor(t);
-        if (maxDateStr && anchor > maxDateStr) continue;
+      if (minDateStr && maxDateStr) {
+        for (const t of recurringTasks) {
+          const anchor = getRecurrenceAnchor(t);
+          if (anchor > maxDateStr) continue;
+          const endOnDate = t.recurrence?.endOnDate;
+          if (endOnDate && endOnDate < minDateStr) continue;
+          const endAfterCount = t.recurrence?.endAfterCount;
+          if (endAfterCount != null && endAfterCount > 0 && getCompletedDateSet(t).size >= endAfterCount) {
+            continue;
+          }
 
-        for (const grid of allGrids) {
-          for (const cell of grid) {
-            if (cell.dateStr < anchor) continue;
-            if (set.has(cell.dateStr)) continue;
+          for (const dateStr of uniqueDates) {
+            if (dateStr < anchor) continue;
+            if (endOnDate && dateStr > endOnDate) break;
+            if (set.has(dateStr)) continue;
             if (
-              taskOccursOnDate(t, cell.dateStr) &&
-              !isCompletedOnDate(t, cell.dateStr) &&
-              !isSkippedOnDate(t, cell.dateStr)
+              !isCompletedOnDate(t, dateStr) &&
+              !isSkippedOnDate(t, dateStr) &&
+              taskOccursOnDate(t, dateStr)
             ) {
-              set.add(cell.dateStr);
+              set.add(dateStr);
             }
           }
         }
@@ -160,6 +182,30 @@ export function CalendarMonthView({
     }
     return set;
   }, [tasks, prevCells, currentCells, nextCells]);
+
+  const applyHorizontalDrag = useCallback((dx: number) => {
+    currentDragOffsetRef.current = dx;
+    if (trackRef.current) {
+      trackRef.current.style.transition = 'none';
+      trackRef.current.style.transform = `translateX(${dx}px)`;
+    }
+    const width = containerRef.current?.offsetWidth || 360;
+    onSwipeProgressRef.current?.({
+      phase: 'drag',
+      progress: Math.max(-1, Math.min(1, dx / width)),
+    });
+  }, []);
+
+  const resetHorizontalTrack = useCallback((notifyReset: boolean) => {
+    currentDragOffsetRef.current = 0;
+    if (trackRef.current) {
+      trackRef.current.style.transition = 'none';
+      trackRef.current.style.transform = 'translateX(0px)';
+    }
+    if (notifyReset) {
+      onSwipeProgressRef.current?.({ phase: 'reset' });
+    }
+  }, []);
 
   const finishSwipe = useCallback(
     (dx: number, dt: number) => {
@@ -192,61 +238,34 @@ export function CalendarMonthView({
       snapTimerRef.current = setTimeout(() => {
         snapTimerRef.current = null;
         let monthWillChange = false;
-        if (target === 1) {
-          if (onSwipeLeft) {
-            onSwipeLeft();
-          } else if (expanded) {
-            const next = shiftMonthView(year, monthIndex, selectedDateStr, 1);
-            onSelectDate(next.dateStr);
-            if (next.year !== year || next.monthIndex !== monthIndex) {
-              monthWillChange = true;
-            }
-            onMonthChange(next.year, next.monthIndex);
+        if (target !== 0) {
+          const customHandler = target === 1 ? onSwipeLeft : onSwipeRight;
+          if (customHandler) {
+            customHandler();
           } else {
-            const next = shiftWeek(selectedDateStr, 1);
-            onSelectDate(next.dateStr);
-            if (next.year !== year || next.monthIndex !== monthIndex) {
+            const shifted = expanded
+              ? shiftMonthView(year, monthIndex, selectedDateStr, target)
+              : shiftWeek(selectedDateStr, target);
+            onSelectDate(shifted.dateStr);
+            if (shifted.year !== year || shifted.monthIndex !== monthIndex) {
               monthWillChange = true;
-              onMonthChange(next.year, next.monthIndex);
-            }
-          }
-        } else if (target === -1) {
-          if (onSwipeRight) {
-            onSwipeRight();
-          } else if (expanded) {
-            const prev = shiftMonthView(year, monthIndex, selectedDateStr, -1);
-            onSelectDate(prev.dateStr);
-            if (prev.year !== year || prev.monthIndex !== monthIndex) {
-              monthWillChange = true;
-            }
-            onMonthChange(prev.year, prev.monthIndex);
-          } else {
-            const prev = shiftWeek(selectedDateStr, -1);
-            onSelectDate(prev.dateStr);
-            if (prev.year !== year || prev.monthIndex !== monthIndex) {
-              monthWillChange = true;
-              onMonthChange(prev.year, prev.monthIndex);
+              onMonthChange(shifted.year, shifted.monthIndex);
+            } else if (expanded) {
+              onMonthChange(shifted.year, shifted.monthIndex);
             }
           }
         }
 
         // Seamlessly reset track offset to 0 without animation
         isSnappingRef.current = false;
-        currentDragOffsetRef.current = 0;
-        if (trackRef.current) {
-          trackRef.current.style.transition = 'none';
-          trackRef.current.style.transform = 'translateX(0px)';
-        }
-        if (!monthWillChange) {
-          onSwipeProgressRef.current?.({ phase: 'reset' });
-        }
+        resetHorizontalTrack(!monthWillChange);
 
         setTimeout(() => {
           justSwipedRef.current = false;
         }, 100);
       }, SNAP_DURATION);
     },
-    [expanded, year, monthIndex, selectedDateStr, onSwipeLeft, onSwipeRight, onSelectDate, onMonthChange]
+    [expanded, year, monthIndex, selectedDateStr, onSwipeLeft, onSwipeRight, onSelectDate, onMonthChange, resetHorizontalTrack]
   );
 
   useEffect(() => {
@@ -294,25 +313,13 @@ export function CalendarMonthView({
 
       if (direction === 'horizontal') {
         if (e.cancelable) e.preventDefault();
-        currentDragOffsetRef.current = dx;
-        if (trackRef.current) {
-          trackRef.current.style.transition = 'none';
-          trackRef.current.style.transform = `translateX(${dx}px)`;
-        }
-        const width = containerRef.current?.offsetWidth || 360;
-        onSwipeProgressRef.current?.({
-          phase: 'drag',
-          progress: Math.max(-1, Math.min(1, dx / width)),
-        });
+        applyHorizontalDrag(dx);
       }
     };
 
     const onTouchEnd = (e: TouchEvent) => {
       if (direction !== 'horizontal') {
-        if (direction === 'none' && trackRef.current) {
-          trackRef.current.style.transition = 'none';
-          trackRef.current.style.transform = 'translateX(0px)';
-        }
+        if (direction === 'none') resetHorizontalTrack(false);
         return;
       }
       direction = 'none';
@@ -325,12 +332,7 @@ export function CalendarMonthView({
 
     const onTouchCancel = () => {
       direction = 'none';
-      currentDragOffsetRef.current = 0;
-      if (trackRef.current) {
-        trackRef.current.style.transition = 'none';
-        trackRef.current.style.transform = 'translateX(0px)';
-      }
-      onSwipeProgressRef.current?.({ phase: 'reset' });
+      resetHorizontalTrack(true);
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -344,7 +346,7 @@ export function CalendarMonthView({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchCancel);
     };
-  }, [finishSwipe]);
+  }, [finishSwipe, applyHorizontalDrag, resetHorizontalTrack]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || e.button !== 0) return;
@@ -358,11 +360,7 @@ export function CalendarMonthView({
     if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
     if ((e.buttons & 1) === 0) {
       if (pointerDirectionRef.current === 'horizontal') {
-        if (trackRef.current) {
-          trackRef.current.style.transition = 'none';
-          trackRef.current.style.transform = 'translateX(0px)';
-        }
-        onSwipeProgressRef.current?.({ phase: 'reset' });
+        resetHorizontalTrack(true);
       }
       pointerDirectionRef.current = 'none';
       return;
@@ -379,16 +377,7 @@ export function CalendarMonthView({
     }
 
     if (pointerDirectionRef.current === 'horizontal') {
-      currentDragOffsetRef.current = dx;
-      if (trackRef.current) {
-        trackRef.current.style.transition = 'none';
-        trackRef.current.style.transform = `translateX(${dx}px)`;
-      }
-      const width = containerRef.current?.offsetWidth || 360;
-      onSwipeProgressRef.current?.({
-        phase: 'drag',
-        progress: Math.max(-1, Math.min(1, dx / width)),
-      });
+      applyHorizontalDrag(dx);
     }
   };
 
@@ -404,12 +393,7 @@ export function CalendarMonthView({
 
   const onPointerCancel = () => {
     if (pointerDirectionRef.current === 'horizontal') {
-      currentDragOffsetRef.current = 0;
-      if (trackRef.current) {
-        trackRef.current.style.transition = 'none';
-        trackRef.current.style.transform = 'translateX(0px)';
-      }
-      onSwipeProgressRef.current?.({ phase: 'reset' });
+      resetHorizontalTrack(true);
     }
     pointerDirectionRef.current = 'none';
   };
@@ -489,13 +473,9 @@ export function CalendarMonthView({
       justSwipedRef.current = false;
       currentDragOffsetRef.current = 0;
       pointerDirectionRef.current = 'none';
-      if (trackRef.current) {
-        trackRef.current.style.transition = 'none';
-        trackRef.current.style.transform = 'translateX(0px)';
-      }
-      onSwipeProgressRef.current?.({ phase: 'reset' });
+      resetHorizontalTrack(true);
     },
-  }), []);
+  }), [resetHorizontalTrack]);
 
   const prevGridKey = expanded
     ? `m-${prevMonth.year}-${prevMonth.monthIndex}`

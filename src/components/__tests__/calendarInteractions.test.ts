@@ -4,7 +4,6 @@ import {
   shiftWeek,
   jumpToToday,
   dueAtForSelectedDay,
-  monthContains,
   buildWeekCells,
   readStoredCalendarExpanded,
   saveStoredCalendarExpanded,
@@ -226,12 +225,6 @@ describe('Calendar Month & Week Navigation Interactions', () => {
   });
 
   describe('Grid Cell Selection & Context Updates', () => {
-    it('determines if selected date belongs to current viewed month', () => {
-      expect(monthContains('2026-11-17', 2026, 10)).toBe(true);
-      expect(monthContains('2026-10-31', 2026, 10)).toBe(false);
-      expect(monthContains('2026-12-01', 2026, 10)).toBe(false);
-    });
-
     it('calculates dueAt for selected date correctly', () => {
       expect(dueAtForSelectedDay('2026-11-20', '2026-11-17')).toBe('2026-11-20');
       expect(dueAtForSelectedDay(null, '2026-11-17')).toBe('2026-11-17');

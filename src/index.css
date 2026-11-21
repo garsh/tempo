@@ -39,34 +39,12 @@
   --tt-text: #191919;
   --tt-secondary: #8e8e93;
   --tt-muted: #a4a5a8;
-  --tt-tab-icon: #8a8b8e;
-
-  /* Empty-state illustration */
-  --tt-illus-blob: #e9ebf0;
-  --tt-illus-stroke: #15224b;
-  --tt-illus-tray: #f2f4f9;
-  --tt-illus-tray-inner: #e7ebf5;
-  --tt-illus-accent: #15224b;
-  --tt-illus-plane-fold: #15224b;
-  --tt-illus-cloud: #ffffff;
-  /* paper-plane fold drawn over the sky blob (Today) */
-  --tt-illus-plane-fold-sky: #15224b;
 
   --tt-overdue: #e03131;
-  --tt-pri-high: #e03131;
-  --tt-pri-med: #faa80c;
-  --tt-pri-low: #4772fa;
   --tt-pri-none: #c7c7cc;
   --tt-success: #34c759;
   --tt-shadow: rgb(0 0 0 / 0.12);
 
-  /* Left drawer — TickTick keeps it navy even in light mode */
-  --tt-drawer: #232c57;
-  --tt-drawer-pill: #293565;
-  --tt-drawer-divider: rgb(255 255 255 / 0.1);
-  --tt-drawer-text: #ffffff;
-  --tt-drawer-muted: rgb(255 255 255 / 0.6);
-  --tt-smart-orange: #ff5900;
   /* Overflow menu card + settings rows */
   --tt-menu: #ffffff;
   --tt-menu-divider: #f1f1f1;
@@ -102,23 +80,10 @@
     --tt-text: #ebebeb;
     --tt-secondary: #8e8e93;
     --tt-muted: #5c5c5c;
-    --tt-tab-icon: #494949;
-
-    --tt-illus-blob: #191919;
-    --tt-illus-stroke: #353535;
-    --tt-illus-tray: #dddee1;
-    --tt-illus-tray-inner: #cdcdcd;
-    --tt-illus-accent: #606060;
-    --tt-illus-plane-fold: #1c1c1e;
-    --tt-illus-cloud: #2a2a2c;
-    --tt-illus-plane-fold-sky: #22398a;
 
     --tt-pri-none: #5c5c60;
     --tt-shadow: rgb(0 0 0 / 0.6);
 
-    --tt-drawer: #1c1c1e;
-    --tt-drawer-pill: #2e3352;
-    --tt-drawer-divider: rgb(255 255 255 / 0.08);
     --tt-menu: #2c2c2e;
     --tt-menu-divider: #3a3a3c;
     --tt-chevron: #5c5c60;
@@ -151,23 +116,10 @@
   --tt-text: #ebebeb;
   --tt-secondary: #8e8e93;
   --tt-muted: #5c5c5c;
-  --tt-tab-icon: #494949;
-
-  --tt-illus-blob: #191919;
-  --tt-illus-stroke: #353535;
-  --tt-illus-tray: #dddee1;
-  --tt-illus-tray-inner: #cdcdcd;
-  --tt-illus-accent: #606060;
-  --tt-illus-plane-fold: #1c1c1e;
-  --tt-illus-cloud: #2a2a2c;
-  --tt-illus-plane-fold-sky: #22398a;
 
   --tt-pri-none: #5c5c60;
   --tt-shadow: rgb(0 0 0 / 0.6);
 
-  --tt-drawer: #1c1c1e;
-  --tt-drawer-pill: #2e3352;
-  --tt-drawer-divider: rgb(255 255 255 / 0.08);
   --tt-menu: #2c2c2e;
   --tt-menu-divider: #3a3a3c;
   --tt-chevron: #5c5c60;
@@ -203,19 +155,9 @@
   --color-tt-text: var(--tt-text);
   --color-tt-secondary: var(--tt-secondary);
   --color-tt-muted: var(--tt-muted);
-  --color-tt-tab-icon: var(--tt-tab-icon);
   --color-tt-overdue: var(--tt-overdue);
-  --color-tt-pri-high: var(--tt-pri-high);
-  --color-tt-pri-med: var(--tt-pri-med);
-  --color-tt-pri-low: var(--tt-pri-low);
   --color-tt-pri-none: var(--tt-pri-none);
   --color-tt-success: var(--tt-success);
-  --color-tt-drawer: var(--tt-drawer);
-  --color-tt-drawer-pill: var(--tt-drawer-pill);
-  --color-tt-drawer-divider: var(--tt-drawer-divider);
-  --color-tt-drawer-text: var(--tt-drawer-text);
-  --color-tt-drawer-muted: var(--tt-drawer-muted);
-  --color-tt-smart-orange: var(--tt-smart-orange);
   --color-tt-menu: var(--tt-menu);
   --color-tt-menu-divider: var(--tt-menu-divider);
   --color-tt-chevron: var(--tt-chevron);
@@ -250,28 +192,6 @@
   select option {
     background-color: var(--tt-elevated);
     color: var(--tt-text);
-  }
-}
-
-@keyframes slideInRight {
-  from {
-    transform: translateX(20px);
-    opacity: 0.85;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes slideInLeft {
-  from {
-    transform: translateX(-20px);
-    opacity: 0.85;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
   }
 }
 

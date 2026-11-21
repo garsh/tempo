@@ -697,6 +697,24 @@ const completedDateSetCache = new WeakMap<
   { history: readonly number[] | undefined; length: number; set: Set<string> }
 >();
 
+const skippedDateSetCache = new WeakMap<
+  object,
+  { skipped: readonly string[] | undefined; length: number; set: Set<string> }
+>();
+
+type EndAfterCountCacheEntry = {
+  rule: RecurrenceRule;
+  endAfterCount: number;
+  anchorStr: string;
+  history: readonly number[] | undefined;
+  historyLength: number;
+  scannedThrough: string | null;
+  uncompletedCount: number;
+  cutoffDateStr: string | null;
+};
+
+const endAfterCountCache = new WeakMap<object, EndAfterCountCacheEntry>();
+
 /** Local midnight bounds `[startMs, nextMidnightMs)` for a YYYY-MM-DD calendar date. */
 export function getDayBoundsMs(dateStr: string): readonly [number, number] {
   const cached = dayBoundsCache.get(dateStr);
@@ -734,7 +752,7 @@ export function getCompletedDateSet(task: Pick<Task, 'completionHistory'>): Set<
 /**
  * Return the completion timestamp for `task` on `dateStr` (YYYY-MM-DD), or null if not completed on that day.
  */
-export function getCompletionTimestampOnDate(
+function getCompletionTimestampOnDate(
   task: Pick<Task, 'completionHistory' | 'completedAt' | 'recurrence' | 'dueAt'>,
   dateStr: string
 ): number | null {
@@ -762,7 +780,24 @@ export function isCompletedOnDate(
   task: Pick<Task, 'completionHistory' | 'completedAt' | 'recurrence' | 'dueAt'>,
   dateStr: string
 ): boolean {
-  return getCompletionTimestampOnDate(task, dateStr) !== null;
+  if (getCompletedDateSet(task).has(dateStr)) return true;
+  if (!task.recurrence && task.completedAt) {
+    if (task.dueAt && getDueDatePart(task.dueAt) === dateStr) return true;
+    const [dayStartMs, dayEndMs] = getDayBoundsMs(dateStr);
+    if (task.completedAt >= dayStartMs && task.completedAt < dayEndMs) return true;
+  }
+  return false;
+}
+
+function getSkippedDateSet(task: Pick<Task, 'skippedDates'>): Set<string> {
+  const skipped = task.skippedDates;
+  const length = skipped?.length ?? 0;
+  const cached = skippedDateSetCache.get(task);
+  if (cached && cached.skipped === skipped && cached.length === length) return cached.set;
+
+  const set = new Set<string>(skipped);
+  skippedDateSetCache.set(task, { skipped, length, set });
+  return set;
 }
 
 /** Whether `task` has had its occurrence skipped for `dateStr` (YYYY-MM-DD). */
@@ -770,7 +805,8 @@ export function isSkippedOnDate(
   task: Pick<Task, 'skippedDates'>,
   dateStr: string
 ): boolean {
-  return !!task.skippedDates?.includes(dateStr);
+  if (!task.skippedDates || task.skippedDates.length === 0) return false;
+  return getSkippedDateSet(task).has(dateStr);
 }
 
 /**
@@ -784,20 +820,19 @@ export function getRecurrenceAnchor(
 ): string {
   if (task.startDate) return task.startDate;
   const duePart = task.dueAt ? getDueDatePart(task.dueAt) : null;
-  const createdPart = formatDate(new Date(task.createdAt));
 
   if (task.completionHistory && task.completionHistory.length > 0) {
-    let earliestComp: string | null = null;
-    for (const ts of task.completionHistory) {
-      const d = formatDate(new Date(ts));
-      if (!earliestComp || d < earliestComp) earliestComp = d;
+    let minTs = task.completionHistory[0];
+    for (let i = 1; i < task.completionHistory.length; i++) {
+      if (task.completionHistory[i] < minTs) minTs = task.completionHistory[i];
     }
-    if (earliestComp && (!duePart || earliestComp < duePart)) {
+    const earliestComp = formatDate(new Date(minTs));
+    if (!duePart || earliestComp < duePart) {
       return earliestComp;
     }
   }
 
-  return duePart || createdPart;
+  return duePart || formatDate(new Date(task.createdAt));
 }
 
 /**
@@ -823,15 +858,14 @@ function scheduleMatchesDate(
   const interval = Math.max(1, rule.intervalValue || 1);
 
   if (rule.weekdays && rule.weekdays.length > 0) {
-    const sorted = [...new Set(rule.weekdays)].sort((a, b) => a - b) as Weekday[];
-    if (!sorted.includes(targetDate.getDay() as Weekday)) return false;
+    if (!rule.weekdays.includes(targetDate.getDay() as Weekday)) return false;
     const intervalWeeks = rule.intervalUnit === 'weeks' ? interval : 1;
     if (intervalWeeks <= 1) return true;
 
     let firstMatch: Date | null = null;
     for (let i = 0; i < 7; i++) {
       const candidate = addDays(baseDate, i);
-      if (sorted.includes(candidate.getDay() as Weekday)) {
+      if (rule.weekdays.includes(candidate.getDay() as Weekday)) {
         firstMatch = candidate;
         break;
       }
@@ -926,15 +960,50 @@ export function taskOccursOnDate(
   if (!scheduleMatchesDate(rule, anchorStr, dateStr, anchorStr)) return false;
 
   if (rule.endAfterCount != null && rule.endAfterCount > 0) {
+    const remaining = rule.endAfterCount - completedDates.size;
+    const history = task.completionHistory;
+    const historyLength = history?.length ?? 0;
+    let entry = endAfterCountCache.get(task);
+    if (
+      !entry ||
+      entry.rule !== rule ||
+      entry.endAfterCount !== rule.endAfterCount ||
+      entry.anchorStr !== anchorStr ||
+      entry.history !== history ||
+      entry.historyLength !== historyLength
+    ) {
+      entry = {
+        rule,
+        endAfterCount: rule.endAfterCount,
+        anchorStr,
+        history,
+        historyLength,
+        scannedThrough: null,
+        uncompletedCount: 0,
+        cutoffDateStr: null,
+      };
+      endAfterCountCache.set(task, entry);
+    }
+
+    if (entry.cutoffDateStr !== null) {
+      return dateStr <= entry.cutoffDateStr;
+    }
+    if (entry.scannedThrough !== null && dateStr <= entry.scannedThrough) {
+      return true;
+    }
+
     const targetDate = parseDate(dateStr);
-    let uncompletedCount = 0;
-    let cursor = parseDate(anchorStr);
+    let cursor = entry.scannedThrough
+      ? addDays(parseDate(entry.scannedThrough), 1)
+      : parseDate(anchorStr);
     while (cursor <= targetDate) {
       const dStr = formatDate(cursor);
+      entry.scannedThrough = dStr;
       if (!completedDates.has(dStr) && scheduleMatchesDate(rule, anchorStr, dStr, anchorStr)) {
-        uncompletedCount++;
-        if (completedDates.size + uncompletedCount > rule.endAfterCount) {
-          return false;
+        entry.uncompletedCount++;
+        if (entry.uncompletedCount === remaining) {
+          entry.cutoffDateStr = dStr;
+          return dateStr <= dStr;
         }
       }
       cursor = addDays(cursor, 1);
@@ -973,6 +1042,25 @@ export function projectTaskForDate(task: Task, dateStr: string): Task {
   return task.dueAt === projectedDueAt ? task : { ...task, dueAt: projectedDueAt };
 }
 
+function findNextUncompletedForward(
+  task: Task,
+  startDate: Date,
+  maxDays: number = 1100
+): string | null {
+  for (let i = 0; i <= maxDays; i++) {
+    const dStr = formatDate(addDays(startDate, i));
+    if (task.recurrence?.endOnDate && dStr > task.recurrence.endOnDate) return null;
+    if (
+      !isCompletedOnDate(task, dStr) &&
+      !isSkippedOnDate(task, dStr) &&
+      taskOccursOnDate(task, dStr)
+    ) {
+      return dStr;
+    }
+  }
+  return null;
+}
+
 /**
  * Find the next (or currently overdue) uncompleted occurrence date (YYYY-MM-DD) for `task`,
  * relative to `fromDate`. Returns null if the task is completed or its recurrence has ended.
@@ -992,9 +1080,9 @@ export function getNextUncompletedOccurrenceDate(
   const todayStr = formatDate(today);
 
   if (
-    taskOccursOnDate(task, todayStr) &&
     !isCompletedOnDate(task, todayStr) &&
-    !isSkippedOnDate(task, todayStr)
+    !isSkippedOnDate(task, todayStr) &&
+    taskOccursOnDate(task, todayStr)
   ) {
     return todayStr;
   }
@@ -1014,9 +1102,9 @@ export function getNextUncompletedOccurrenceDate(
       const dStr = formatDate(cursor);
       if (completedDates.has(dStr) || (latestCompletedStr && dStr <= latestCompletedStr)) break;
       if (
-        taskOccursOnDate(task, dStr) &&
         !isCompletedOnDate(task, dStr) &&
-        !isSkippedOnDate(task, dStr)
+        !isSkippedOnDate(task, dStr) &&
+        taskOccursOnDate(task, dStr)
       ) {
         return dStr;
       }
@@ -1024,19 +1112,7 @@ export function getNextUncompletedOccurrenceDate(
   }
 
   const startForward = anchorStr > todayStr ? parseDate(anchorStr) : addDays(today, 1);
-  for (let i = 0; i <= 1100; i++) {
-    const dStr = formatDate(addDays(startForward, i));
-    if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) break;
-    if (
-      taskOccursOnDate(task, dStr) &&
-      !isCompletedOnDate(task, dStr) &&
-      !isSkippedOnDate(task, dStr)
-    ) {
-      return dStr;
-    }
-  }
-
-  return null;
+  return findNextUncompletedForward(task, startForward);
 }
 
 export function startOfDay(date: Date = new Date()): Date {
@@ -1047,18 +1123,6 @@ export function addDays(date: Date, days: number): Date {
   const d = startOfDay(date);
   d.setDate(d.getDate() + days);
   return d;
-}
-
-/** Subtask progress helper. */
-export function subtaskProgress(subtasks: { completed: boolean }[] | undefined): {
-  done: number;
-  total: number;
-} {
-  const list = subtasks || [];
-  return {
-    done: list.filter((s) => s.completed).length,
-    total: list.length,
-  };
 }
 
 /**
@@ -1078,17 +1142,12 @@ export function getSkipOccurrenceDate(
 
   // Search forward strictly after curDateStr
   const startForward = addDays(fromDate, 1);
-  for (let i = 0; i <= 1100; i++) {
-    const candidate = addDays(startForward, i);
-    const dStr = formatDate(candidate);
-    if (task.recurrence.endOnDate && dStr > task.recurrence.endOnDate) return null;
-    if (
-      taskOccursOnDate(task, dStr) &&
-      !isCompletedOnDate(task, dStr) &&
-      !isSkippedOnDate(task, dStr)
-    ) {
-      return combineDueAt(dStr, time);
-    }
+  const nextForward = findNextUncompletedForward(task, startForward);
+  if (nextForward) {
+    return combineDueAt(nextForward, time);
+  }
+  if (task.recurrence.endOnDate && formatDate(addDays(startForward, 1100)) > task.recurrence.endOnDate) {
+    return null;
   }
 
   // Fallback for long-interval schedules beyond the 1100-day forward scan

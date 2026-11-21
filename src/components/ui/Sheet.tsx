@@ -1,4 +1,5 @@
-import { useEffect, useId, type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface SheetProps {
   open: boolean;
@@ -18,16 +19,7 @@ interface SheetProps {
  */
 export function Sheet({ open, onClose, title, action, children, z = 70, testId }: SheetProps) {
   const titleId = useId();
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onClose]);
+  useEscapeKey(open, onClose, { capture: true, stopPropagation: true });
 
   if (!open) return null;
   return (
@@ -110,16 +102,7 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      onCancel();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onCancel]);
+  useEscapeKey(open, onCancel, { capture: true, stopPropagation: true });
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-8 bg-tt-scrim" onClick={onCancel}>

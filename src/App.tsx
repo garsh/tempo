@@ -27,6 +27,7 @@ import {
   isUndatedOneTime,
   isWindowPeriodic,
   projectTaskForDate,
+  type WindowProgress,
 } from './domain/recurrence';
 import {
   sortTasksForDailyView,
@@ -36,10 +37,7 @@ import {
 import { usePrefs } from './prefs/prefs';
 import { completedTasksOnDate, shiftMonth, tasksDueOnDate } from './domain/calendar';
 import {
-  calendarExpandProgress,
   calendarHeaderTitle,
-  classifyCalendarPull,
-  commitCalendarExpanded,
   defaultDateForMonth,
   jumpToToday,
   readStoredActiveView,
@@ -55,12 +53,13 @@ import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
 import { shareTextFromParts, takeSharedText } from './pwa/shareText';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useCalendarPullGesture } from './hooks/useCalendarPullGesture';
+import { useUndoToast } from './hooks/useUndoToast';
 import { TaskCard } from './components/TaskCard';
 import { ReorderableTaskList } from './components/ReorderableTaskList';
 import { QuickAddSheet } from './components/QuickAddSheet';
 import { SettingsPage, type SettingsPageId } from './components/settings/SettingsPage';
 import {
-  CALENDAR_EXPAND_DELTA,
   CalendarMonthView,
   type CalendarMonthHandle,
 } from './components/CalendarMonthView';
@@ -68,6 +67,7 @@ import {
   SwipeableMonthTitle,
   type SwipeableMonthTitleHandle,
 } from './components/calendar/SwipeableMonthTitle';
+import { TodayCalendarIcon } from './components/calendar/TodayCalendarIcon';
 import { MonthYearPickerDialog } from './components/calendar/MonthYearPickerDialog';
 import {
   ChangeDatePicker,
@@ -75,7 +75,9 @@ import {
 } from './components/dialogs/ChangeDatePicker';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
+import { ShortcutsHelpDialog } from './components/dialogs/ShortcutsHelpDialog';
 import { InstallPrompt } from './components/InstallPrompt';
+import { UndoToast } from './components/ui/UndoToast';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { OverflowMenu } from './components/menu/OverflowMenu';
 import { TaskSearchView } from './components/search/TaskSearchView';
@@ -87,44 +89,12 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Keyboard,
   ListChecks,
   MoreVertical,
   Plus,
-  X,
 } from 'lucide-react';
 
 const EMPTY_TASKS: Task[] = [];
-
-function TodayCalendarIcon({ day }: { day: number }) {
-  return (
-    <svg
-      width={20}
-      height={20}
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="2.5" y="3.5" width="15" height="14" rx="3" />
-      <path d="M6.5 2v2.5M13.5 2v2.5M2.5 7.5h15" />
-      <text
-        x="10"
-        y="14.5"
-        textAnchor="middle"
-        fill="currentColor"
-        stroke="none"
-        fontSize="7.5"
-        fontWeight="700"
-      >
-        {day}
-      </text>
-    </svg>
-  );
-}
 
 export function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -135,13 +105,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeView, setActiveView] = useState<ActiveMainView>(readStoredActiveView);
   const [isRecurringOpen, setIsRecurringOpen] = useState(false);
-  const [undoToast, setUndoToast] = useState<{
-    id: number;
-    message: string;
-    onUndo: () => Promise<void> | void;
-  } | null>(null);
-  const undoTimerRef = useRef<number | null>(null);
-  const toastPopoverRef = useRef<HTMLDivElement>(null);
+  const { undoToast, showUndoToast, dismissUndoToast } = useUndoToast();
 
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
@@ -227,25 +191,14 @@ export function App() {
     },
     [applyCalendarTarget]
   );
-  const calGestureRef = useRef<{
-    startY: number;
-    startX: number;
-    startProgress: number;
-    latestProgress: number;
-    mode: 'pending' | 'drag' | 'scroll';
-  } | null>(null);
-  const isTaskReorderingRef = useRef(false);
-
-  const handleDragActiveChange = useCallback((active: boolean) => {
-    isTaskReorderingRef.current = active;
-    if (active) {
-      const g = calGestureRef.current;
-      calGestureRef.current = null;
-      if (g && g.mode === 'drag') {
-        monthViewRef.current?.releasePull(() => {});
-      }
-    }
-  }, []);
+  const { handleDragActiveChange, cancelPull, areaPointerProps } = useCalendarPullGesture({
+    calAreaRef,
+    calScrollRef,
+    monthViewRef,
+    calExpanded,
+    setCalExpanded,
+    active: activeView === 'calendar' && !isSearchOpen && !isRecurringOpen,
+  });
 
   const [prefs, updatePrefs] = usePrefs();
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>('root');
@@ -262,7 +215,6 @@ export function App() {
   }, []);
 
   const [initialTasks, setInitialTasks] = useState<Task[] | null>(null);
-  const [reorderOverride] = useState<Map<string, number> | null>(null);
 
   useEffect(() => {
     initDiagnostics();
@@ -305,14 +257,7 @@ export function App() {
   }, []);
 
   const liveTasks = useLiveQuery(() => db.tasks.toArray(), []);
-  const allTasks = useMemo(() => {
-    const base = liveTasks ?? initialTasks ?? EMPTY_TASKS;
-    if (!reorderOverride || reorderOverride.size === 0) return base;
-    return base.map((t) => {
-      const order = reorderOverride.get(t.id);
-      return order !== undefined ? { ...t, sortOrder: order } : t;
-    });
-  }, [liveTasks, initialTasks, reorderOverride]);
+  const allTasks = liveTasks ?? initialTasks ?? EMPTY_TASKS;
 
   const { status: syncStatus, refreshStatus: refreshSyncStatus, scheduleSync } = useAutoSync();
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
@@ -325,19 +270,20 @@ export function App() {
   }, [calSelectedDate, activeTasks]);
 
   const calCompletedTasks = useMemo(() => {
-    if (!calSelectedDate) return [];
+    if (!calSelectedDate || prefs.hideCompleted) return [];
     return sortTasksForDailyView(completedTasksOnDate(activeTasks, calSelectedDate));
-  }, [calSelectedDate, activeTasks]);
+  }, [calSelectedDate, activeTasks, prefs.hideCompleted]);
 
   const calOverdueTasks = useMemo(() => {
     if (!prefs.showOverdue) return [];
-    const todayStr = formatDate(new Date());
+    const refNow = new Date();
+    const todayStr = formatDate(refNow);
     if (calSelectedDate !== todayStr) return [];
     const overdue: Task[] = [];
     for (const t of activeTasks) {
       if (t.deletedAt || isCompleted(t)) continue;
       if (isFixedRecurring(t)) {
-        const nextDate = getNextUncompletedOccurrenceDate(t, new Date());
+        const nextDate = getNextUncompletedOccurrenceDate(t, refNow);
         if (nextDate && nextDate < todayStr) {
           overdue.push(projectTaskForDate(t, nextDate));
         }
@@ -354,6 +300,7 @@ export function App() {
   const { visiblePeriodicTasks, tasksDotTone, undatedOneTimeTasks } = useMemo(() => {
     const refNow = new Date();
     const periodic: Task[] = [];
+    const progressById = new Map<string, WindowProgress | null>();
     const oneTime: Task[] = [];
     let hasOverdue = false;
     let hasAmber = false;
@@ -365,6 +312,7 @@ export function App() {
         const prog = getWindowProgress(t, refNow);
         if (prog?.visibleInTasks) {
           periodic.push(t);
+          progressById.set(t.id, prog);
           if (prog.stage === 'at_or_past_max' && prog.overdueIntensity > 0) {
             hasOverdue = true;
           } else if (prog.stage === 'at_or_past_max' || prog.stage === 'not_done_yet') {
@@ -379,7 +327,7 @@ export function App() {
     }
 
     return {
-      visiblePeriodicTasks: sortWindowTasks(periodic, refNow),
+      visiblePeriodicTasks: sortWindowTasks(periodic, refNow, progressById),
       tasksDotTone: hasOverdue
         ? ('overdue' as const)
         : hasAmber
@@ -392,10 +340,11 @@ export function App() {
   }, [activeTasks]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
-    const todayStr = formatDate(new Date());
+    const today = new Date();
+    const todayStr = formatDate(today);
     if (dateStr === todayStr) return 'Today';
-    if (dateStr === formatDate(addDays(new Date(), 1))) return 'Tomorrow';
-    if (dateStr === formatDate(addDays(new Date(), -1))) return 'Yesterday';
+    if (dateStr === formatDate(addDays(today, 1))) return 'Tomorrow';
+    if (dateStr === formatDate(addDays(today, -1))) return 'Yesterday';
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d).toLocaleDateString(undefined, {
       weekday: 'short',
@@ -404,129 +353,12 @@ export function App() {
     });
   };
 
-  useEffect(() => {
-    const area = calAreaRef.current;
-    if (!area) return;
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (isTaskReorderingRef.current) return;
-      const t = e.touches[0];
-      if (!t) return;
-      const startProgress = calExpanded ? 1 : 0;
-      calGestureRef.current = {
-        startY: t.clientY,
-        startX: t.clientX,
-        startProgress,
-        latestProgress: startProgress,
-        mode: 'pending',
-      };
-    };
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (isTaskReorderingRef.current) return;
-      const g = calGestureRef.current;
-      const t = e.touches[0];
-      if (!g || !t) return;
-
-      const dy = t.clientY - g.startY;
-      const dx = t.clientX - g.startX;
-
-      if (g.mode === 'pending') {
-        const scroller = calScrollRef.current;
-        const nextMode = classifyCalendarPull({
-          mode: g.mode,
-          dx,
-          dy,
-          atTop: !scroller || scroller.scrollTop <= 1,
-          onHeader: scroller ? !scroller.contains(e.target as Node) : true,
-          expanded: calExpanded,
-        });
-        if (nextMode === 'pending') return;
-        g.mode = nextMode;
-        if (g.mode !== 'drag') return;
-      }
-
-      if (g.mode === 'drag') {
-        e.preventDefault();
-        const next = calendarExpandProgress(g.startProgress, dy, CALENDAR_EXPAND_DELTA);
-        g.latestProgress = next;
-        monthViewRef.current?.setPullProgress(next);
-      }
-    };
-
-    const finishDrag = () => {
-      if (isTaskReorderingRef.current) {
-        calGestureRef.current = null;
-        return;
-      }
-      const g = calGestureRef.current;
-      calGestureRef.current = null;
-      if (!g || g.mode !== 'drag') return;
-      const shouldExpand = commitCalendarExpanded(g.startProgress, g.latestProgress);
-      monthViewRef.current?.releasePull(() => {
-        setCalExpanded(shouldExpand);
-      });
-    };
-
-    area.addEventListener('touchstart', onTouchStart, { passive: true });
-    area.addEventListener('touchmove', onTouchMove, { passive: false });
-    area.addEventListener('touchend', finishDrag, { passive: true });
-    area.addEventListener('touchcancel', finishDrag, { passive: true });
-    return () => {
-      area.removeEventListener('touchstart', onTouchStart);
-      area.removeEventListener('touchmove', onTouchMove);
-      area.removeEventListener('touchend', finishDrag);
-      area.removeEventListener('touchcancel', finishDrag);
-    };
-  }, [calExpanded, isSearchOpen, isRecurringOpen, activeView]);
-
-  const dismissUndoToast = useCallback(() => {
-    if (undoTimerRef.current != null) {
-      window.clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = null;
-    }
-    setUndoToast(null);
-  }, []);
-
-  const showUndoToast = useCallback((message: string, onUndo: () => Promise<void> | void) => {
-    if (undoTimerRef.current != null) {
-      window.clearTimeout(undoTimerRef.current);
-    }
-    setUndoToast({ id: Date.now(), message, onUndo });
-    undoTimerRef.current = window.setTimeout(() => {
-      undoTimerRef.current = null;
-      setUndoToast(null);
-    }, 5000);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current != null) {
-        window.clearTimeout(undoTimerRef.current);
-      }
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    const el = toastPopoverRef.current;
-    if (!el || !undoToast) return;
-    if (typeof el.showPopover === 'function') {
-      try {
-        if (!el.matches(':popover-open')) {
-          el.showPopover();
-        }
-      } catch {
-        // Ignore environments without popover support
-      }
-    }
-  }, [undoToast]);
-
   const openSearch = useCallback(() => {
-    calGestureRef.current = null;
+    cancelPull();
     savedCalScrollTopRef.current = calScrollRef.current?.scrollTop ?? null;
     setOverflowAnchor(null);
     setIsSearchOpen(true);
-  }, []);
+  }, [cancelPull]);
 
   const closeSearch = useCallback((restoreFocus = true) => {
     restoreMoreFocusRef.current = restoreFocus;
@@ -543,6 +375,9 @@ export function App() {
       setActiveView('calendar');
       setSearchQuery('');
       if (expandCompleted) {
+        if (prefs.hideCompleted) {
+          updatePrefs({ hideCompleted: false });
+        }
         setCollapsedGroups((prev) =>
           prev['cal-completed'] ? { ...prev, 'cal-completed': false } : prev
         );
@@ -552,7 +387,7 @@ export function App() {
         applyCalendarTarget({ year: y, monthIndex: m - 1, dateStr });
       }
     },
-    [applyCalendarTarget]
+    [applyCalendarTarget, prefs.hideCompleted, updatePrefs]
   );
 
   useLayoutEffect(() => {
@@ -622,28 +457,6 @@ export function App() {
     scheduleSync();
   };
 
-  const handlePatchTask = async (
-    id: string,
-    patch: Partial<{
-      dueAt: string | null;
-      recurrence: Task['recurrence'];
-      notes: string;
-      title: string;
-    }>
-  ) => {
-    const existing = await db.tasks.get(id);
-    if (!existing) return;
-    await saveTask({
-      id: existing.id,
-      title: patch.title ?? existing.title,
-      notes: patch.notes ?? existing.notes,
-      listId: existing.listId,
-      dueAt: patch.dueAt !== undefined ? patch.dueAt : existing.dueAt,
-      recurrence: patch.recurrence !== undefined ? patch.recurrence : existing.recurrence,
-    });
-    scheduleSync();
-  };
-
   const handleRequestChangeDate = useCallback((task: Task, anchorRect?: DOMRect) => {
     changeDatePickerRef.current?.open(task, anchorRect);
   }, []);
@@ -653,7 +466,17 @@ export function App() {
   }, []);
 
   const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
-    await handlePatchTask(taskId, { dueAt: newDueAt });
+    const existing = await db.tasks.get(taskId);
+    if (!existing) return;
+    await saveTask({
+      id: existing.id,
+      title: existing.title,
+      notes: existing.notes,
+      listId: existing.listId,
+      dueAt: newDueAt,
+      recurrence: existing.recurrence,
+    });
+    scheduleSync();
   };
 
   const handleConfirmLogDate = useCallback(async (taskId: string, pickedDate: string | null) => {
@@ -769,7 +592,6 @@ export function App() {
 
   const renderTaskRows = (
     tasks: Task[],
-    dense: boolean,
     reorderEnabled = false,
     occurrenceDateStr?: string,
   ) => {
@@ -786,7 +608,6 @@ export function App() {
           <TaskCard
             key={`${t.id}-${t.dueAt ?? ''}`}
             task={t}
-            dense={dense}
             showDetails={prefs.showDetails}
             occurrenceDateStr={occurrenceDateStr}
             onSelect={handleEdit}
@@ -987,61 +808,9 @@ export function App() {
           ) : (
             <div
               ref={calAreaRef}
-            onPointerDown={(e) => {
-              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
-              const startProgress = calExpanded ? 1 : 0;
-              calGestureRef.current = {
-                startY: e.clientY,
-                startX: e.clientX,
-                startProgress,
-                latestProgress: startProgress,
-                mode: 'pending',
-              };
-            }}
-            onPointerMove={(e) => {
-              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
-              const g = calGestureRef.current;
-              if (!g) return;
-
-              const dy = e.clientY - g.startY;
-              const dx = e.clientX - g.startX;
-
-              if (g.mode === 'pending') {
-                const scroller = calScrollRef.current;
-                const nextMode = classifyCalendarPull({
-                  mode: g.mode,
-                  dx,
-                  dy,
-                  atTop: !scroller || scroller.scrollTop <= 1,
-                  onHeader: scroller ? !scroller.contains(e.target as Node) : true,
-                  expanded: calExpanded,
-                });
-                if (nextMode === 'pending') return;
-                if (nextMode === 'scroll') {
-                  calGestureRef.current = null;
-                  return;
-                }
-                g.mode = 'drag';
-              }
-
-              if (g.mode === 'drag') {
-                const next = calendarExpandProgress(g.startProgress, dy, CALENDAR_EXPAND_DELTA);
-                g.latestProgress = next;
-                monthViewRef.current?.setPullProgress(next);
-              }
-            }}
-            onPointerUp={(e) => {
-              if (e.pointerType === 'touch' || isTaskReorderingRef.current) return;
-              const g = calGestureRef.current;
-              calGestureRef.current = null;
-              if (!g || g.mode !== 'drag') return;
-              const shouldExpand = commitCalendarExpanded(g.startProgress, g.latestProgress);
-              monthViewRef.current?.releasePull(() => {
-                setCalExpanded(shouldExpand);
-              });
-            }}
-            className="flex-1 flex flex-col min-h-0 overflow-hidden"
-          >
+              {...areaPointerProps}
+              className="flex-1 flex flex-col min-h-0 overflow-hidden"
+            >
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="shrink-0 px-3 sm:px-5">
                 <CalendarMonthView
@@ -1083,7 +852,7 @@ export function App() {
                             onToggle={() => toggleGroup('cal-overdue')}
                             sticky={false}
                           />
-                          {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks, false)}
+                          {!collapsedGroups['cal-overdue'] && renderTaskRows(calOverdueTasks)}
                         </div>
                       )}
                       {displayedTasks.length > 0 ? (
@@ -1096,7 +865,7 @@ export function App() {
                               {displayedTasks.length}
                             </span>
                           </div>
-                          {renderTaskRows(displayedTasks, false, true)}
+                          {renderTaskRows(displayedTasks, true)}
                         </div>
                       ) : (
                         calOverdueTasks.length > 0 && (
@@ -1119,7 +888,7 @@ export function App() {
                             sticky={false}
                           />
                           {!collapsedGroups['cal-completed'] &&
-                            renderTaskRows(calCompletedTasks, false, false, calSelectedDate ?? undefined)}
+                            renderTaskRows(calCompletedTasks, false, calSelectedDate ?? undefined)}
                         </div>
                       )}
                     </>
@@ -1134,45 +903,7 @@ export function App() {
         </>
       )}
 
-      {undoToast && (
-        <div
-          ref={toastPopoverRef}
-          key={undoToast.id}
-          role="status"
-          aria-live="polite"
-          data-testid="undo-toast"
-          {...(typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype
-            ? { popover: 'manual' as const }
-            : {})}
-          className="fixed top-auto left-4 right-20 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 m-0 p-0 border-0 bg-transparent z-50"
-          style={{ bottom: 'calc(20px + env(safe-area-inset-bottom))' }}
-        >
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-tt-rail text-white shadow-xl border border-white/10">
-            <span className="text-sm font-medium truncate">{undoToast.message}</span>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  const fn = undoToast.onUndo;
-                  dismissUndoToast();
-                  void fn();
-                }}
-                className="px-2.5 py-1 text-sm font-bold text-blue-300 hover:text-blue-200 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                onClick={dismissUndoToast}
-                aria-label="Dismiss notification"
-                className="p-1 text-white/60 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <UndoToast toast={undoToast} onDismiss={dismissUndoToast} />
 
       {/* FAB */}
       <button
@@ -1211,8 +942,6 @@ export function App() {
         diagnosticsContext={{
           calSelectedDate,
           collapsedGroups,
-          groupBy: prefs.groupBy,
-          sortBy: prefs.sortBy,
           hideCompleted: prefs.hideCompleted,
         }}
       />
@@ -1239,40 +968,7 @@ export function App() {
 
       <InstallPrompt />
 
-      {showShortcutsHelp && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-tt-elevated border border-tt-border rounded-3xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
-                <Keyboard className="w-5 h-5 text-tt-blue" />
-                Shortcuts
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowShortcutsHelp(false)}
-                className="p-1.5 text-tt-secondary hover:text-tt-text"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <ul className="space-y-2 text-xs text-tt-text">
-              {[
-                ['n / c', 'New task (capture)'],
-                ['/', 'Search tasks'],
-                ['Esc', 'Close modals'],
-                ['?', 'This help'],
-              ].map(([key, desc]) => (
-                <li key={key} className="flex items-center justify-between gap-3">
-                  <span className="text-tt-secondary">{desc}</span>
-                  <kbd className="px-2 py-1 rounded-lg bg-tt-sidebar text-tt-text font-mono text-[11px]">
-                    {key}
-                  </kbd>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
+      <ShortcutsHelpDialog open={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
 
       {/* Swipe Action Dialogs */}
       <ChangeDatePicker

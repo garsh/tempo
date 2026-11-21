@@ -77,11 +77,25 @@ let inflight: Promise<DriveSyncResult | null> | null = null;
 let queuedSync = false;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+const QUIET_SYNC_ERROR_RE =
+  /popup_closed|access_denied|interaction_required|user_logged_out|user_closed|Token request failed|Offline; sync paused|failed to fetch|networkerror|offline/i;
+
+export function isQuietSyncError(err: unknown): boolean {
+  if (err instanceof AuthOfflineError) return true;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return QUIET_SYNC_ERROR_RE.test(message);
+}
+
+export function canAutoSync(): boolean {
+  return Boolean(getStoredClientId() && isAutoSyncEnabled() && getGoogleAccount());
+}
+
 /**
  * Schedule a background Drive sync after a brief debounce period (e.g. after local edits).
  */
 export function triggerDebouncedSync(delayMs = 2000): void {
-  if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
+  if (!canAutoSync()) return;
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
   syncDebounceTimer = setTimeout(() => {
     syncDebounceTimer = null;
@@ -128,16 +142,8 @@ export async function runDriveSync(opts: {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const offline =
-        err instanceof AuthOfflineError ||
-        (typeof navigator !== 'undefined' && navigator.onLine === false);
       // Silent failures and offline reloads stay quiet. The cached account is kept.
-      const quiet =
-        offline ||
-        /popup_closed|access_denied|interaction_required|user_closed|Token request failed|failed to fetch|networkerror|offline/i.test(
-          message
-        );
-      if (!opts.allowInteractive && quiet) return null;
+      if (!opts.allowInteractive && isQuietSyncError(err)) return null;
       recordSyncError(message);
       throw err;
     } finally {

@@ -209,9 +209,11 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
   const remoteFolders: Folder[] = remoteData?.folders || [];
 
   return await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
-    const localTasks = await db.tasks.toArray();
-    const localLists = await db.lists.toArray();
-    const localFolders = await db.folders.toArray();
+    const [localTasks, localLists, localFolders] = await Promise.all([
+      db.tasks.toArray(),
+      db.lists.toArray(),
+      db.folders.toArray(),
+    ]);
 
     const mergedTasks = mergeTasks(localTasks, remoteTasks);
     const mergedLists = mergeLists(localLists, remoteLists);
@@ -234,7 +236,7 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
     return {
       tasks: mergedTasks,
       lists: await db.lists.toArray(),
-      folders: await db.folders.toArray(),
+      folders: mergedFolders,
     };
   });
 }

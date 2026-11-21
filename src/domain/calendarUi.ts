@@ -1,11 +1,6 @@
 import { addDays, formatDate } from './recurrence';
 import { shiftMonth, startOfWeek, type CalendarDayCell } from './calendar';
 
-/** Month name only ("October"), matching TickTick's calendar header. */
-export function monthName(year: number, monthIndex: number, locale?: string): string {
-  return new Date(year, monthIndex, 1).toLocaleString(locale, { month: 'long' });
-}
-
 /** Month + year title for the calendar header (e.g. "November 2026"). */
 export function calendarHeaderTitle(
   year: number,
@@ -16,30 +11,6 @@ export function calendarHeaderTitle(
     month: 'long',
     year: 'numeric',
   });
-}
-
-/**
- * Day-card title under the month grid: "Today" when the selected day is today,
- * otherwise a short date like "Mon, Oct 7".
- */
-export function dayCardTitle(dateStr: string, todayStr: string, locale?: string): string {
-  if (dateStr === todayStr) return 'Today';
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-/**
- * Right-side due label on a calendar day-card row: "Today" when due today,
- * otherwise a short month+day (TickTick style).
- */
-export function calendarRowDueLabel(dueAt: string | null | undefined, todayStr: string): string {
-  if (!dueAt) return '';
-  const date = dueAt.slice(0, 10);
-  if (date === todayStr) return 'Today';
-  const [y, m, d] = date.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 export interface JumpToTodayResult {
@@ -64,12 +35,6 @@ export function jumpToToday(now: Date = new Date()): JumpToTodayResult {
 export function dueAtForSelectedDay(selectedDateStr: string | null | undefined, todayStr?: string): string | null {
   if (!selectedDateStr) return todayStr ?? formatDate(new Date());
   return selectedDateStr;
-}
-
-/** True when shifting months would leave the selected day outside the new month — keep selection. */
-export function monthContains(dateStr: string, year: number, monthIndex: number): boolean {
-  const [y, m] = dateStr.split('-').map(Number);
-  return y === year && m - 1 === monthIndex;
 }
 
 export interface ShiftCalendarResult {

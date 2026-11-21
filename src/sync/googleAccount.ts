@@ -26,14 +26,20 @@ export function sanitizePhotoUrl(url: string | null | undefined): string | undef
   }
 }
 
+function normalizeGoogleAccount(account: GoogleAccount): GoogleAccount {
+  const photoUrl = sanitizePhotoUrl(account.photoUrl);
+  return photoUrl
+    ? { email: account.email, name: account.name, photoUrl }
+    : { email: account.email, name: account.name };
+}
+
 export function getGoogleAccount(): GoogleAccount | null {
   try {
     const raw = localStorage.getItem(ACCOUNT_KEY);
     if (!raw) return null;
     const v = JSON.parse(raw) as GoogleAccount;
     if (!v || typeof v.email !== 'string' || !v.email) return null;
-    const photoUrl = sanitizePhotoUrl(v.photoUrl);
-    return photoUrl ? { email: v.email, name: v.name, photoUrl } : { email: v.email, name: v.name };
+    return normalizeGoogleAccount(v);
   } catch {
     return null;
   }
@@ -44,11 +50,7 @@ export function setGoogleAccount(account: GoogleAccount | null): void {
     localStorage.removeItem(ACCOUNT_KEY);
     return;
   }
-  const photoUrl = sanitizePhotoUrl(account.photoUrl);
-  const stored: GoogleAccount = photoUrl
-    ? { email: account.email, name: account.name, photoUrl }
-    : { email: account.email, name: account.name };
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(stored));
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(normalizeGoogleAccount(account)));
 }
 
 /** Best-effort; returns null on any failure (offline, scope, etc.). */

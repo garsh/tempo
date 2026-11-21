@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,7 +12,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
-import type { Task, TaskList } from '../../types/task';
+import type { Task } from '../../types/task';
 import {
   clearAllData,
   clearSampleTasks,
@@ -80,7 +81,6 @@ interface SettingsPageProps {
   initialPage?: SettingsPageId;
   onClose: () => void;
   tasks: Task[];
-  lists?: TaskList[];
   syncStatus: SyncStatusSnapshot;
   onSyncStatusChange: () => void;
   onShowShortcuts: () => void;
@@ -101,17 +101,14 @@ export function SettingsPage(props: SettingsPageProps) {
   const [page, setPage] = useState<SettingsPageId>(initialPage);
   const [status, setStatus] = useState<Status>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
+  useEscapeKey(
+    isOpen,
+    () => {
       if (page === 'root' || page === initialPage) onClose();
       else setPage('root');
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [isOpen, page, initialPage, onClose]);
+    },
+    { capture: true, stopPropagation: true }
+  );
 
   if (!isOpen) return null;
 
@@ -533,38 +530,13 @@ function DateTimePage() {
 
 function GeneralPage({
   tasks,
-  lists = [],
   onShowShortcuts,
   setStatus,
 }: SettingsPageProps & { setStatus: (s: Status) => void }) {
-  const [prefs, update] = usePrefs();
   const hasSampleTasks = tasks.some((t) => isSampleId(t.id) && !t.deletedAt);
-  const defaultListValid = lists.some((l) => l.id === prefs.defaultListId);
 
   return (
     <>
-      {lists.length > 0 && (
-        <>
-          <SectionLabel>New tasks</SectionLabel>
-          <Card>
-            <ControlRow label="Default list" sub="Used outside a specific list">
-              <select
-                value={defaultListValid ? prefs.defaultListId : 'inbox'}
-                onChange={(e) => update({ defaultListId: e.target.value })}
-                aria-label="Default list for new tasks"
-                className="max-w-[45%] px-2 py-1.5 rounded-lg bg-tt-input text-[15px] text-tt-text outline-none"
-              >
-                {lists.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </ControlRow>
-          </Card>
-        </>
-      )}
-
       <SectionLabel>Sample tasks</SectionLabel>
       <Card>
         <div data-tempo-sample-tasks="1">
@@ -638,7 +610,6 @@ function FileRow({
 
 function IntegrationsPage({
   tasks,
-  lists = [],
   syncStatus,
   diagnosticsContext,
   setStatus,
@@ -646,7 +617,7 @@ function IntegrationsPage({
 }: SettingsPageProps & { setStatus: (s: Status) => void; go: (p: SettingsPageId) => void }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
-  const diag = buildDiagnosticsSummary(tasks, lists, diagnosticsContext);
+  const diag = buildDiagnosticsSummary(tasks, [], diagnosticsContext);
 
   const run = async (label: string, fn: () => Promise<string>, failPrefix: string) => {
     if (busyLabel) return;
@@ -673,7 +644,7 @@ function IntegrationsPage({
       db.folders.toArray().catch(() => []),
     ]);
     const reportTasks = idbTasks.length > 0 && tasks.length === 0 ? idbTasks : tasks;
-    const report = buildDiagnosticsSummary(reportTasks, lists, {
+    const report = buildDiagnosticsSummary(reportTasks, idbLists, {
       ...diagnosticsContext,
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       liveQueryTaskCount: tasks.length,

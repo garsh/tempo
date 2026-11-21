@@ -128,11 +128,20 @@ export function parseImportDue(
   return null;
 }
 
-function getField(row: Record<string, string>, ...names: string[]): string {
-  const keys = Object.keys(row);
+function indexRowFields(row: Record<string, string>): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [key, value] of Object.entries(row)) {
+    if (!value) continue;
+    const lower = key.toLowerCase();
+    if (!map.has(lower)) map.set(lower, value);
+  }
+  return map;
+}
+
+function getIndexedField(fields: Map<string, string>, ...names: string[]): string {
   for (const name of names) {
-    const found = keys.find((k) => k.toLowerCase() === name.toLowerCase());
-    if (found && row[found]) return row[found];
+    const val = fields.get(name.toLowerCase());
+    if (val) return val;
   }
   return '';
 }
@@ -158,15 +167,17 @@ function findHeaderRow(rows: string[][]): {
   format: TickTickImportResult['format'];
 } {
   const limit = Math.min(rows.length, 25);
+  let genericIndex = -1;
   for (let i = 0; i < limit; i++) {
     const headers = rows[i].map((h) => h.trim());
     if (isTickTickHeader(headers)) return { index: i, format: 'ticktick' };
+    if (genericIndex === -1 && isGenericHeader(headers)) {
+      genericIndex = i;
+    }
   }
-  for (let i = 0; i < limit; i++) {
-    const headers = rows[i].map((h) => h.trim());
-    if (isGenericHeader(headers)) return { index: i, format: 'generic' };
-  }
-  return { index: -1, format: 'unknown' };
+  return genericIndex !== -1
+    ? { index: genericIndex, format: 'generic' }
+    : { index: -1, format: 'unknown' };
 }
 
 function parseTimestampMs(raw: string, fallback: number): number {
@@ -352,6 +363,7 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
   const objects = rowsToObjects(rows.slice(headerIndex));
 
   const listMap = new Map<string, TaskList>();
+  const listIdByLowerName = new Map<string, string>();
   const tasks: Task[] = [];
   let skipped = 0;
   const activeRecurringByKey = new Map<string, Task>();
@@ -367,11 +379,10 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
 
   const ensureList = (name: string): string => {
     const trimmed = name.trim() || 'Imported';
-    const existing = [...listMap.values()].find(
-      (l) => l.name.toLowerCase() === trimmed.toLowerCase()
-    );
-    if (existing) return existing.id;
-    if (trimmed.toLowerCase() === 'inbox') return INBOX_LIST_ID;
+    const lower = trimmed.toLowerCase();
+    const existingId = listIdByLowerName.get(lower);
+    if (existingId) return existingId;
+    if (lower === 'inbox') return INBOX_LIST_ID;
     const id = newId();
     listMap.set(id, {
       id,
@@ -382,40 +393,32 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
       updatedAt: now,
       deletedAt: null,
     });
+    listIdByLowerName.set(lower, id);
     return id;
   };
 
   for (const row of objects) {
-    const title =
-      getField(row, 'Title', 'title', 'Task', 'task', 'Name', 'name') || '';
+    const fields = indexRowFields(row);
+    const title = getIndexedField(fields, 'Title', 'Task', 'Name');
     if (!title.trim()) {
       skipped += 1;
       continue;
     }
 
-    const listName = getField(row, 'List Name', 'list name', 'List', 'list', 'Folder Name');
+    const listName = getIndexedField(fields, 'List Name', 'List', 'Folder Name');
     const listId = listName ? ensureList(listName) : INBOX_LIST_ID;
 
-    const dueRaw = getField(
-      row,
-      'Due Date',
-      'due date',
-      'Due',
-      'due',
-      'dueAt',
-      'Start Date',
-      'start date'
-    );
-    const isAllDayRaw = getField(row, 'Is All Day', 'is all day', 'isAllDay').trim().toLowerCase();
+    const dueRaw = getIndexedField(fields, 'Due Date', 'Due', 'dueAt', 'Start Date');
+    const isAllDayRaw = getIndexedField(fields, 'Is All Day', 'isAllDay').trim().toLowerCase();
     const isAllDay = isAllDayRaw === 'true' || isAllDayRaw === '1' || isAllDayRaw === 'yes';
-    const timezone = getField(row, 'Timezone', 'timezone', 'Time Zone', 'time zone').trim() || undefined;
+    const timezone = getIndexedField(fields, 'Timezone', 'Time Zone').trim() || undefined;
     const dueAt = parseImportDue(dueRaw, { isAllDay, timezone });
 
-    const repeatRaw = getField(row, 'Repeat', 'repeat', 'Recurrence', 'recurrence');
+    const repeatRaw = getIndexedField(fields, 'Repeat', 'Recurrence');
     const parsedRecurrence = parseImportRepeat(repeatRaw);
 
-    const priority = mapPriority(getField(row, 'Priority', 'priority'));
-    const tagsRaw = getField(row, 'Tags', 'tags', 'tag');
+    const priority = mapPriority(getIndexedField(fields, 'Priority'));
+    const tagsRaw = getIndexedField(fields, 'Tags', 'tag');
     const tags = tagsRaw
       ? tagsRaw
           .split(/[,;\s]+/)
@@ -423,9 +426,9 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
           .filter(Boolean)
       : [];
 
-    const notes = getField(row, 'Content', 'content', 'Notes', 'notes', 'Description', 'description');
-    const status = getField(row, 'Status', 'status').trim().toLowerCase();
-    const completedRaw = getField(row, 'Completed Time', 'completed time', 'Completed', 'completed');
+    const notes = getIndexedField(fields, 'Content', 'Notes', 'Description');
+    const status = getIndexedField(fields, 'Status').trim().toLowerCase();
+    const completedRaw = getIndexedField(fields, 'Completed Time', 'Completed');
     const explicitOpen = status === '0' || status === 'normal' || status === 'open';
     const isDone =
       explicitOpen && (parsedRecurrence || !completedRaw)
@@ -437,7 +440,7 @@ export function importTasksFromCsv(csvText: string, now = Date.now()): TickTickI
           status === '-1' ||
           Boolean(completedRaw);
 
-    const createdRaw = getField(row, 'Created Time', 'created time', 'Created', 'created');
+    const createdRaw = getIndexedField(fields, 'Created Time', 'Created');
     const hasExplicitCreated = createdRaw.trim().length > 0;
     const createdAt = parseTimestampMs(createdRaw, now);
     const completedAt = isDone ? parseTimestampMs(completedRaw, now) : null;

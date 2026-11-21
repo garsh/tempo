@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AUTO_SYNC_INTERVAL_MS,
+  canAutoSync,
   isAutoSyncEnabled,
+  isQuietSyncError,
   readSyncStatusSnapshot,
   runDriveSync,
   triggerDebouncedSync,
@@ -10,7 +12,6 @@ import {
 } from '../sync/autoSync';
 import {
   applyRemoteSignOut,
-  AuthOfflineError,
   getStoredClientId,
   subscribeGoogleSignOut,
 } from '../sync/googleAuth';
@@ -56,14 +57,8 @@ export function useAutoSync(onSynced?: () => void): {
           setStatus(readSyncStatusSnapshot('skipped'));
         }
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        const quiet =
-          err instanceof AuthOfflineError ||
-          /popup_closed|access_denied|interaction_required|user_logged_out|user_closed|Token request failed|Offline; sync paused/i.test(
-            message
-          );
         // Silent background auth expiry shouldn't flag a scary error banner
-        if (!interactive && quiet) {
+        if (!interactive && isQuietSyncError(err)) {
           setStatus(readSyncStatusSnapshot('idle'));
         } else {
           setStatus(readSyncStatusSnapshot('error'));
@@ -74,19 +69,19 @@ export function useAutoSync(onSynced?: () => void): {
   );
 
   useEffect(() => {
-    if (getStoredClientId() && isAutoSyncEnabled() && getGoogleAccount()) {
+    if (canAutoSync()) {
       void syncNow(false);
     }
 
     const interval = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
+      if (!canAutoSync()) return;
       void syncNow(false);
     }, AUTO_SYNC_INTERVAL_MS);
 
     const onVis = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
+      if (!canAutoSync()) return;
       const last = readSyncStatusSnapshot().lastSyncedAt;
       if (last && Date.now() - last < 2 * 60 * 1000) return;
       void syncNow(false);
@@ -94,7 +89,7 @@ export function useAutoSync(onSynced?: () => void): {
     document.addEventListener('visibilitychange', onVis);
 
     const onOnline = () => {
-      if (!getStoredClientId() || !isAutoSyncEnabled() || !getGoogleAccount()) return;
+      if (!canAutoSync()) return;
       void syncNow(false);
     };
     window.addEventListener('online', onOnline);

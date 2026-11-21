@@ -1,4 +1,4 @@
-import type { Task } from '../types/task';
+import { WEEKDAY_LABELS, type Task, type Weekday } from '../types/task';
 import {
   formatDate,
   getDayBoundsMs,
@@ -48,11 +48,9 @@ export function buildMonthGrid(
   return cells;
 }
 
-const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 /** Weekday header labels rotated to start on `weekStart`. */
 export function weekdayLabels(weekStart: number = 0): string[] {
-  return Array.from({ length: 7 }, (_, i) => DOW_SHORT[(weekStart + i) % 7]);
+  return Array.from({ length: 7 }, (_, i) => WEEKDAY_LABELS[((weekStart + i) % 7) as Weekday]);
 }
 
 /** First day (local midnight) of the week containing `date`, for a given week start. */
@@ -69,8 +67,8 @@ export function tasksDueOnDate(tasks: Task[], dateStr: string): Task[] {
       if (t.deletedAt || isWindowPeriodic(t) || (!t.dueAt && !isFixedRecurring(t))) return false;
       if (!t.recurrence && t.completedAt) return false;
       if (isSkippedOnDate(t, dateStr)) return false;
-      if (!taskOccursOnDate(t, dateStr)) return false;
-      return !isCompletedOnDate(t, dateStr);
+      if (isCompletedOnDate(t, dateStr)) return false;
+      return taskOccursOnDate(t, dateStr);
     })
     .map((t) => projectTaskForDate(t, dateStr));
 }
@@ -103,13 +101,6 @@ export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
       return isCompletedOnDate(t, dateStr);
     })
     .map((t) => projectTaskForDate(t, dateStr));
-}
-
-export function monthLabel(year: number, monthIndex: number): string {
-  return new Date(year, monthIndex, 1).toLocaleString(undefined, {
-    month: 'long',
-    year: 'numeric',
-  });
 }
 
 export function shiftMonth(year: number, monthIndex: number, delta: number): {

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import type { Task } from '../types/task';
+import type { Task, TaskUrgency } from '../types/task';
 import {
   formatDueLabel,
   getDueDatePart,
@@ -24,10 +24,7 @@ import { splitHighlightSegments } from '../domain/search';
 
 interface TaskCardProps {
   task: Task;
-  listName?: string;
-  showListName?: boolean;
   selected?: boolean;
-  dense?: boolean;
   onComplete: (id: string, dateStr?: string) => void;
   onUncomplete?: (id: string, dateStr?: string) => void;
   onSelect?: (task: Task) => void;
@@ -69,9 +66,8 @@ function dueTextClass(urgency: string): string {
   return 'text-tt-secondary';
 }
 
-function formatRowDue(dueAt: string | null | undefined): string | null {
+function formatRowDue(dueAt: string | null | undefined, urgency: TaskUrgency): string | null {
   if (!dueAt) return null;
-  const urgency = getTaskUrgency(dueAt);
   if (urgency === 'due_today') return 'Today';
   if (urgency === 'overdue') {
     return formatDueLabel(dueAt) || 'Overdue';
@@ -97,7 +93,6 @@ function renderHighlighted(text: string, tokens?: string[]) {
 const TaskCardComponent: React.FC<TaskCardProps> = ({
   task,
   selected = false,
-  dense = false,
   onComplete,
   onUncomplete,
   onSelect,
@@ -136,7 +131,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const canSkip = fixedRecurring && !!onRequestSkipOccurrence;
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
-  const dueLabel = windowPeriodic ? null : formatRowDue(task.dueAt);
+  const dueLabel = windowPeriodic ? null : formatRowDue(task.dueAt, urgency);
 
   useEffect(() => {
     if (completed && justCompleted) {
@@ -164,7 +159,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     onComplete(task.id, dateStr);
   };
 
-  const rowPad = dense ? 'py-2.5 min-h-[44px]' : 'py-3 min-h-[50px]';
+  const rowPad = 'py-3 min-h-[50px]';
   const notesPreview =
     notesSnippet !== undefined
       ? notesSnippet
@@ -247,6 +242,42 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     }
   }, [isSwipedOpen]);
 
+  const prepareSwipeDrawer = () => {
+    if (drawerRef.current) {
+      drawerRef.current.style.visibility = 'visible';
+      drawerRef.current.style.pointerEvents = 'auto';
+    }
+    if (slidingRef.current) {
+      slidingRef.current.style.transition = 'none';
+    }
+  };
+
+  const applySwipeOffset = (initialOffset: number, dx: number) => {
+    const next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, initialOffset + dx));
+    currentOffsetRef.current = next;
+    if (slidingRef.current) {
+      slidingRef.current.style.transform = `translateX(${next}px)`;
+    }
+  };
+
+  const commitSwipe = (wasHorizontal: boolean) => {
+    if (wasHorizontal) {
+      suppressClickRef.current = true;
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 220);
+
+      if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
+        openSwipe();
+      } else {
+        closeSwipe();
+      }
+    } else if (!isOpenRef.current && drawerRef.current) {
+      drawerRef.current.style.visibility = 'hidden';
+      drawerRef.current.style.pointerEvents = 'none';
+    }
+  };
+
   useEffect(() => {
     const el = slidingRef.current;
     if (!el || isDragging) return;
@@ -260,13 +291,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
       };
       swipeDirectionRef.current = null;
-      if (drawerRef.current) {
-        drawerRef.current.style.visibility = 'visible';
-        drawerRef.current.style.pointerEvents = 'auto';
-      }
-      if (slidingRef.current) {
-        slidingRef.current.style.transition = 'none';
-      }
+      prepareSwipeDrawer();
     };
 
     const handleTouchMove = (e: TouchEvent) => {
@@ -285,12 +310,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       }
 
       if (swipeDirectionRef.current === 'horizontal') {
-        let next = start.initialOffset + dx;
-        next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
-        currentOffsetRef.current = next;
-        if (slidingRef.current) {
-          slidingRef.current.style.transform = `translateX(${next}px)`;
-        }
+        applySwipeOffset(start.initialOffset, dx);
       }
     };
 
@@ -298,24 +318,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       const dir = swipeDirectionRef.current;
       touchStartRef.current = null;
       swipeDirectionRef.current = null;
-
-      if (dir === 'horizontal') {
-        suppressClickRef.current = true;
-        setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 220);
-
-        if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
-          openSwipe();
-        } else {
-          closeSwipe();
-        }
-      } else if (!isOpenRef.current) {
-        if (drawerRef.current) {
-          drawerRef.current.style.visibility = 'hidden';
-          drawerRef.current.style.pointerEvents = 'none';
-        }
-      }
+      commitSwipe(dir === 'horizontal');
     };
 
     el.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -340,13 +343,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         y: e.clientY,
         initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
       };
-      if (drawerRef.current) {
-        drawerRef.current.style.visibility = 'visible';
-        drawerRef.current.style.pointerEvents = 'auto';
-      }
-      if (slidingRef.current) {
-        slidingRef.current.style.transition = 'none';
-      }
+      prepareSwipeDrawer();
     }
   };
 
@@ -354,12 +351,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
       const dx = e.clientX - mouseStartRef.current.x;
       if (Math.abs(dx) > 10) {
-        let next = mouseStartRef.current.initialOffset + dx;
-        next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, next));
-        currentOffsetRef.current = next;
-        if (slidingRef.current) {
-          slidingRef.current.style.transform = `translateX(${next}px)`;
-        }
+        applySwipeOffset(mouseStartRef.current.initialOffset, dx);
       }
     }
   };
@@ -368,23 +360,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
       const dx = e.clientX - mouseStartRef.current.x;
       mouseStartRef.current = null;
-      if (Math.abs(dx) > 10) {
-        suppressClickRef.current = true;
-        setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 220);
-
-        if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
-          openSwipe();
-        } else {
-          closeSwipe();
-        }
-      } else if (!isOpenRef.current) {
-        if (drawerRef.current) {
-          drawerRef.current.style.visibility = 'hidden';
-          drawerRef.current.style.pointerEvents = 'none';
-        }
-      }
+      commitSwipe(Math.abs(dx) > 10);
     }
   };
 

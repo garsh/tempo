@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useRef, type RefObject } from 'react';
 import { Check } from 'lucide-react';
 import type { RecurrenceType } from '../../types/task';
-import { dateChoiceMenuPosition, handleMenuArrowKeyDown } from './DateChoiceMenu';
+import { handleMenuArrowKeyDown, useAnchoredMenu } from './useAnchoredMenu';
 
 interface RepeatChoiceMenuProps {
   open: boolean;
@@ -25,59 +25,15 @@ export function RepeatChoiceMenu({
   onClearRepeat,
 }: RepeatChoiceMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 8, left: 8 });
   const menuHeight = active ? 54 * 2 + 44 + 28 : 54 * 2 + 19;
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const update = () => {
-      const vv = window.visualViewport;
-      const el = anchorRef.current;
-      setPos(
-        dateChoiceMenuPosition(
-          el ? el.getBoundingClientRect() : null,
-          {
-            width: vv?.width ?? window.innerWidth,
-            height: vv?.height ?? window.innerHeight,
-            offsetTop: vv?.offsetTop ?? 0,
-            offsetLeft: vv?.offsetLeft ?? 0,
-          },
-          menuHeight,
-          MENU_WIDTH,
-        )
-      );
-    };
-    update();
-    window.addEventListener('resize', update);
-    const vv = window.visualViewport;
-    vv?.addEventListener('resize', update);
-    vv?.addEventListener('scroll', update);
-    return () => {
-      window.removeEventListener('resize', update);
-      vv?.removeEventListener('resize', update);
-      vv?.removeEventListener('scroll', update);
-    };
-  }, [open, anchorRef, menuHeight]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onClose]);
-
-  useLayoutEffect(() => {
-    if (open) {
-      cardRef.current
-        ?.querySelector<HTMLElement>('[role="menuitemradio"]')
-        ?.focus({ preventScroll: true });
-    }
-  }, [open]);
+  const pos = useAnchoredMenu({
+    open,
+    anchorRef,
+    cardRef,
+    menuHeight,
+    menuWidth: MENU_WIDTH,
+    onClose,
+  });
 
   if (!open) return null;
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { RefreshCw, Search, Settings } from 'lucide-react';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 const ICON = {
   width: 20,
@@ -83,16 +84,7 @@ export function OverflowMenu(props: OverflowMenuProps) {
     ? { top: Math.max(8, anchor.top + 4), right: Math.max(12, window.innerWidth - anchor.right) }
     : { top: 14, right: 12 };
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onClose]);
+  useEscapeKey(open, onClose, { capture: true, stopPropagation: true });
 
   useEffect(() => {
     if (open) cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });

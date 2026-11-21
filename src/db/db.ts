@@ -1,17 +1,16 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   Folder,
-  FolderInput,
   Task,
   TaskInput,
   TaskList,
-  TaskListInput,
 } from '../types/task';
 import { INBOX_LIST_ID } from '../types/task';
 import {
   addDays,
   completionTimestampForDate,
   formatDate,
+  getDayBoundsMs,
   getDueDatePart,
   getLatestCompletionMs,
   getRecurrenceAnchor,
@@ -409,6 +408,21 @@ export async function reorderTasks(orderedIds: string[]): Promise<void> {
   recordDiagEvent('reorder', `ids=${orderedIds.join(',')} updated=${updatedCount}`);
 }
 
+function buildCompletionHistoryUpdate(
+  task: Pick<Task, 'completionHistory' | 'removedCompletions'>,
+  ts: number,
+  alreadyDone: boolean
+): { completionHistory: number[]; removedCompletions?: number[] } {
+  const completionHistory = alreadyDone
+    ? [...(task.completionHistory || [])]
+    : [...(task.completionHistory || []), ts].sort((a, b) => a - b);
+  const removed = (task.removedCompletions || []).filter((r) => r !== ts);
+  return {
+    completionHistory,
+    ...(removed.length > 0 ? { removedCompletions: removed } : { removedCompletions: undefined }),
+  };
+}
+
 /**
  * Complete a task.
  * - Window periodic: logs completion in completionHistory while keeping dueAt and completedAt null.
@@ -429,23 +443,19 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
     const targetDateStr = dateStr || formatDate(new Date(now));
     const ts = completionTimestampForDate(targetDateStr, now);
     const alreadyDone = isCompletedOnDate(task, targetDateStr);
-    const history = alreadyDone
-      ? [...(task.completionHistory || [])]
-      : [...(task.completionHistory || []), ts].sort((a, b) => a - b);
-    const removed = (task.removedCompletions || []).filter((r) => r !== ts);
+    const historyUpdate = buildCompletionHistoryUpdate(task, ts, alreadyDone);
 
     updated = {
       ...task,
       startDate: null,
       dueAt: null,
       completedAt: null,
-      completionHistory: history,
-      ...(removed.length > 0 ? { removedCompletions: removed } : { removedCompletions: undefined }),
+      ...historyUpdate,
       updatedAt: now,
     };
     recordDiagEvent(
       'complete_window',
-      `id=${id} title=${task.title.slice(0, 30)} target=${targetDateStr} already=${alreadyDone} hist=${history.length}`
+      `id=${id} title=${task.title.slice(0, 30)} target=${targetDateStr} already=${alreadyDone} hist=${historyUpdate.completionHistory.length}`
     );
   } else if (isFixedRecurring(task) && task.recurrence) {
     const targetDateStr =
@@ -556,31 +566,6 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
   return updated;
 }
 
-/**
- * Remove a skipped occurrence for `dateStr` (YYYY-MM-DD), restoring it to active recurrence.
- */
-export async function unskipTaskOccurrence(id: string, dateStr: string): Promise<Task | null> {
-  const task = await db.tasks.get(id);
-  if (!task) return null;
-
-  const now = Date.now();
-  const skipped = (task.skippedDates || []).filter((d) => d !== dateStr);
-
-  const updated: Task = {
-    ...task,
-    skippedDates: skipped,
-    updatedAt: now,
-  };
-
-  recordDiagEvent(
-    'unskip_occurrence',
-    `id=${id} title=${task.title.slice(0, 30)} unskipped=${dateStr}`
-  );
-
-  await db.tasks.put(updated);
-  return updated;
-}
-
 function mergeRemovedTimestamps(existing: number[] | undefined, removed: number[]): number[] | undefined {
   if (removed.length === 0) return existing;
   const merged = Array.from(new Set([...(existing || []), ...removed])).sort((a, b) => a - b);
@@ -626,26 +611,15 @@ export async function uncompleteTask(id: string, dateStr?: string): Promise<Task
 
   if (isWindowPeriodic(task)) {
     targetDateStr = dateStr || formatDate(new Date(now));
-    history = history.filter((ts) => {
-      if (formatDate(new Date(ts)) === targetDateStr) {
-        removed.push(ts);
-        return false;
-      }
-      return true;
-    });
   } else if (isFixedRecurring(task) && task.recurrence) {
     targetDateStr =
       dateStr || (task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now)));
+  }
+
+  if (targetDateStr) {
+    const [dayStartMs, dayEndMs] = getDayBoundsMs(targetDateStr);
     history = history.filter((ts) => {
-      if (formatDate(new Date(ts)) === targetDateStr) {
-        removed.push(ts);
-        return false;
-      }
-      return true;
-    });
-  } else if (dateStr) {
-    history = history.filter((ts) => {
-      if (formatDate(new Date(ts)) === dateStr) {
+      if (ts >= dayStartMs && ts < dayEndMs) {
         removed.push(ts);
         return false;
       }
@@ -695,16 +669,12 @@ export async function logTaskCompletion(id: string, dateStr: string): Promise<Ta
   const now = Date.now();
   const ts = completionTimestampForDate(dateStr, now);
   const alreadyDone = isCompletedOnDate(task, dateStr);
-  const history = alreadyDone
-    ? [...(task.completionHistory || [])]
-    : [...(task.completionHistory || []), ts].sort((a, b) => a - b);
-  const removed = (task.removedCompletions || []).filter((r) => r !== ts);
+  const historyUpdate = buildCompletionHistoryUpdate(task, ts, alreadyDone);
 
   const updated: Task = {
     ...task,
     ...(isWindowPeriodic(task) ? { dueAt: null, startDate: null } : {}),
-    completionHistory: history,
-    ...(removed.length > 0 ? { removedCompletions: removed } : { removedCompletions: undefined }),
+    ...historyUpdate,
     updatedAt: now,
   };
   await db.tasks.put(updated);
@@ -785,137 +755,6 @@ export async function softDeleteTask(id: string): Promise<void> {
     updatedAt: now,
   });
   recordDiagEvent('delete_task', `id=${id} title=${task.title.slice(0, 30)}`);
-}
-
-export async function restoreTask(id: string): Promise<void> {
-  const task = await db.tasks.get(id);
-  if (!task) return;
-
-  const now = Date.now();
-  await db.tasks.put({
-    ...task,
-    deletedAt: null,
-    updatedAt: now,
-  });
-}
-
-export async function saveList(list: TaskListInput): Promise<TaskList> {
-  const now = Date.now();
-
-  if (list.id === INBOX_LIST_ID) {
-    return ensureInboxList();
-  }
-
-  if (list.id) {
-    const existing = await db.lists.get(list.id);
-    const full: TaskList = {
-      ...(existing || {}),
-      ...list,
-      id: list.id,
-      name: list.name,
-      folderId: list.folderId !== undefined ? list.folderId : existing?.folderId ?? null,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      deletedAt: existing?.deletedAt ?? null,
-    };
-    await db.lists.put(full);
-    return full;
-  }
-
-  const full: TaskList = {
-    id: newId(),
-    name: list.name,
-    folderId: list.folderId ?? null,
-    sortOrder: list.sortOrder ?? Date.now(),
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.lists.put(full);
-  return full;
-}
-
-export async function softDeleteList(id: string): Promise<void> {
-  if (id === INBOX_LIST_ID) return;
-
-  const list = await db.lists.get(id);
-  if (!list) return;
-
-  const now = Date.now();
-  await db.transaction('rw', db.lists, db.tasks, async () => {
-    await db.lists.put({
-      ...list,
-      deletedAt: now,
-      updatedAt: now,
-    });
-
-    const tasksInList = await db.tasks.where('listId').equals(id).toArray();
-    for (const task of tasksInList) {
-      if (task.deletedAt) continue;
-      await db.tasks.put({
-        ...task,
-        listId: INBOX_LIST_ID,
-        updatedAt: now,
-      });
-    }
-  });
-}
-
-export async function saveFolder(folder: FolderInput): Promise<Folder> {
-  const now = Date.now();
-
-  if (folder.id) {
-    const existing = await db.folders.get(folder.id);
-    const full: Folder = {
-      ...(existing || {}),
-      ...folder,
-      id: folder.id,
-      name: folder.name,
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-      deletedAt: existing?.deletedAt ?? null,
-    };
-    await db.folders.put(full);
-    return full;
-  }
-
-  const full: Folder = {
-    id: newId(),
-    name: folder.name,
-    sortOrder: folder.sortOrder ?? Date.now(),
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.folders.put(full);
-  return full;
-}
-
-/**
- * Soft-delete a folder. Lists in it become unfoldered (folderId = null).
- */
-export async function softDeleteFolder(id: string): Promise<void> {
-  const folder = await db.folders.get(id);
-  if (!folder) return;
-
-  const now = Date.now();
-  await db.transaction('rw', db.folders, db.lists, async () => {
-    await db.folders.put({
-      ...folder,
-      deletedAt: now,
-      updatedAt: now,
-    });
-
-    const listsInFolder = await db.lists.where('folderId').equals(id).toArray();
-    for (const list of listsInFolder) {
-      if (list.deletedAt) continue;
-      await db.lists.put({
-        ...list,
-        folderId: null,
-        updatedAt: now,
-      });
-    }
-  });
 }
 
 function hasGoogleSyncConfigured(): boolean {
@@ -1049,8 +888,7 @@ export async function repairAndDeduplicateDatabase(): Promise<{
       }
 
       let deduplicatedTasks = 0;
-      for (const bucket of byExactKey.values()) {
-        if (bucket.length <= 1) continue;
+      const collapseBucket = (bucket: Task[]) => {
         const { keeper, dropped } = mergeTaskGroup(bucket, now);
         taskMap.set(keeper.id, keeper);
         dirtyTaskIds.add(keeper.id);
@@ -1059,6 +897,11 @@ export async function repairAndDeduplicateDatabase(): Promise<{
           dirtyTaskIds.add(dup.id);
           deduplicatedTasks++;
         }
+      };
+
+      for (const bucket of byExactKey.values()) {
+        if (bucket.length <= 1) continue;
+        collapseBucket(bucket);
       }
 
       // 2b. Collapse duplicate open tasks sharing (listId, titleLower) when any is recurring.
@@ -1073,14 +916,7 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 
       for (const bucket of openByTitleKey.values()) {
         if (bucket.length <= 1 || !bucket.some(hasActiveRecurrence)) continue;
-        const { keeper, dropped } = mergeTaskGroup(bucket, now);
-        taskMap.set(keeper.id, keeper);
-        dirtyTaskIds.add(keeper.id);
-        for (const dup of dropped) {
-          taskMap.set(dup.id, { ...dup, deletedAt: now, updatedAt: now });
-          dirtyTaskIds.add(dup.id);
-          deduplicatedTasks++;
-        }
+        collapseBucket(bucket);
       }
 
       let purgedTombstones = 0;

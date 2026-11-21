@@ -27,8 +27,8 @@ describe('prefs persistence', () => {
     expect(p).toEqual(DEFAULT_PREFS);
     expect(p.theme).toBe('system');
     expect(p.showOverdue).toBe(true);
-    expect(p.smartLists.today && p.smartLists.inbox).toBe(true);
-    expect(p.smartLists.tomorrow || p.smartLists.next7 || p.smartLists.all || p.smartLists.completed).toBe(false);
+    expect(p.hideCompleted).toBe(false);
+    expect(p.showDetails).toBe(false);
   });
 
   it('round-trips through storage', () => {
@@ -37,39 +37,36 @@ describe('prefs persistence', () => {
       theme: 'dark' as const,
       showDetails: true,
       hideCompleted: true,
-      groupBy: 'none' as const,
-      sortBy: 'title' as const,
+      showOverdue: false,
       weekStart: 1 as const,
       timeFormat: '24h' as const,
-      defaultReminderTime: '08:30',
-      defaultListId: 'work',
-      smartLists: { ...DEFAULT_PREFS.smartLists, next7: true },
     };
     savePrefs(next, storage);
     expect(storage.map.has(PREFS_STORAGE_KEY)).toBe(true);
     expect(loadPrefs(storage)).toEqual(next);
   });
 
-  it('survives corrupt JSON and drops invalid values', () => {
+  it('survives corrupt JSON, drops invalid values, and ignores legacy keys', () => {
     storage.setItem(PREFS_STORAGE_KEY, '{not json');
     expect(loadPrefs(storage)).toEqual(DEFAULT_PREFS);
     const p = sanitizePrefs({
       theme: 'neon',
       weekStart: 3,
       timeFormat: '13h',
-      defaultReminderTime: '9am',
-      groupBy: 'color',
-      sortBy: 'random',
+      showOverdue: 'yes',
+      defaultReminderTime: '08:30',
+      defaultListId: 'work',
+      groupBy: 'none',
+      sortBy: 'title',
+      viewMode: 'board',
       smartLists: { tomorrow: true, bogus: true, inbox: 'yes' },
     });
-    expect(p.theme).toBe('system');
-    expect(p.weekStart).toBe(0);
-    expect(p.timeFormat).toBe('12h');
-    expect(p.defaultReminderTime).toBe('09:00');
-    expect(p.groupBy).toBe('date');
-    expect(p.sortBy).toBe('due');
-    expect(p.smartLists.tomorrow).toBe(true);
-    expect(p.smartLists.inbox).toBe(true);
-    expect('bogus' in p.smartLists).toBe(false);
+    expect(p).toEqual(DEFAULT_PREFS);
+    expect('smartLists' in p).toBe(false);
+    expect('groupBy' in p).toBe(false);
+    expect('sortBy' in p).toBe(false);
+    expect('viewMode' in p).toBe(false);
+    expect('defaultReminderTime' in p).toBe(false);
+    expect('defaultListId' in p).toBe(false);
   });
 });

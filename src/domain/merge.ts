@@ -1,4 +1,5 @@
 import type { Folder, Task, TaskList } from '../types/task';
+import { isWindowPeriodic } from './recurrence';
 
 /** Match the CSV import cap so a hostile history cannot grow without bound. */
 const MAX_MERGED_HISTORY = 365;
@@ -111,10 +112,7 @@ export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
       Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])).sort()
     );
 
-    const isWindow =
-      winner.recurrence?.type === 'after_completion' ||
-      (winner.recurrence?.maxIntervalValue != null &&
-        winner.recurrence.maxIntervalValue >= winner.recurrence.intervalValue);
+    const isWindow = isWindowPeriodic(winner);
 
     return {
       ...winner,
@@ -140,8 +138,4 @@ export function resolveListConflict(local: TaskList, remote: TaskList): TaskList
 
 export function mergeFolders(localFolders: Folder[], remoteFolders: Folder[]): Folder[] {
   return mergeEntities(localFolders, remoteFolders);
-}
-
-export function resolveFolderConflict(local: Folder, remote: Folder): Folder {
-  return mergeFolders([local], [remote])[0];
 }
