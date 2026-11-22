@@ -10,6 +10,7 @@ interface RepeatChoiceMenuProps {
   onClose: () => void;
   onSelectFixed: () => void;
   onSelectApproximate: () => void;
+  onSelectAnnualWindow: () => void;
   onClearRepeat?: () => void;
 }
 
@@ -22,10 +23,11 @@ export function RepeatChoiceMenu({
   onClose,
   onSelectFixed,
   onSelectApproximate,
+  onSelectAnnualWindow,
   onClearRepeat,
 }: RepeatChoiceMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const menuHeight = active ? 54 * 2 + 44 + 28 : 54 * 2 + 19;
+  const menuHeight = active ? 54 * 3 + 44 + 28 : 54 * 3 + 19;
   const pos = useAnchoredMenu({
     open,
     anchorRef,
@@ -88,6 +90,23 @@ export function RepeatChoiceMenu({
             </span>
           </div>
           {active === 'after_completion' && (
+            <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />
+          )}
+        </button>
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={active === 'annual_window'}
+          className={row}
+          onClick={choose(onSelectAnnualWindow)}
+        >
+          <div className="flex flex-col min-w-0">
+            <span className="text-[16px] font-semibold leading-tight">Time of year</span>
+            <span className="text-[12px] text-tt-secondary leading-tight mt-0.5">
+              Tasks · dates or season
+            </span>
+          </div>
+          {active === 'annual_window' && (
             <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />
           )}
         </button>

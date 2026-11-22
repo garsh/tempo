@@ -27,6 +27,7 @@ import {
   isSkippedOnDate,
   isWindowPeriodic,
   parseDate,
+  sanitizeAnnualWindow,
   splitDueAt,
   taskOccursOnDate,
 } from '../domain/recurrence';
@@ -195,6 +196,17 @@ function normalizeRecurrenceForSave(
   rule: Task['recurrence'] | undefined
 ): Task['recurrence'] {
   if (!rule) return null;
+  if (rule.type === 'annual_window') {
+    if (!Array.isArray(rule.annualWindows) || rule.annualWindows.length === 0) return null;
+    const years = Math.min(99, Math.max(1, Math.floor(rule.intervalValue || 1)));
+    return {
+      type: 'annual_window',
+      intervalValue: years,
+      intervalUnit: 'years',
+      annualWindows: rule.annualWindows.slice(0, 12).map(sanitizeAnnualWindow),
+      ...(rule.endOnDate !== undefined ? { endOnDate: rule.endOnDate } : {}),
+    };
+  }
   if (isWindowPeriodic({ recurrence: rule })) {
     const { min, max, unit } = getWindowBounds(rule);
     return {

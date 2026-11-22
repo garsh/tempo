@@ -522,6 +522,23 @@ function DateTimePage() {
           <RadioRow label="24-hour" sub="17:30" checked={prefs.timeFormat === '24h'} onSelect={() => update({ timeFormat: '24h' })} />
         </div>
       </Card>
+      <SectionLabel>Seasons</SectionLabel>
+      <Card>
+        <div role="radiogroup" aria-label="Seasons">
+          <RadioRow
+            label="Northern hemisphere"
+            sub="Spring starts in March"
+            checked={prefs.hemisphere === 'north'}
+            onSelect={() => update({ hemisphere: 'north' })}
+          />
+          <RadioRow
+            label="Southern hemisphere"
+            sub="Spring starts in September"
+            checked={prefs.hemisphere === 'south'}
+            onSelect={() => update({ hemisphere: 'south' })}
+          />
+        </div>
+      </Card>
     </>
   );
 }

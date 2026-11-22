@@ -30,6 +30,7 @@ describe('prefs persistence', () => {
     expect(p.showOverdue).toBe(true);
     expect(p.hideCompleted).toBe(false);
     expect(p.showDetails).toBe(false);
+    expect(p.hemisphere).toBe('north');
   });
 
   it('round-trips through storage', () => {
@@ -42,6 +43,7 @@ describe('prefs persistence', () => {
       showOverdue: false,
       weekStart: 1 as const,
       timeFormat: '24h' as const,
+      hemisphere: 'south' as const,
     };
     savePrefs(next, storage);
     expect(storage.map.has(PREFS_STORAGE_KEY)).toBe(true);
@@ -55,6 +57,7 @@ describe('prefs persistence', () => {
       theme: 'neon',
       weekStart: 3,
       timeFormat: '13h',
+      hemisphere: 'equator',
       newTaskPosition: 'middle',
       showOverdue: 'yes',
       defaultReminderTime: '08:30',

@@ -1,4 +1,5 @@
 import type {
+  AnnualWindow,
   IntervalUnit,
   RecurrenceRule,
   RecurrenceScheduleSegment,
@@ -8,6 +9,110 @@ import type {
   Weekday,
 } from '../types/task';
 import { WEEKDAY_LABELS } from '../types/task';
+
+export type SeasonId = 'spring' | 'summer' | 'autumn' | 'winter';
+
+export interface SeasonPreset {
+  id: SeasonId;
+  label: string;
+  window: AnnualWindow;
+}
+
+export const ANNUAL_MONTH_SHORT = [
+  '',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+export const ANNUAL_MONTH_LONG = [
+  '',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+const MAX_DAYS_IN_ANNUAL_MONTH = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+export function daysInAnnualMonth(month: number): number {
+  const m = Math.min(12, Math.max(1, Math.floor(month || 1)));
+  return MAX_DAYS_IN_ANNUAL_MONTH[m];
+}
+
+export function sanitizeAnnualWindow(w: AnnualWindow): AnnualWindow {
+  const startMonth = Math.min(12, Math.max(1, Math.floor(w.startMonth || 1)));
+  const endMonth = Math.min(12, Math.max(1, Math.floor(w.endMonth || 1)));
+  const startDay = Math.min(daysInAnnualMonth(startMonth), Math.max(1, Math.floor(w.startDay || 1)));
+  const endDay = Math.min(daysInAnnualMonth(endMonth), Math.max(1, Math.floor(w.endDay || 1)));
+  return { startMonth, startDay, endMonth, endDay };
+}
+
+export function isYearWrapAnnualWindow(w: AnnualWindow): boolean {
+  const s = sanitizeAnnualWindow(w);
+  return s.startMonth > s.endMonth || (s.startMonth === s.endMonth && s.startDay > s.endDay);
+}
+
+export function annualWindowsEqual(a: AnnualWindow, b: AnnualWindow): boolean {
+  const sa = sanitizeAnnualWindow(a);
+  const sb = sanitizeAnnualWindow(b);
+  return (
+    sa.startMonth === sb.startMonth &&
+    sa.startDay === sb.startDay &&
+    sa.endMonth === sb.endMonth &&
+    sa.endDay === sb.endDay
+  );
+}
+
+export function getSeasonPresets(hemisphere: 'north' | 'south' = 'north'): SeasonPreset[] {
+  if (hemisphere === 'south') {
+    return [
+      { id: 'spring', label: 'Spring', window: { startMonth: 9, startDay: 1, endMonth: 11, endDay: 30 } },
+      { id: 'summer', label: 'Summer', window: { startMonth: 12, startDay: 1, endMonth: 2, endDay: 29 } },
+      { id: 'autumn', label: 'Autumn', window: { startMonth: 3, startDay: 1, endMonth: 5, endDay: 31 } },
+      { id: 'winter', label: 'Winter', window: { startMonth: 6, startDay: 1, endMonth: 8, endDay: 31 } },
+    ];
+  }
+  return [
+    { id: 'spring', label: 'Spring', window: { startMonth: 3, startDay: 1, endMonth: 5, endDay: 31 } },
+    { id: 'summer', label: 'Summer', window: { startMonth: 6, startDay: 1, endMonth: 8, endDay: 31 } },
+    { id: 'autumn', label: 'Fall', window: { startMonth: 9, startDay: 1, endMonth: 11, endDay: 30 } },
+    { id: 'winter', label: 'Winter', window: { startMonth: 12, startDay: 1, endMonth: 2, endDay: 29 } },
+  ];
+}
+
+export function formatAnnualWindowRange(w: AnnualWindow): string {
+  const s = sanitizeAnnualWindow(w);
+  const isFullStart = s.startDay === 1;
+  const isFullEnd = s.endDay >= (s.endMonth === 2 ? 28 : daysInAnnualMonth(s.endMonth));
+  if (s.startMonth === s.endMonth && isFullStart && isFullEnd) {
+    return ANNUAL_MONTH_LONG[s.startMonth];
+  }
+  if (isFullStart && isFullEnd) {
+    return `${ANNUAL_MONTH_SHORT[s.startMonth]}–${ANNUAL_MONTH_SHORT[s.endMonth]}`;
+  }
+  if (s.startMonth === s.endMonth && s.startDay === s.endDay) {
+    return `${ANNUAL_MONTH_SHORT[s.startMonth]} ${s.startDay}`;
+  }
+  return `${ANNUAL_MONTH_SHORT[s.startMonth]} ${s.startDay} – ${ANNUAL_MONTH_SHORT[s.endMonth]} ${s.endDay}`;
+}
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
@@ -434,6 +539,12 @@ export function formatRecurrenceLabel(
   const unitSingular = unit.replace(/s$/, '');
   const unitText = value === 1 ? unitSingular : unit;
 
+  if (isAnnualWindow({ recurrence: rule })) {
+    const ranges = rule.annualWindows!.map(formatAnnualWindowRange).join(', ');
+    const base = `Every ${ranges}`;
+    return rule.endOnDate ? `${base} (until ${rule.endOnDate})` : base;
+  }
+
   if (isWindowPeriodic({ recurrence: rule })) {
     const { min, max } = getWindowBounds(rule);
     const base =
@@ -471,19 +582,35 @@ export function isRecurring(task: Pick<Task, 'recurrence'>): boolean {
 }
 
 /**
+ * Annual calendar-window periodic routine (shown in Tasks, off-calendar).
+ * Matches `type === 'annual_window'` with at least one configured annual window.
+ */
+export function isAnnualWindow(task: Pick<Task, 'recurrence'>): boolean {
+  const rule = task.recurrence;
+  return (
+    !!rule &&
+    rule.type === 'annual_window' &&
+    Array.isArray(rule.annualWindows) &&
+    rule.annualWindows.length > 0
+  );
+}
+
+/**
  * Window-based approximate periodic routine (shown in Tasks, off-calendar).
- * Matches `type === 'after_completion'` (legacy normalized to [N, N]) or any rule with `maxIntervalValue >= intervalValue`.
+ * Matches `type === 'after_completion'` (legacy normalized to [N, N]),
+ * `type === 'annual_window'`, or any rule with `maxIntervalValue >= intervalValue`.
  */
 export function isWindowPeriodic(task: Pick<Task, 'recurrence'>): boolean {
   const rule = task.recurrence;
   if (!rule) return false;
   if (rule.type === 'after_completion') return true;
+  if (isAnnualWindow(task)) return true;
   return rule.maxIntervalValue != null && rule.maxIntervalValue >= rule.intervalValue;
 }
 
 /** Calendar-bound fixed-interval recurring task. */
 export function isFixedRecurring(task: Pick<Task, 'recurrence'>): boolean {
-  return !!task.recurrence && !isWindowPeriodic(task);
+  return !!task.recurrence && task.recurrence.type !== 'annual_window' && !isWindowPeriodic(task);
 }
 
 /** Undated one-time task belonging in Tasks > One-Time. */
@@ -515,7 +642,7 @@ export function getLatestCompletionMs(task: Pick<Task, 'completionHistory'>): nu
 
 export function isWindowStopped(
   task: Pick<Task, 'recurrence' | 'completionHistory'> &
-    Partial<Pick<Task, 'completedAt' | 'dueAt'>>,
+    Partial<Pick<Task, 'completedAt' | 'dueAt' | 'createdAt'>>,
   now: Date = new Date()
 ): boolean {
   if (!isWindowPeriodic(task) || !task.recurrence?.endOnDate) return false;
@@ -523,6 +650,9 @@ export function isWindowStopped(
   const endOnDate = task.recurrence.endOnDate;
   if (todayStr > endOnDate) return true;
   if (todayStr === endOnDate && isCompletedOnDate(task, todayStr)) return true;
+  if (isAnnualWindow(task)) {
+    return resolveAnnualProgress(task, now).stage === 'stopped';
+  }
   return false;
 }
 
@@ -586,16 +716,252 @@ function localDaysBetween(fromMidnight: Date, toMidnight: Date): number {
   return Math.round((toMidnight.getTime() - fromMidnight.getTime()) / 86400000);
 }
 
+interface AnnualCycleInstance {
+  start: Date;
+  end: Date;
+  startStr: string;
+  endStr: string;
+  window: AnnualWindow;
+}
+
+function buildAnnualCycles(windows: AnnualWindow[], centerYear: number): AnnualCycleInstance[] {
+  const seen = new Set<string>();
+  const cycles: AnnualCycleInstance[] = [];
+  for (const rawW of windows) {
+    const w = sanitizeAnnualWindow(rawW);
+    const wraps = isYearWrapAnnualWindow(w);
+    for (let y = centerYear - 2; y <= centerYear + 2; y++) {
+      const start = clampMonthDay(y, w.startMonth - 1, w.startDay);
+      const endYear = wraps ? y + 1 : y;
+      const end = clampMonthDay(endYear, w.endMonth - 1, w.endDay);
+      const startStr = formatDate(start);
+      const endStr = formatDate(end);
+      const key = `${startStr}|${endStr}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cycles.push({ start, end, startStr, endStr, window: w });
+    }
+  }
+  cycles.sort((a, b) =>
+    a.startStr !== b.startStr ? a.startStr.localeCompare(b.startStr) : a.endStr.localeCompare(b.endStr)
+  );
+  return cycles;
+}
+
+function leadInStartStr(cycles: AnnualCycleInstance[], idx: number): string {
+  if (idx <= 0) return cycles[idx].startStr;
+  const prevEnd = cycles[idx - 1].end;
+  const currStart = cycles[idx].start;
+  const gapDays = localDaysBetween(prevEnd, currStart);
+  if (gapDays <= 1) return cycles[idx].startStr;
+  return formatDate(addDays(prevEnd, Math.ceil(gapDays / 2)));
+}
+
+function formatAnnualNextStart(date: Date, referenceYear: number): string {
+  const base = `${ANNUAL_MONTH_SHORT[date.getMonth() + 1]} ${date.getDate()}`;
+  return date.getFullYear() === referenceYear ? base : `${base}, ${date.getFullYear()}`;
+}
+
+function resolveAnnualProgress(
+  task: Pick<Task, 'recurrence' | 'completionHistory'> &
+    Partial<Pick<Task, 'completedAt' | 'dueAt' | 'createdAt'>>,
+  now: Date
+): WindowProgress {
+  const windows = task.recurrence!.annualWindows!;
+  const scheduleLabel = windows.map(formatAnnualWindowRange).join(', ');
+  const today = startOfDay(now);
+  const todayStr = formatDate(today);
+  const doneToday = isCompletedOnDate(task, todayStr);
+
+  const history = task.completionHistory || [];
+  let minTs: number | null = null;
+  let maxTs: number | null = null;
+  for (const ts of history) {
+    if (minTs === null || ts < minTs) minTs = ts;
+    if (maxTs === null || ts > maxTs) maxTs = ts;
+  }
+
+  const lastDoneMs = maxTs;
+  const latestDoneDateStr = maxTs != null ? formatDate(startOfDay(new Date(maxTs))) : null;
+  const earliestDoneDateStr = minTs != null ? formatDate(startOfDay(new Date(minTs))) : null;
+  const elapsedDays =
+    lastDoneMs != null ? Math.max(0, localDaysBetween(startOfDay(new Date(lastDoneMs)), today)) : null;
+
+  const endOnDate = task.recurrence?.endOnDate ?? null;
+  if (endOnDate && (todayStr > endOnDate || (todayStr === endOnDate && doneToday))) {
+    return {
+      stage: 'stopped',
+      visibleInTasks: false,
+      sortScore: -2,
+      ringFill: 0,
+      overdueIntensity: 0,
+      elapsedDays,
+      minDays: 1,
+      maxDays: 1,
+      lastDoneMs,
+      doneToday,
+      detailLabel: `Stopped · every ${scheduleLabel}`,
+    };
+  }
+
+  const createdDateStr =
+    task.createdAt != null && Number.isFinite(task.createdAt)
+      ? formatDate(startOfDay(new Date(task.createdAt)))
+      : null;
+  const effectiveStartStr =
+    earliestDoneDateStr && (!createdDateStr || earliestDoneDateStr < createdDateStr)
+      ? earliestDoneDateStr
+      : createdDateStr ?? todayStr;
+
+  const cycles = buildAnnualCycles(windows, today.getFullYear());
+  const isCycleSatisfied = (idx: number): boolean =>
+    latestDoneDateStr != null && latestDoneDateStr >= leadInStartStr(cycles, idx);
+
+  let lastStartedIdx = -1;
+  for (let i = 0; i < cycles.length; i++) {
+    if (cycles[i].startStr <= todayStr) {
+      lastStartedIdx = i;
+    } else {
+      break;
+    }
+  }
+
+  const currEligible = lastStartedIdx >= 0 && cycles[lastStartedIdx].endStr >= effectiveStartStr;
+  const currActive = currEligible && !isCycleSatisfied(lastStartedIdx);
+
+  if (currActive) {
+    const curr = cycles[lastStartedIdx];
+    const windowLabel = formatAnnualWindowRange(curr.window);
+    const windowSpanDays = Math.max(0, localDaysBetween(curr.start, curr.end));
+    const elapsedSuffix = elapsedDays != null ? ` · ${formatExpandedElapsed(elapsedDays)}` : '';
+
+    if (todayStr < curr.endStr) {
+      const daysInto = Math.max(0, localDaysBetween(curr.start, today));
+      const daysLeft = Math.max(1, localDaysBetween(today, curr.end));
+      const w = daysInto / Math.max(1, windowSpanDays);
+      return {
+        stage: 'in_window',
+        visibleInTasks: true,
+        sortScore: w,
+        ringFill: Math.max(0.08, w),
+        overdueIntensity: 0,
+        elapsedDays,
+        minDays: 0,
+        maxDays: Math.max(1, windowSpanDays),
+        lastDoneMs,
+        doneToday,
+        detailLabel: `${windowLabel} · ${daysLeft === 1 ? '1 day left' : `${daysLeft} days left`}${elapsedSuffix}`,
+      };
+    }
+
+    if (todayStr === curr.endStr) {
+      return {
+        stage: 'at_or_past_max',
+        visibleInTasks: true,
+        sortScore: 1.01,
+        ringFill: 1.0,
+        overdueIntensity: 0,
+        elapsedDays,
+        minDays: 0,
+        maxDays: Math.max(1, windowSpanDays),
+        lastDoneMs,
+        doneToday,
+        detailLabel: `${windowLabel} · Last day of window${elapsedSuffix}`,
+      };
+    }
+
+    const daysOverdue = Math.max(1, localDaysBetween(curr.end, today));
+    const extra = daysOverdue / Math.max(7, windowSpanDays);
+    return {
+      stage: 'at_or_past_max',
+      visibleInTasks: true,
+      sortScore: 1.01 + extra,
+      ringFill: 1.0,
+      overdueIntensity: Math.min(1, extra),
+      elapsedDays,
+      minDays: 0,
+      maxDays: Math.max(1, windowSpanDays),
+      lastDoneMs,
+      doneToday,
+      detailLabel: `${windowLabel} · ${daysOverdue === 1 ? '1 day overdue' : `${daysOverdue} days overdue`}${elapsedSuffix}`,
+    };
+  }
+
+  let nextIdx = cycles.length - 1;
+  for (let i = Math.max(0, lastStartedIdx + 1); i < cycles.length; i++) {
+    if (!isCycleSatisfied(i)) {
+      nextIdx = i;
+      break;
+    }
+  }
+  const next = cycles[nextIdx];
+
+  if (endOnDate && next.startStr > endOnDate) {
+    return {
+      stage: 'stopped',
+      visibleInTasks: false,
+      sortScore: -2,
+      ringFill: 0,
+      overdueIntensity: 0,
+      elapsedDays,
+      minDays: 1,
+      maxDays: 1,
+      lastDoneMs,
+      doneToday,
+      detailLabel: `Stopped · every ${scheduleLabel}`,
+    };
+  }
+
+  const prevCycleEnd = nextIdx > 0 ? cycles[nextIdx - 1].end : addDays(next.start, -365);
+  const lastDoneDay = lastDoneMs != null ? startOfDay(new Date(lastDoneMs)) : null;
+  const refStart =
+    lastDoneDay &&
+    lastDoneDay <= today &&
+    lastDoneDay > addDays(next.start, -365) &&
+    (lastDoneDay >= prevCycleEnd || (lastStartedIdx >= 0 && lastDoneDay >= cycles[lastStartedIdx].start))
+      ? lastDoneDay
+      : prevCycleEnd;
+  const waitDays = Math.max(1, localDaysBetween(refStart, next.start));
+  const elapsedWait = Math.max(0, Math.min(waitDays, localDaysBetween(refStart, today)));
+  const ratio = elapsedWait / waitDays;
+  const nextStartLabel = formatAnnualNextStart(next.start, today.getFullYear());
+  const nextWindowLabel = formatAnnualWindowRange(next.window);
+
+  const detailLabel = doneToday
+    ? `Done today · next ${nextStartLabel} (${nextWindowLabel})`
+    : elapsedDays != null
+      ? `${formatExpandedElapsed(elapsedDays)} · next ${nextStartLabel} (${nextWindowLabel})`
+      : `Starts ${nextStartLabel} · ${nextWindowLabel}`;
+
+  return {
+    stage: 'before_min',
+    visibleInTasks: false,
+    sortScore: -1 + ratio,
+    ringFill: ratio,
+    overdueIntensity: 0,
+    elapsedDays,
+    minDays: waitDays,
+    maxDays: waitDays + Math.max(1, localDaysBetween(next.start, next.end)),
+    lastDoneMs,
+    doneToday,
+    detailLabel,
+  };
+}
+
 /**
  * Compute continuous progress, visibility in Tasks, sort score, and radial ring fill
- * for an approximate min–max periodic task. Returns null for non-window tasks.
+ * for an approximate min–max periodic task or annual time-of-year window task.
+ * Returns null for non-window tasks.
  */
 export function getWindowProgress(
   task: Pick<Task, 'recurrence' | 'completionHistory'> &
-    Partial<Pick<Task, 'completedAt' | 'dueAt'>>,
+    Partial<Pick<Task, 'completedAt' | 'dueAt' | 'createdAt'>>,
   now: Date = new Date()
 ): WindowProgress | null {
   if (!isWindowPeriodic(task) || !task.recurrence) return null;
+  if (isAnnualWindow(task)) {
+    return resolveAnnualProgress(task, now);
+  }
 
   const { min, max, unit } = getWindowBounds(task.recurrence);
   const periodExpanded = formatExpandedPeriod(min, max, unit);

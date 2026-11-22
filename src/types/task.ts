@@ -1,4 +1,4 @@
-export type RecurrenceType = 'after_completion' | 'fixed_interval';
+export type RecurrenceType = 'after_completion' | 'fixed_interval' | 'annual_window';
 
 export type IntervalUnit = 'days' | 'weeks' | 'months' | 'years';
 
@@ -22,12 +22,25 @@ export const WEEKDAY_LABELS: Record<Weekday, string> = {
   6: 'Sat',
 };
 
+export interface AnnualWindow {
+  /** 1..12 */
+  startMonth: number;
+  /** 1..31 (clamped to actual month length for a given year) */
+  startDay: number;
+  /** 1..12 */
+  endMonth: number;
+  /** 1..31 (clamped to actual month length; 29 for Feb handles leap years) */
+  endDay: number;
+}
+
 export interface RecurrenceRule {
   type: RecurrenceType;
   intervalValue: number;
   /** Optional upper bound (>= intervalValue) defining an approximate min–max window in Tasks. */
   maxIntervalValue?: number | null;
   intervalUnit: IntervalUnit;
+  /** Recurring calendar date windows (MM-DD to MM-DD) when type === 'annual_window'. */
+  annualWindows?: AnnualWindow[];
   weekdays?: Weekday[];
   monthDay?: number;
   endOnDate?: string | null;

@@ -3,15 +3,23 @@ import { Trash2 } from 'lucide-react';
 import type { IntervalUnit, RecurrenceType, Weekday } from '../../types/task';
 import { WEEKDAY_LABELS } from '../../types/task';
 import {
+  ANNUAL_MONTH_SHORT,
+  annualWindowsEqual,
   completionTimestampForDate,
+  daysInAnnualMonth,
   formatDate,
+  formatRecurrenceLabel,
+  getSeasonPresets,
+  isYearWrapAnnualWindow,
   parseDate,
   startOfDay,
 } from '../../domain/recurrence';
+import { usePrefs } from '../../prefs/prefs';
 
 export type EndMode = 'never' | 'on_date' | 'after_count';
 
 const ALL_WEEKDAYS: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
+const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 export interface RepeatPanelProps {
   recurrenceType: RecurrenceType;
@@ -32,6 +40,14 @@ export interface RepeatPanelProps {
   monthDay: number;
   setMonthDay: (day: number) => void;
   setWeekdays: (days: Weekday[]) => void;
+  annualStartMonth: number;
+  setAnnualStartMonth: (month: number) => void;
+  annualStartDay: number;
+  setAnnualStartDay: (day: number) => void;
+  annualEndMonth: number;
+  setAnnualEndMonth: (month: number) => void;
+  annualEndDay: number;
+  setAnnualEndDay: (day: number) => void;
   endMode: EndMode;
   setEndMode: (mode: EndMode) => void;
   endOnDate: string;
@@ -70,6 +86,14 @@ export function RepeatPanel({
   monthDay,
   setMonthDay,
   setWeekdays,
+  annualStartMonth,
+  setAnnualStartMonth,
+  annualStartDay,
+  setAnnualStartDay,
+  annualEndMonth,
+  setAnnualEndMonth,
+  annualEndDay,
+  setAnnualEndDay,
   endMode,
   setEndMode,
   endOnDate,
@@ -84,10 +108,21 @@ export function RepeatPanel({
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
 }: RepeatPanelProps) {
+  const [prefs] = usePrefs();
+  const seasonPresets = getSeasonPresets(prefs.hemisphere);
+  const currentAnnualWindow = {
+    startMonth: annualStartMonth,
+    startDay: annualStartDay,
+    endMonth: annualEndMonth,
+    endDay: annualEndDay,
+  };
+  const startMonthDays = daysInAnnualMonth(annualStartMonth);
+  const endMonthDays = daysInAnnualMonth(annualEndMonth);
+
   const sortedDesc = [...localHistory].sort((a, b) => b - a);
   const count = sortedDesc.length;
   let avgText = '';
-  if (count >= 2) {
+  if (count >= 2 && recurrenceType === 'after_completion') {
     const firstDay = startOfDay(new Date(sortedDesc[count - 1]));
     const lastDay = startOfDay(new Date(sortedDesc[0]));
     const span = Math.max(0, Math.round((lastDay.getTime() - firstDay.getTime()) / 86400000));
@@ -275,88 +310,251 @@ export function RepeatPanel({
           </>
         ) : (
           <>
-            {/* Approximately: Min, Max, Unit */}
-            <div className="grid grid-cols-3 gap-2.5">
-              <div>
-                <label
-                  htmlFor="repeat-min-input"
-                  className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+            {recurrenceType === 'annual_window' ? (
+              <>
+                <fieldset className="space-y-1.5">
+                  <legend className="block text-sm sm:text-base font-bold text-tt-text mb-1">
+                    Quick season
+                  </legend>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {seasonPresets.map((preset) => {
+                      const active = annualWindowsEqual(currentAnnualWindow, preset.window);
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => {
+                            setAnnualStartMonth(preset.window.startMonth);
+                            setAnnualStartDay(preset.window.startDay);
+                            setAnnualEndMonth(preset.window.endMonth);
+                            setAnnualEndDay(preset.window.endDay);
+                          }}
+                          className={`h-11 rounded-xl text-sm sm:text-base font-bold border transition-all flex items-center justify-center cursor-pointer ${
+                            active
+                              ? 'bg-tt-blue text-white border-tt-blue shadow-sm shadow-tt-blue/25 ring-1 ring-tt-blue'
+                              : 'bg-tt-elevated text-tt-text border-tt-border hover:bg-tt-hover active:scale-95'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div className="grid grid-cols-[1fr_5rem] gap-2">
+                      <div>
+                        <label
+                          htmlFor="annual-start-month"
+                          className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                        >
+                          From month
+                        </label>
+                        <select
+                          id="annual-start-month"
+                          value={annualStartMonth}
+                          onChange={(e) => {
+                            const nextMonth = parseInt(e.target.value, 10) || 1;
+                            const nextMax = daysInAnnualMonth(nextMonth);
+                            const wasSingleFullMonth =
+                              annualStartMonth === annualEndMonth &&
+                              annualStartDay === 1 &&
+                              annualEndDay >= daysInAnnualMonth(annualEndMonth);
+                            setAnnualStartMonth(nextMonth);
+                            if (wasSingleFullMonth) {
+                              setAnnualStartDay(1);
+                              setAnnualEndMonth(nextMonth);
+                              setAnnualEndDay(nextMax);
+                            } else {
+                              setAnnualStartDay(Math.min(annualStartDay, nextMax));
+                            }
+                          }}
+                          className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                        >
+                          {ALL_MONTHS.map((m) => (
+                            <option key={m} value={m}>
+                              {ANNUAL_MONTH_SHORT[m]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="annual-start-day"
+                          className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                        >
+                          Day
+                        </label>
+                        <select
+                          id="annual-start-day"
+                          value={Math.min(annualStartDay, startMonthDays)}
+                          onChange={(e) => setAnnualStartDay(parseInt(e.target.value, 10) || 1)}
+                          className="w-full h-11 sm:h-12 px-2.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer tabular-nums"
+                        >
+                          {Array.from({ length: startMonthDays }, (_, idx) => idx + 1).map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="grid grid-cols-[1fr_5rem] gap-2">
+                      <div>
+                        <label
+                          htmlFor="annual-end-month"
+                          className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                        >
+                          To month
+                        </label>
+                        <select
+                          id="annual-end-month"
+                          value={annualEndMonth}
+                          onChange={(e) => {
+                            const nextMonth = parseInt(e.target.value, 10) || 1;
+                            const nextMax = daysInAnnualMonth(nextMonth);
+                            const wasEndOfMonth = annualEndDay >= daysInAnnualMonth(annualEndMonth);
+                            setAnnualEndMonth(nextMonth);
+                            setAnnualEndDay(wasEndOfMonth ? nextMax : Math.min(annualEndDay, nextMax));
+                          }}
+                          className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                        >
+                          {ALL_MONTHS.map((m) => (
+                            <option key={m} value={m}>
+                              {ANNUAL_MONTH_SHORT[m]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="annual-end-day"
+                          className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                        >
+                          Day
+                        </label>
+                        <select
+                          id="annual-end-day"
+                          value={Math.min(annualEndDay, endMonthDays)}
+                          onChange={(e) => setAnnualEndDay(parseInt(e.target.value, 10) || 1)}
+                          className="w-full h-11 sm:h-12 px-2.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer tabular-nums"
+                        >
+                          {Array.from({ length: endMonthDays }, (_, idx) => idx + 1).map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <p
+                  data-testid="annual-window-preview"
+                  className="text-xs sm:text-sm font-medium text-tt-secondary"
                 >
-                  Min
-                </label>
-                <input
-                  id="repeat-min-input"
-                  type="number"
-                  min="1"
-                  max="999"
-                  value={minInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setMinInput(v);
-                    const n = parseInt(v, 10);
-                    if (!Number.isNaN(n) && n >= 1) {
-                      setIntervalValue(Math.min(999, n));
-                    }
-                  }}
-                  onBlur={() => {
-                    setMinInput(String(intervalValue));
-                    if (maxIntervalValue < intervalValue) {
-                      setMaxIntervalValue(intervalValue);
-                      setMaxInput(String(intervalValue));
-                    }
-                  }}
-                  className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="repeat-max-input"
-                  className="block text-sm sm:text-base font-bold text-tt-text mb-1"
-                >
-                  Max
-                </label>
-                <input
-                  id="repeat-max-input"
-                  type="number"
-                  min={intervalValue}
-                  max="999"
-                  value={maxInput}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setMaxInput(v);
-                    const n = parseInt(v, 10);
-                    if (!Number.isNaN(n) && n >= 1) {
-                      setMaxIntervalValue(Math.min(999, Math.max(intervalValue, n)));
-                    }
-                  }}
-                  onBlur={() => {
-                    const clamped = Math.max(intervalValue, maxIntervalValue);
-                    setMaxIntervalValue(clamped);
-                    setMaxInput(String(clamped));
-                  }}
-                  className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="repeat-unit-select"
-                  className="block text-sm sm:text-base font-bold text-tt-text mb-1"
-                >
-                  Unit
-                </label>
-                <select
-                  id="repeat-unit-select"
-                  value={intervalUnit}
-                  onChange={(e) => setIntervalUnit(e.target.value as IntervalUnit)}
-                  className="w-full h-11 sm:h-12 px-2.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
-                >
-                  <option value="days">Days</option>
-                  <option value="weeks">Weeks</option>
-                  <option value="months">Months</option>
-                  <option value="years">Years</option>
-                </select>
-              </div>
-            </div>
+                  {formatRecurrenceLabel({
+                    type: 'annual_window',
+                    intervalValue: 1,
+                    intervalUnit: 'years',
+                    annualWindows: [currentAnnualWindow],
+                  })}
+                  {isYearWrapAnnualWindow(currentAnnualWindow) ? ' (spans New Year)' : ''}
+                </p>
+              </>
+            ) : (
+              <>
+                {/* Approximately: Min, Max, Unit */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label
+                      htmlFor="repeat-min-input"
+                      className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                    >
+                      Min
+                    </label>
+                    <input
+                      id="repeat-min-input"
+                      type="number"
+                      min="1"
+                      max="999"
+                      value={minInput}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMinInput(v);
+                        const n = parseInt(v, 10);
+                        if (!Number.isNaN(n) && n >= 1) {
+                          setIntervalValue(Math.min(999, n));
+                        }
+                      }}
+                      onBlur={() => {
+                        setMinInput(String(intervalValue));
+                        if (maxIntervalValue < intervalValue) {
+                          setMaxIntervalValue(intervalValue);
+                          setMaxInput(String(intervalValue));
+                        }
+                      }}
+                      className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="repeat-max-input"
+                      className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                    >
+                      Max
+                    </label>
+                    <input
+                      id="repeat-max-input"
+                      type="number"
+                      min={intervalValue}
+                      max="999"
+                      value={maxInput}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMaxInput(v);
+                        const n = parseInt(v, 10);
+                        if (!Number.isNaN(n) && n >= 1) {
+                          setMaxIntervalValue(Math.min(999, Math.max(intervalValue, n)));
+                        }
+                      }}
+                      onBlur={() => {
+                        const clamped = Math.max(intervalValue, maxIntervalValue);
+                        setMaxIntervalValue(clamped);
+                        setMaxInput(String(clamped));
+                      }}
+                      className="w-full h-11 sm:h-12 px-3 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-lg sm:text-xl font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="repeat-unit-select"
+                      className="block text-sm sm:text-base font-bold text-tt-text mb-1"
+                    >
+                      Unit
+                    </label>
+                    <select
+                      id="repeat-unit-select"
+                      value={intervalUnit}
+                      onChange={(e) => setIntervalUnit(e.target.value as IntervalUnit)}
+                      className="w-full h-11 sm:h-12 px-2.5 bg-tt-elevated border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue transition-colors cursor-pointer"
+                    >
+                      <option value="days">Days</option>
+                      <option value="weeks">Weeks</option>
+                      <option value="months">Months</option>
+                      <option value="years">Years</option>
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Ends (Never or On specific date) */}
             <div className="pt-2 border-t border-tt-border/80">

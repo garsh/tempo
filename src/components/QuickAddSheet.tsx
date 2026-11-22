@@ -21,13 +21,16 @@ import {
   addInterval,
   combineDueAt,
   completionTimestampForDate,
+  daysInAnnualMonth,
   formatDate,
   getDueDatePart,
   getLatestCompletionMs,
   getWindowBounds,
   hasDueTime,
+  isAnnualWindow,
   isWindowPeriodic,
   parseDate,
+  sanitizeAnnualWindow,
   splitDueAt,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
@@ -176,6 +179,11 @@ export function QuickAddSheet({
   const [weekdays, setWeekdays] = useState<Weekday[]>([]);
   const [useMonthDay, setUseMonthDay] = useState(false);
   const [monthDay, setMonthDay] = useState(1);
+  const defaultAnnualMonth = new Date().getMonth() + 1;
+  const [annualStartMonth, setAnnualStartMonth] = useState(defaultAnnualMonth);
+  const [annualStartDay, setAnnualStartDay] = useState(1);
+  const [annualEndMonth, setAnnualEndMonth] = useState(defaultAnnualMonth);
+  const [annualEndDay, setAnnualEndDay] = useState(() => daysInAnnualMonth(defaultAnnualMonth));
   const [endMode, setEndMode] = useState<EndMode>('never');
   const [endOnDate, setEndOnDate] = useState('');
   const [endAfterCount, setEndAfterCount] = useState('');
@@ -252,6 +260,11 @@ export function QuickAddSheet({
     setWeekdays([]);
     setUseMonthDay(false);
     setMonthDay(1);
+    const curMonth = new Date().getMonth() + 1;
+    setAnnualStartMonth(curMonth);
+    setAnnualStartDay(1);
+    setAnnualEndMonth(curMonth);
+    setAnnualEndDay(daysInAnnualMonth(curMonth));
     setEndMode('never');
     setEndOnDate('');
     setEndAfterCount('');
@@ -274,14 +287,39 @@ export function QuickAddSheet({
       setTitle(initialTask.title);
       setNotes(initialTask.notes || '');
       const hasRecurrence = !!initialTask.recurrence;
-      const isApprox = isWindowPeriodic(initialTask);
+      const isAnnual = isAnnualWindow(initialTask);
+      const isApprox = !isAnnual && isWindowPeriodic(initialTask);
       setIsRecurring(hasRecurrence);
       setLocalHistory([...(initialTask.completionHistory || [])]);
       setInitialLastDoneDate(null);
 
       if (initialTask.recurrence) {
         const r = initialTask.recurrence;
-        if (isApprox) {
+        if (isAnnual) {
+          const firstWin = sanitizeAnnualWindow(r.annualWindows![0]);
+          setRecurrenceType('annual_window');
+          setDueAt(null);
+          setAnnualStartMonth(firstWin.startMonth);
+          setAnnualStartDay(firstWin.startDay);
+          setAnnualEndMonth(firstWin.endMonth);
+          setAnnualEndDay(firstWin.endDay);
+          setIntervalValue(1);
+          setMaxIntervalValue(2);
+          setMinInput('1');
+          setMaxInput('2');
+          setIntervalUnit('years');
+          setWeekdays([]);
+          setUseMonthDay(false);
+          setMonthDay(1);
+          if (r.endOnDate) {
+            setEndMode('on_date');
+            setEndOnDate(r.endOnDate);
+          } else {
+            setEndMode('never');
+            setEndOnDate('');
+          }
+          setEndAfterCount('');
+        } else if (isApprox) {
           const { min, max, unit } = getWindowBounds(r);
           setRecurrenceType('after_completion');
           setDueAt(null);
@@ -337,6 +375,11 @@ export function QuickAddSheet({
         setWeekdays([]);
         setUseMonthDay(false);
         setMonthDay(1);
+        const curMonth = new Date().getMonth() + 1;
+        setAnnualStartMonth(curMonth);
+        setAnnualStartDay(1);
+        setAnnualEndMonth(curMonth);
+        setAnnualEndDay(daysInAnnualMonth(curMonth));
         setEndMode('never');
         setEndOnDate('');
         setEndAfterCount('');
@@ -360,7 +403,8 @@ export function QuickAddSheet({
   if (!isOpen) return null;
 
   const canSubmit = title.trim().length > 0;
-  const isApproxMode = isRecurring && recurrenceType === 'after_completion';
+  const isWindowMode =
+    isRecurring && (recurrenceType === 'after_completion' || recurrenceType === 'annual_window');
   const latestHistoryMs = getLatestCompletionMs({ completionHistory: localHistory });
   const latestHistoryDateStr = latestHistoryMs != null ? formatDate(new Date(latestHistoryMs)) : null;
 
@@ -370,7 +414,7 @@ export function QuickAddSheet({
   };
 
   const datePart = dueAt ? dueAt.slice(0, 10) : '';
-  const datePreset: DatePreset = isApproxMode
+  const datePreset: DatePreset = isWindowMode
     ? initialLastDoneDate === todayStr
       ? 'today'
       : initialLastDoneDate
@@ -384,7 +428,7 @@ export function QuickAddSheet({
           ? 'tomorrow'
           : null;
 
-  const dateChipLabel = isApproxMode
+  const dateChipLabel = isWindowMode
     ? initialTask?.id && latestHistoryDateStr
       ? `Last done: ${latestHistoryDateStr === todayStr ? 'Today' : formatShortDate(latestHistoryDateStr)}`
       : initialLastDoneDate
@@ -408,11 +452,12 @@ export function QuickAddSheet({
   };
 
   const handleSelectFixed = () => {
-    const wasApprox = isRecurring && recurrenceType === 'after_completion';
+    const wasWindow =
+      isRecurring && (recurrenceType === 'after_completion' || recurrenceType === 'annual_window');
     setIsRecurring(true);
     setRecurrenceType('fixed_interval');
     setPanel('repeat');
-    if (wasApprox || !dueAt) {
+    if (wasWindow || !dueAt) {
       const anchorStr = latestHistoryDateStr ?? initialLastDoneDate;
       if (anchorStr) {
         const nextStr = formatDate(addInterval(parseDate(anchorStr), intervalValue, intervalUnit));
@@ -446,6 +491,17 @@ export function QuickAddSheet({
     }
   };
 
+  const handleSelectAnnualWindow = () => {
+    setIsRecurring(true);
+    setRecurrenceType('annual_window');
+    setPanel('repeat');
+    setDueAt(null);
+    if (endMode === 'after_count') {
+      setEndMode('never');
+      setEndAfterCount('');
+    }
+  };
+
   const handleClearRepeat = () => {
     setIsRecurring(false);
     setPanel('none');
@@ -466,7 +522,22 @@ export function QuickAddSheet({
           parsedEndOnDate = endOnDate.trim();
         }
 
-        if (recurrenceType === 'after_completion') {
+        if (recurrenceType === 'annual_window') {
+          recurrence = {
+            type: 'annual_window',
+            intervalValue: 1,
+            intervalUnit: 'years',
+            annualWindows: [
+              sanitizeAnnualWindow({
+                startMonth: annualStartMonth,
+                startDay: annualStartDay,
+                endMonth: annualEndMonth,
+                endDay: annualEndDay,
+              }),
+            ],
+            endOnDate: parsedEndOnDate,
+          };
+        } else if (recurrenceType === 'after_completion') {
           recurrence = {
             type: 'after_completion',
             intervalValue: safeMin,
@@ -496,7 +567,7 @@ export function QuickAddSheet({
       }
 
       const seededHistory =
-        recurrence?.type === 'after_completion' &&
+        (recurrence?.type === 'after_completion' || recurrence?.type === 'annual_window') &&
         localHistory.length === 0 &&
         initialLastDoneDate
           ? [completionTimestampForDate(initialLastDoneDate)]
@@ -507,7 +578,7 @@ export function QuickAddSheet({
           ? splitDueAt(initialTask.dueAt).time
           : null;
       const submittedDueAt =
-        recurrence?.type === 'after_completion'
+        recurrence?.type === 'after_completion' || recurrence?.type === 'annual_window'
           ? null
           : dueAt
             ? combineDueAt(dueAt, existingTime)
@@ -704,13 +775,13 @@ export function QuickAddSheet({
         {/* Toolbar */}
         <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 flex-nowrap min-w-0">
           {toolBtn(
-            isApproxMode ? 'Last done' : 'Date',
-            isApproxMode
+            isWindowMode ? 'Last done' : 'Date',
+            isWindowMode
               ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
               : dateMenuOpen || !!dueAt,
             () => {
               setRepeatMenuOpen(false);
-              if (isApproxMode && initialTask?.id && localHistory.length > 0) {
+              if (isWindowMode && initialTask?.id && localHistory.length > 0) {
                 setDateMenuOpen(false);
                 setPanel('repeat');
                 window.requestAnimationFrame(() => {
@@ -721,7 +792,7 @@ export function QuickAddSheet({
               }
             },
             <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
-              {isApproxMode ? (
+              {isWindowMode ? (
                 <Clock className="w-4 h-4 stroke-[2.2]" />
               ) : (
                 <Calendar className="w-4 h-4 stroke-[2.2]" />
@@ -730,7 +801,7 @@ export function QuickAddSheet({
             </span>,
             'shrink-0',
             undefined,
-            isApproxMode && initialTask?.id && localHistory.length > 0
+            isWindowMode && initialTask?.id && localHistory.length > 0
               ? undefined
               : { expanded: dateMenuOpen, controlsId: 'date-choice-menu', buttonRef: dateButtonRef },
           )}
@@ -753,7 +824,13 @@ export function QuickAddSheet({
             <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
               <RefreshCw className="w-4 h-4 stroke-[2.2]" />
               <span>
-                {!isRecurring ? 'Repeat' : recurrenceType === 'after_completion' ? 'Approx' : 'Fixed'}
+                {!isRecurring
+                  ? 'Repeat'
+                  : recurrenceType === 'after_completion'
+                    ? 'Approx'
+                    : recurrenceType === 'annual_window'
+                      ? 'Yearly'
+                      : 'Fixed'}
               </span>
             </span>,
             'shrink-0',
@@ -807,6 +884,14 @@ export function QuickAddSheet({
             monthDay={monthDay}
             setMonthDay={setMonthDay}
             setWeekdays={setWeekdays}
+            annualStartMonth={annualStartMonth}
+            setAnnualStartMonth={setAnnualStartMonth}
+            annualStartDay={annualStartDay}
+            setAnnualStartDay={setAnnualStartDay}
+            annualEndMonth={annualEndMonth}
+            setAnnualEndMonth={setAnnualEndMonth}
+            annualEndDay={annualEndDay}
+            setAnnualEndDay={setAnnualEndDay}
             endMode={endMode}
             setEndMode={setEndMode}
             endOnDate={endOnDate}
@@ -827,22 +912,22 @@ export function QuickAddSheet({
         open={dateMenuOpen}
         anchorRef={dateButtonRef}
         active={datePreset}
-        mode={isApproxMode ? 'last_done' : 'due'}
+        mode={isWindowMode ? 'last_done' : 'due'}
         allowNoDate={!isRecurring}
-        maxDate={isApproxMode ? todayStr : undefined}
-        dateValue={isApproxMode ? (initialLastDoneDate ?? '') : datePart}
+        maxDate={isWindowMode ? todayStr : undefined}
+        dateValue={isWindowMode ? (initialLastDoneDate ?? '') : datePart}
         onClose={() => setDateMenuOpen(false)}
         onToday={() => {
-          if (isApproxMode) setInitialLastDoneDate(todayStr);
+          if (isWindowMode) setInitialLastDoneDate(todayStr);
           else setDueAt(todayStr);
         }}
-        onTomorrow={isApproxMode ? undefined : () => setDueAt(tomorrowStr)}
+        onTomorrow={isWindowMode ? undefined : () => setDueAt(tomorrowStr)}
         onNoDate={() => {
-          if (isApproxMode) setInitialLastDoneDate(null);
+          if (isWindowMode) setInitialLastDoneDate(null);
           else setDueAt(null);
         }}
         onDatePicked={(val) => {
-          if (isApproxMode) setInitialLastDoneDate(val);
+          if (isWindowMode) setInitialLastDoneDate(val);
           else setDueAt(val);
         }}
       />
@@ -853,6 +938,7 @@ export function QuickAddSheet({
         onClose={() => setRepeatMenuOpen(false)}
         onSelectFixed={handleSelectFixed}
         onSelectApproximate={handleSelectApproximate}
+        onSelectAnnualWindow={handleSelectAnnualWindow}
         onClearRepeat={handleClearRepeat}
       />
     </div>

@@ -1,4 +1,5 @@
 import type {
+  AnnualWindow,
   Folder,
   RecurrenceRule,
   RecurrenceScheduleSegment,
@@ -175,10 +176,61 @@ function asWeekday(value: unknown): Weekday | undefined {
   return undefined;
 }
 
+const MAX_ANNUAL_MONTH_DAYS = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+function asAnnualWindow(value: unknown): AnnualWindow | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const startMonth = asFinite(raw.startMonth);
+  const startDay = asFinite(raw.startDay);
+  const endMonth = asFinite(raw.endMonth);
+  const endDay = asFinite(raw.endDay);
+  if (startMonth === undefined || startDay === undefined || endMonth === undefined || endDay === undefined) {
+    return undefined;
+  }
+  const sm = Math.floor(startMonth);
+  const em = Math.floor(endMonth);
+  const sd = Math.floor(startDay);
+  const ed = Math.floor(endDay);
+  if (sm < 1 || sm > 12 || em < 1 || em > 12) return undefined;
+  if (sd < 1 || sd > 31 || ed < 1 || ed > 31) return undefined;
+  return {
+    startMonth: sm,
+    startDay: Math.min(MAX_ANNUAL_MONTH_DAYS[sm], sd),
+    endMonth: em,
+    endDay: Math.min(MAX_ANNUAL_MONTH_DAYS[em], ed),
+  };
+}
+
+function asAnnualWindows(value: unknown): AnnualWindow[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const windows: AnnualWindow[] = [];
+  for (const item of value.slice(0, 12)) {
+    const parsed = asAnnualWindow(item);
+    if (parsed) windows.push(parsed);
+  }
+  return windows.length > 0 ? windows : undefined;
+}
+
 function asRecurrence(value: unknown): RecurrenceRule | null | undefined {
   if (value == null) return value === null ? null : undefined;
   if (typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
+  if (raw.type === 'annual_window') {
+    const annualWindows = asAnnualWindows(raw.annualWindows);
+    if (!annualWindows) return undefined;
+    const rawInterval = asFinite(raw.intervalValue);
+    const intervalValue = rawInterval !== undefined ? Math.min(99, Math.max(1, Math.floor(rawInterval))) : 1;
+    const rule: RecurrenceRule = {
+      type: 'annual_window',
+      intervalValue,
+      intervalUnit: 'years',
+      annualWindows,
+    };
+    if (typeof raw.endOnDate === 'string' && DATE_RE.test(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
+    else if (raw.endOnDate === null) rule.endOnDate = null;
+    return rule;
+  }
   if (raw.type !== 'after_completion' && raw.type !== 'fixed_interval') return undefined;
   if (
     raw.intervalUnit !== 'days' &&
@@ -282,7 +334,9 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (subtasks && subtasks.length > 0) task.subtasks = subtasks;
   const recurrence = asRecurrence(record.recurrence);
   if (recurrence !== undefined) task.recurrence = recurrence;
-  if (task.recurrence?.type === 'after_completion') {
+  const isWindowRecurrence =
+    task.recurrence?.type === 'after_completion' || task.recurrence?.type === 'annual_window';
+  if (isWindowRecurrence) {
     task.dueAt = null;
     task.startDate = null;
   }
@@ -294,7 +348,7 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (deletedAt !== undefined) task.deletedAt = deletedAt;
   const skipped = asDateList(record.skippedDates);
   if (skipped && skipped.length > 0) task.skippedDates = skipped;
-  if (task.recurrence?.type !== 'after_completion') {
+  if (!isWindowRecurrence) {
     const removedSkipped = asDateList(record.removedSkippedDates);
     if (removedSkipped && removedSkipped.length > 0) task.removedSkippedDates = removedSkipped;
     if (task.recurrence) {

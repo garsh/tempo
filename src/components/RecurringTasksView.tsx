@@ -4,6 +4,7 @@ import type { Task } from '../types/task';
 import {
   formatRecurrenceLabel,
   getNextUncompletedOccurrenceDate,
+  isAnnualWindow,
   isFixedRecurring,
   isRecurrenceFinished,
   isWindowPeriodic,
@@ -47,18 +48,24 @@ export function RecurringTasksView({
   onRequestDelete,
 }: RecurringTasksViewProps) {
   const [approxCollapsed, setApproxCollapsed] = useState(false);
+  const [annualCollapsed, setAnnualCollapsed] = useState(false);
   const [fixedCollapsed, setFixedCollapsed] = useState(false);
 
-  const { approxTasks, fixedEntries } = useMemo(() => {
+  const { approxTasks, annualTasks, fixedEntries } = useMemo(() => {
     const now = new Date();
     const approx: Task[] = [];
+    const annual: Task[] = [];
     const fixed: { raw: Task; projected: Task; nextDate: string | null; label: string }[] = [];
 
     for (const t of tasks) {
       if (t.deletedAt || !t.recurrence) continue;
       if (isWindowPeriodic(t)) {
         if (!isWindowStopped(t, now)) {
-          approx.push(t);
+          if (isAnnualWindow(t)) {
+            annual.push(t);
+          } else {
+            approx.push(t);
+          }
         }
         continue;
       }
@@ -83,11 +90,26 @@ export function RecurringTasksView({
 
     return {
       approxTasks: sortWindowTasks(approx, now),
+      annualTasks: sortWindowTasks(annual, now),
       fixedEntries: fixed,
     };
   }, [tasks]);
 
-  const isEmpty = approxTasks.length === 0 && fixedEntries.length === 0;
+  const isEmpty = approxTasks.length === 0 && annualTasks.length === 0 && fixedEntries.length === 0;
+  const windowSections = [
+    {
+      label: 'Approximately',
+      items: approxTasks,
+      collapsed: approxCollapsed,
+      onToggle: () => setApproxCollapsed((prev) => !prev),
+    },
+    {
+      label: 'Time of Year',
+      items: annualTasks,
+      collapsed: annualCollapsed,
+      onToggle: () => setAnnualCollapsed((prev) => !prev),
+    },
+  ];
 
   return (
     <>
@@ -116,31 +138,34 @@ export function RecurringTasksView({
               <p className="text-sm text-tt-muted px-4 py-12 text-center">No active recurring tasks</p>
             ) : (
               <>
-                {approxTasks.length > 0 && (
-                  <section aria-label="Approximately">
-                    <TaskGroupHeader
-                      label="Approximately"
-                      count={approxTasks.length}
-                      collapsed={approxCollapsed}
-                      onToggle={() => setApproxCollapsed((prev) => !prev)}
-                      sticky={false}
-                    />
-                    {!approxCollapsed &&
-                      approxTasks.map((t) => (
-                        <TaskCard
-                          key={t.id}
-                          task={t}
-                          showDetails={showDetails}
-                          onSelect={() => onEdit(t)}
-                          onComplete={onComplete}
-                          onUncomplete={onUncomplete}
-                          onEdit={onEdit}
-                          onDelete={onDelete}
-                          onRequestLogDate={onRequestLogDate}
-                          onRequestDelete={onRequestDelete}
+                {windowSections.map(
+                  ({ label, items, collapsed, onToggle }) =>
+                    items.length > 0 && (
+                      <section key={label} aria-label={label}>
+                        <TaskGroupHeader
+                          label={label}
+                          count={items.length}
+                          collapsed={collapsed}
+                          onToggle={onToggle}
+                          sticky={false}
                         />
-                      ))}
-                  </section>
+                        {!collapsed &&
+                          items.map((t) => (
+                            <TaskCard
+                              key={t.id}
+                              task={t}
+                              showDetails={showDetails}
+                              onSelect={() => onEdit(t)}
+                              onComplete={onComplete}
+                              onUncomplete={onUncomplete}
+                              onEdit={onEdit}
+                              onDelete={onDelete}
+                              onRequestLogDate={onRequestLogDate}
+                              onRequestDelete={onRequestDelete}
+                            />
+                          ))}
+                      </section>
+                    )
                 )}
 
                 {fixedEntries.length > 0 && (
