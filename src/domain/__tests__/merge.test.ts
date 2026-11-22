@@ -224,4 +224,45 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(merged[0].completionHistory).toEqual([ts3]);
     expect(merged[0].startDate).toBeNull();
   });
+
+  it('unions removedSkippedDates tombstones so unskipped dates do not resurrect and preserves winner rescheduledDates/scheduleHistory', () => {
+    const local: Task = {
+      id: 'rec-merge-1',
+      title: 'Trash',
+      listId: INBOX_LIST_ID,
+      dueAt: '2026-11-22',
+      startDate: '2026-11-22',
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [0] },
+      completionHistory: [],
+      skippedDates: ['2026-11-07'],
+      removedSkippedDates: ['2026-11-28'],
+      rescheduledDates: { '2026-11-29': '2026-11-30' },
+      scheduleHistory: [
+        {
+          startDate: '2026-11-01',
+          endDate: '2026-11-20',
+          recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [6] },
+        },
+      ],
+      createdAt: 1000,
+      updatedAt: 4000,
+    };
+    const remote: Task = {
+      ...local,
+      startDate: '2026-11-01',
+      skippedDates: ['2026-11-07', '2026-11-28'],
+      removedSkippedDates: undefined,
+      rescheduledDates: undefined,
+      scheduleHistory: undefined,
+      updatedAt: 2000,
+    };
+
+    const merged = mergeTasks([local], [remote]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].skippedDates).toEqual(['2026-11-07']);
+    expect(merged[0].removedSkippedDates).toEqual(['2026-11-28']);
+    expect(merged[0].startDate).toBe('2026-11-22');
+    expect(merged[0].rescheduledDates).toEqual({ '2026-11-29': '2026-11-30' });
+    expect(merged[0].scheduleHistory).toHaveLength(1);
+  });
 });

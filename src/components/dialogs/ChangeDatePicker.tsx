@@ -11,7 +11,8 @@ export interface ChangeDatePickerHandle {
 
 export interface ChangeDatePickerProps {
   ref?: Ref<ChangeDatePickerHandle>;
-  onSave: (taskId: string, newDueAt: string | null) => Promise<void> | void;
+  onSave?: (taskId: string, newDueAt: string | null) => Promise<void> | void;
+  onSaveTask?: (task: Task, newDueAt: string | null) => Promise<void> | void;
   maxDate?: string;
   ariaLabel?: string;
 }
@@ -25,15 +26,18 @@ const VIEWPORT_MARGIN = 8;
 export function ChangeDatePicker({
   ref,
   onSave,
+  onSaveTask,
   maxDate,
   ariaLabel = 'Change date',
 }: ChangeDatePickerProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const pendingRef = useRef<{ id: string; existingTime: string | null } | null>(null);
+  const pendingRef = useRef<{ id: string; task: Task; existingTime: string | null } | null>(null);
   const onSaveRef = useRef(onSave);
+  const onSaveTaskRef = useRef(onSaveTask);
 
   useEffect(() => {
     onSaveRef.current = onSave;
+    onSaveTaskRef.current = onSaveTask;
   });
 
   useEffect(() => {
@@ -45,7 +49,11 @@ export function ChangeDatePicker({
       const pending = pendingRef.current;
       if (!pending || !pickedDate) return;
       const nextDueAt = combineDueAt(pickedDate, pending.existingTime);
-      void onSaveRef.current(pending.id, nextDueAt);
+      if (onSaveTaskRef.current) {
+        void onSaveTaskRef.current(pending.task, nextDueAt);
+      } else {
+        void onSaveRef.current?.(pending.id, nextDueAt);
+      }
     };
 
     const handleCancel = () => {
@@ -70,6 +78,7 @@ export function ChangeDatePicker({
         const parts = task.dueAt ? splitDueAt(task.dueAt) : null;
         pendingRef.current = {
           id: task.id,
+          task,
           existingTime: parts?.time ?? null,
         };
 

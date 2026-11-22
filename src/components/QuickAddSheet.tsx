@@ -19,13 +19,16 @@ import { INBOX_LIST_ID } from '../types/task';
 import {
   addDays,
   addInterval,
+  combineDueAt,
   completionTimestampForDate,
   formatDate,
   getDueDatePart,
   getLatestCompletionMs,
   getWindowBounds,
+  hasDueTime,
   isWindowPeriodic,
   parseDate,
+  splitDueAt,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
 import { DateChoiceMenu, type DatePreset } from './menu/DateChoiceMenu';
@@ -35,7 +38,7 @@ import { RepeatPanel, type EndMode } from './quickAdd/RepeatPanel';
 export interface QuickAddSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (task: TaskInput) => void | Promise<void>;
+  onSave: (task: TaskInput) => boolean | void | Promise<boolean | void>;
   initialTask?: Task | null;
   /** Pre-filled due date (YYYY-MM-DD). Calendar passes selected day; Tasks passes null. */
   defaultDueAt?: string | null;
@@ -499,15 +502,30 @@ export function QuickAddSheet({
           ? [completionTimestampForDate(initialLastDoneDate)]
           : undefined;
 
-      await onSave({
+      const existingTime =
+        initialTask?.dueAt && hasDueTime(initialTask.dueAt)
+          ? splitDueAt(initialTask.dueAt).time
+          : null;
+      const submittedDueAt =
+        recurrence?.type === 'after_completion'
+          ? null
+          : dueAt
+            ? combineDueAt(dueAt, existingTime)
+            : null;
+
+      const saved = await onSave({
         id: initialTask?.id,
         title: title.trim(),
         notes: notes.trim() || undefined,
         listId: initialTask?.listId || INBOX_LIST_ID,
-        dueAt: recurrence?.type === 'after_completion' ? null : dueAt || null,
+        dueAt: submittedDueAt,
         recurrence,
         ...(seededHistory ? { completionHistory: seededHistory } : {}),
       });
+
+      if (saved === false) {
+        return;
+      }
 
       if (initialTask) {
         onClose();

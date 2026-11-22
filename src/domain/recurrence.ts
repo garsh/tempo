@@ -1,6 +1,7 @@
 import type {
   IntervalUnit,
   RecurrenceRule,
+  RecurrenceScheduleSegment,
   RecurrenceType,
   Task,
   TaskUrgency,
@@ -288,7 +289,12 @@ export function willEndRecurrence(
  */
 export function isRecurrenceFinished(
   task: Pick<Task, 'recurrence' | 'completionHistory' | 'dueAt'> &
-    Partial<Pick<Task, 'completedAt' | 'startDate' | 'createdAt' | 'deletedAt' | 'skippedDates'>>,
+    Partial<
+      Pick<
+        Task,
+        'completedAt' | 'startDate' | 'createdAt' | 'deletedAt' | 'skippedDates' | 'rescheduledDates' | 'scheduleHistory'
+      >
+    >,
   referenceDate: Date = new Date()
 ): boolean {
   if (!task.recurrence) return true;
@@ -299,9 +305,10 @@ export function isRecurrenceFinished(
   if (rule.endAfterCount != null && rule.endAfterCount > 0) {
     if ((task.completionHistory?.length ?? 0) >= rule.endAfterCount) return true;
   }
-  if (rule.endOnDate) {
+  const effectiveEnd = getEffectiveEndOnDate(task);
+  if (effectiveEnd) {
     if (task.dueAt) {
-      const end = parseDate(rule.endOnDate);
+      const end = parseDate(effectiveEnd);
       const due = parseDate(getDueDatePart(task.dueAt));
       if (due > end) return true;
     }
@@ -318,6 +325,8 @@ export function isRecurrenceFinished(
       completedAt: task.completedAt ?? null,
       deletedAt: task.deletedAt ?? null,
       skippedDates: task.skippedDates,
+      rescheduledDates: task.rescheduledDates,
+      scheduleHistory: task.scheduleHistory,
     };
     if (getNextUncompletedOccurrenceDate(synthetic, referenceDate) === null) {
       return true;
@@ -706,6 +715,9 @@ type EndAfterCountCacheEntry = {
   rule: RecurrenceRule;
   endAfterCount: number;
   anchorStr: string;
+  earliestStart: string;
+  scheduleHistory: readonly RecurrenceScheduleSegment[] | undefined;
+  rescheduledDates: Readonly<Record<string, string>> | undefined;
   history: readonly number[] | undefined;
   historyLength: number;
   scannedThrough: string | null;
@@ -807,6 +819,100 @@ export function isSkippedOnDate(
 ): boolean {
   if (!task.skippedDates || task.skippedDates.length === 0) return false;
   return getSkippedDateSet(task).has(dateStr);
+}
+
+/**
+ * If `targetDateStr` is the rescheduled target of an earlier/original occurrence, returns that original YYYY-MM-DD key;
+ * otherwise returns null.
+ */
+export function findRescheduledOrigin(
+  task: Pick<Task, 'rescheduledDates'>,
+  targetDateStr: string
+): string | null {
+  if (!task.rescheduledDates) return null;
+  for (const [orig, target] of Object.entries(task.rescheduledDates)) {
+    if (target === targetDateStr && orig !== target) {
+      return orig;
+    }
+  }
+  return null;
+}
+
+/**
+ * Return the recurrence rule active on `dateStr` (checking historical scheduleHistory segments first).
+ */
+export function getRuleActiveOnDate(
+  task: Pick<
+    Task,
+    'startDate' | 'dueAt' | 'createdAt' | 'completionHistory' | 'recurrence' | 'scheduleHistory'
+  >,
+  dateStr: string
+): RecurrenceRule | null {
+  if (task.scheduleHistory && task.scheduleHistory.length > 0) {
+    for (const seg of task.scheduleHistory) {
+      if (dateStr >= seg.startDate && dateStr <= seg.endDate) {
+        return seg.recurrence;
+      }
+    }
+  }
+  return task.recurrence ?? null;
+}
+
+/**
+ * Earliest base schedule start date across `scheduleHistory` segments and the active recurrence anchor.
+ */
+export function getEarliestBaseStart(
+  task: Pick<Task, 'startDate' | 'dueAt' | 'createdAt' | 'completionHistory' | 'scheduleHistory'>
+): string {
+  let minStr = getRecurrenceAnchor(task);
+  if (task.scheduleHistory) {
+    for (const seg of task.scheduleHistory) {
+      if (seg.startDate && seg.startDate < minStr) {
+        minStr = seg.startDate;
+      }
+    }
+  }
+  return minStr;
+}
+
+/**
+ * Earliest calendar date where `task` could appear, accounting for `scheduleHistory` and `rescheduledDates`.
+ */
+export function getEarliestOccurrenceBound(
+  task: Pick<
+    Task,
+    'startDate' | 'dueAt' | 'createdAt' | 'completionHistory' | 'scheduleHistory' | 'rescheduledDates'
+  >
+): string {
+  let minStr = getEarliestBaseStart(task);
+  if (task.rescheduledDates) {
+    for (const target of Object.values(task.rescheduledDates)) {
+      if (target && target < minStr) {
+        minStr = target;
+      }
+    }
+  }
+  return minStr;
+}
+
+/**
+ * Effective end date (YYYY-MM-DD), extended when a scheduled occurrence on or before `endOnDate`
+ * was moved past `endOnDate` via `rescheduledDates`.
+ */
+export function getEffectiveEndOnDate(
+  task: Pick<Task, 'recurrence' | 'rescheduledDates'>
+): string | null {
+  const endOnDate = task.recurrence?.endOnDate;
+  if (!endOnDate) return null;
+  let maxEnd = endOnDate;
+  if (task.rescheduledDates) {
+    for (const [orig, target] of Object.entries(task.rescheduledDates)) {
+      if (orig <= endOnDate && target > maxEnd) {
+        maxEnd = target;
+      }
+    }
+  }
+  return maxEnd;
 }
 
 /**
@@ -930,11 +1036,122 @@ function scheduleMatchesDate(
 }
 
 /**
+ * Whether `dateStr` matches the task's base recurring schedule (prior `scheduleHistory` segments
+ * or the current recurrence rule from `getRecurrenceAnchor`), ignoring single-occurrence overrides.
+ */
+export function baseScheduleMatchesDate(
+  task: Pick<
+    Task,
+    'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'scheduleHistory'
+  >,
+  dateStr: string
+): boolean {
+  const rule = task.recurrence;
+  if (!rule) return false;
+  if (task.scheduleHistory && task.scheduleHistory.length > 0) {
+    for (const seg of task.scheduleHistory) {
+      if (dateStr >= seg.startDate && dateStr <= seg.endDate) {
+        return scheduleMatchesDate(seg.recurrence, seg.startDate, dateStr, seg.startDate);
+      }
+    }
+  }
+  const anchorStr = getRecurrenceAnchor(task);
+  if (dateStr < anchorStr) return false;
+  return scheduleMatchesDate(rule, anchorStr, dateStr, anchorStr);
+}
+
+function passesEndAfterCount(
+  task: Pick<
+    Task,
+    | 'startDate'
+    | 'dueAt'
+    | 'recurrence'
+    | 'completionHistory'
+    | 'createdAt'
+    | 'rescheduledDates'
+    | 'scheduleHistory'
+  >,
+  baseDateStr: string,
+  completedDates: Set<string>
+): boolean {
+  const rule = task.recurrence;
+  if (!rule || rule.endAfterCount == null || rule.endAfterCount <= 0) return true;
+
+  const remaining = rule.endAfterCount - completedDates.size;
+  if (remaining <= 0) return false;
+
+  const anchorStr = getRecurrenceAnchor(task);
+  const earliestStart = getEarliestBaseStart(task);
+  const history = task.completionHistory;
+  const historyLength = history?.length ?? 0;
+  const scheduleHistory = task.scheduleHistory;
+  const rescheduledDates = task.rescheduledDates;
+
+  let entry = endAfterCountCache.get(task);
+  if (
+    !entry ||
+    entry.rule !== rule ||
+    entry.endAfterCount !== rule.endAfterCount ||
+    entry.anchorStr !== anchorStr ||
+    entry.earliestStart !== earliestStart ||
+    entry.scheduleHistory !== scheduleHistory ||
+    entry.rescheduledDates !== rescheduledDates ||
+    entry.history !== history ||
+    entry.historyLength !== historyLength
+  ) {
+    entry = {
+      rule,
+      endAfterCount: rule.endAfterCount,
+      anchorStr,
+      earliestStart,
+      scheduleHistory,
+      rescheduledDates,
+      history,
+      historyLength,
+      scannedThrough: null,
+      uncompletedCount: 0,
+      cutoffDateStr: null,
+    };
+    endAfterCountCache.set(task, entry);
+  }
+
+  if (entry.cutoffDateStr !== null) {
+    return baseDateStr <= entry.cutoffDateStr;
+  }
+  if (entry.scannedThrough !== null && baseDateStr <= entry.scannedThrough) {
+    return true;
+  }
+
+  const targetDate = parseDate(baseDateStr);
+  let cursor = entry.scannedThrough
+    ? addDays(parseDate(entry.scannedThrough), 1)
+    : parseDate(earliestStart);
+  while (cursor <= targetDate) {
+    const dStr = formatDate(cursor);
+    entry.scannedThrough = dStr;
+    if (baseScheduleMatchesDate(task, dStr)) {
+      const effectiveDate = rescheduledDates?.[dStr] ?? dStr;
+      if (!completedDates.has(dStr) && !completedDates.has(effectiveDate)) {
+        entry.uncompletedCount++;
+        if (entry.uncompletedCount === remaining) {
+          entry.cutoffDateStr = dStr;
+          return baseDateStr <= dStr;
+        }
+      }
+    }
+    cursor = addDays(cursor, 1);
+  }
+
+  return true;
+}
+
+/**
  * Whether `task` occurs on the local calendar date `dateStr` (YYYY-MM-DD).
  * Returns true for every scheduled repeat day as well as any day already in `completionHistory`.
  */
 export function taskOccursOnDate(
-  task: Pick<Task, 'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'>,
+  task: Pick<Task, 'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'> &
+    Partial<Pick<Task, 'rescheduledDates' | 'scheduleHistory'>>,
   dateStr: string
 ): boolean {
   if (task.deletedAt) return false;
@@ -949,65 +1166,33 @@ export function taskOccursOnDate(
   const completedDates = getCompletedDateSet(task);
   if (completedDates.has(dateStr)) return true;
 
-  if (rule.endOnDate && dateStr > rule.endOnDate) return false;
   if (rule.endAfterCount != null && rule.endAfterCount > 0 && completedDates.size >= rule.endAfterCount) {
     return false;
   }
 
-  const anchorStr = getRecurrenceAnchor(task);
-  if (dateStr < anchorStr) return false;
+  const rescheduledOrigin = findRescheduledOrigin(task, dateStr);
+  if (rescheduledOrigin) {
+    if (rule.endOnDate && rescheduledOrigin > rule.endOnDate) return false;
+    if (!baseScheduleMatchesDate(task, rescheduledOrigin)) return false;
+    if (rule.endAfterCount != null && rule.endAfterCount > 0) {
+      return passesEndAfterCount(task, rescheduledOrigin, completedDates);
+    }
+    return true;
+  }
 
-  if (!scheduleMatchesDate(rule, anchorStr, dateStr, anchorStr)) return false;
+  if (
+    task.rescheduledDates &&
+    Object.prototype.hasOwnProperty.call(task.rescheduledDates, dateStr) &&
+    task.rescheduledDates[dateStr] !== dateStr
+  ) {
+    return false;
+  }
+
+  if (rule.endOnDate && dateStr > rule.endOnDate) return false;
+  if (!baseScheduleMatchesDate(task, dateStr)) return false;
 
   if (rule.endAfterCount != null && rule.endAfterCount > 0) {
-    const remaining = rule.endAfterCount - completedDates.size;
-    const history = task.completionHistory;
-    const historyLength = history?.length ?? 0;
-    let entry = endAfterCountCache.get(task);
-    if (
-      !entry ||
-      entry.rule !== rule ||
-      entry.endAfterCount !== rule.endAfterCount ||
-      entry.anchorStr !== anchorStr ||
-      entry.history !== history ||
-      entry.historyLength !== historyLength
-    ) {
-      entry = {
-        rule,
-        endAfterCount: rule.endAfterCount,
-        anchorStr,
-        history,
-        historyLength,
-        scannedThrough: null,
-        uncompletedCount: 0,
-        cutoffDateStr: null,
-      };
-      endAfterCountCache.set(task, entry);
-    }
-
-    if (entry.cutoffDateStr !== null) {
-      return dateStr <= entry.cutoffDateStr;
-    }
-    if (entry.scannedThrough !== null && dateStr <= entry.scannedThrough) {
-      return true;
-    }
-
-    const targetDate = parseDate(dateStr);
-    let cursor = entry.scannedThrough
-      ? addDays(parseDate(entry.scannedThrough), 1)
-      : parseDate(anchorStr);
-    while (cursor <= targetDate) {
-      const dStr = formatDate(cursor);
-      entry.scannedThrough = dStr;
-      if (!completedDates.has(dStr) && scheduleMatchesDate(rule, anchorStr, dStr, anchorStr)) {
-        entry.uncompletedCount++;
-        if (entry.uncompletedCount === remaining) {
-          entry.cutoffDateStr = dStr;
-          return dateStr <= dStr;
-        }
-      }
-      cursor = addDays(cursor, 1);
-    }
+    return passesEndAfterCount(task, dateStr, completedDates);
   }
 
   return true;
@@ -1047,9 +1232,10 @@ function findNextUncompletedForward(
   startDate: Date,
   maxDays: number = 1100
 ): string | null {
+  const effectiveEnd = getEffectiveEndOnDate(task);
   for (let i = 0; i <= maxDays; i++) {
     const dStr = formatDate(addDays(startDate, i));
-    if (task.recurrence?.endOnDate && dStr > task.recurrence.endOnDate) return null;
+    if (effectiveEnd && dStr > effectiveEnd) return null;
     if (
       !isCompletedOnDate(task, dStr) &&
       !isSkippedOnDate(task, dStr) &&
@@ -1087,17 +1273,17 @@ export function getNextUncompletedOccurrenceDate(
     return todayStr;
   }
 
-  const anchorStr = getRecurrenceAnchor(task);
+  const earliestStr = getEarliestOccurrenceBound(task);
   const completedDates = getCompletedDateSet(task);
   let latestCompletedStr: string | null = null;
   for (const c of completedDates) {
     if (!latestCompletedStr || c > latestCompletedStr) latestCompletedStr = c;
   }
 
-  if (!isCompletedOnDate(task, todayStr) && !isSkippedOnDate(task, todayStr) && anchorStr < todayStr) {
-    const anchorDate = parseDate(anchorStr);
+  if (!isCompletedOnDate(task, todayStr) && !isSkippedOnDate(task, todayStr) && earliestStr < todayStr) {
+    const earliestDate = parseDate(earliestStr);
     const minLookback = addDays(today, -365);
-    const earliest = anchorDate > minLookback ? anchorDate : minLookback;
+    const earliest = earliestDate > minLookback ? earliestDate : minLookback;
     for (let cursor = addDays(today, -1); cursor >= earliest; cursor = addDays(cursor, -1)) {
       const dStr = formatDate(cursor);
       if (completedDates.has(dStr) || (latestCompletedStr && dStr <= latestCompletedStr)) break;
@@ -1111,7 +1297,7 @@ export function getNextUncompletedOccurrenceDate(
     }
   }
 
-  const startForward = anchorStr > todayStr ? parseDate(anchorStr) : addDays(today, 1);
+  const startForward = earliestStr > todayStr ? parseDate(earliestStr) : addDays(today, 1);
   return findNextUncompletedForward(task, startForward);
 }
 
@@ -1146,7 +1332,8 @@ export function getSkipOccurrenceDate(
   if (nextForward) {
     return combineDueAt(nextForward, time);
   }
-  if (task.recurrence.endOnDate && formatDate(addDays(startForward, 1100)) > task.recurrence.endOnDate) {
+  const effectiveEnd = getEffectiveEndOnDate(task);
+  if (effectiveEnd && formatDate(addDays(startForward, 1100)) > effectiveEnd) {
     return null;
   }
 

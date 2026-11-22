@@ -168,6 +168,8 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         : undefined;
   const activate = () => onSelect?.(task);
 
+  const contentOpacityClass = completed ? 'opacity-60' : justCompleted ? 'opacity-50' : '';
+
   // --- Swipe-to-reveal gesture logic ---
   const DRAWER_WIDTH = 160;
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -177,7 +179,12 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const slidingRef = useRef<HTMLDivElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
-  const mouseStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
+  const mouseStartRef = useRef<{
+    x: number;
+    y: number;
+    initialOffset: number;
+    didSwipe: boolean;
+  } | null>(null);
   const swipeDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
   const suppressClickRef = useRef(false);
   const onSwipeChangeRef = useRef(onSwipeChange);
@@ -186,6 +193,12 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     onSwipeChangeRef.current = onSwipeChange;
   });
 
+  const setDrawerVisibility = (visible: boolean, interactive: boolean) => {
+    if (!drawerRef.current) return;
+    drawerRef.current.style.visibility = visible ? 'visible' : 'hidden';
+    drawerRef.current.style.pointerEvents = interactive ? 'auto' : 'none';
+  };
+
   const openSwipe = () => {
     isOpenRef.current = true;
     currentOffsetRef.current = -DRAWER_WIDTH;
@@ -193,10 +206,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
       slidingRef.current.style.transform = `translateX(${-DRAWER_WIDTH}px)`;
     }
-    if (drawerRef.current) {
-      drawerRef.current.style.visibility = 'visible';
-      drawerRef.current.style.pointerEvents = 'auto';
-    }
+    setDrawerVisibility(true, true);
     setIsOpen(true);
     setSwipeOffset(-DRAWER_WIDTH);
     globalSwipeCoordinator.notifyOpened(task.id);
@@ -211,10 +221,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
       slidingRef.current.style.transform = 'translateX(0px)';
     }
-    if (drawerRef.current) {
-      drawerRef.current.style.visibility = 'hidden';
-      drawerRef.current.style.pointerEvents = 'none';
-    }
+    setDrawerVisibility(false, false);
     setIsOpen(false);
     setSwipeOffset(0);
     if (wasOpen) {
@@ -242,22 +249,14 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     }
   }, [isSwipedOpen]);
 
-  const prepareSwipeDrawer = () => {
-    if (drawerRef.current) {
-      drawerRef.current.style.visibility = 'visible';
-      drawerRef.current.style.pointerEvents = 'auto';
-    }
-    if (slidingRef.current) {
-      slidingRef.current.style.transition = 'none';
-    }
-  };
-
   const applySwipeOffset = (initialOffset: number, dx: number) => {
     const next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, initialOffset + dx));
     currentOffsetRef.current = next;
     if (slidingRef.current) {
+      slidingRef.current.style.transition = 'none';
       slidingRef.current.style.transform = `translateX(${next}px)`;
     }
+    setDrawerVisibility(next < 0, false);
   };
 
   const commitSwipe = (wasHorizontal: boolean) => {
@@ -272,15 +271,25 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       } else {
         closeSwipe();
       }
-    } else if (!isOpenRef.current && drawerRef.current) {
-      drawerRef.current.style.visibility = 'hidden';
-      drawerRef.current.style.pointerEvents = 'none';
+    } else if (!isOpenRef.current) {
+      setDrawerVisibility(false, false);
     }
   };
 
   useEffect(() => {
     const el = slidingRef.current;
-    if (!el || isDragging) return;
+    if (isDragging) {
+      touchStartRef.current = null;
+      mouseStartRef.current = null;
+      swipeDirectionRef.current = null;
+      if (isOpenRef.current) {
+        closeSwipe();
+      } else {
+        setDrawerVisibility(false, false);
+      }
+      return;
+    }
+    if (!el) return;
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
@@ -291,7 +300,6 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
       };
       swipeDirectionRef.current = null;
-      prepareSwipeDrawer();
     };
 
     const handleTouchMove = (e: TouchEvent) => {
@@ -331,6 +339,15 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       el.removeEventListener('touchmove', handleTouchMove);
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
+      touchStartRef.current = null;
+      swipeDirectionRef.current = null;
+      if (!isOpenRef.current) {
+        setDrawerVisibility(false, false);
+        if (currentOffsetRef.current !== 0) {
+          currentOffsetRef.current = 0;
+          el.style.transform = 'translateX(0px)';
+        }
+      }
     };
   }, [isDragging, task.id]);
 
@@ -342,25 +359,35 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         x: e.clientX,
         y: e.clientY,
         initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
+        didSwipe: false,
       };
-      prepareSwipeDrawer();
     }
   };
 
   const handleRowPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
       const dx = e.clientX - mouseStartRef.current.x;
-      if (Math.abs(dx) > 10) {
+      const dy = e.clientY - mouseStartRef.current.y;
+      if (!mouseStartRef.current.didSwipe) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+          mouseStartRef.current = null;
+          return;
+        }
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+          mouseStartRef.current.didSwipe = true;
+        }
+      }
+      if (mouseStartRef.current.didSwipe) {
         applySwipeOffset(mouseStartRef.current.initialOffset, dx);
       }
     }
   };
 
-  const handleRowPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const finishMouseSwipe = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && mouseStartRef.current) {
-      const dx = e.clientX - mouseStartRef.current.x;
+      const { didSwipe } = mouseStartRef.current;
       mouseStartRef.current = null;
-      commitSwipe(Math.abs(dx) > 10);
+      commitSwipe(didSwipe);
     }
   };
 
@@ -373,7 +400,8 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       data-dragging={isDragging ? 'true' : undefined}
       onPointerDown={handleRowPointerDown}
       onPointerMove={handleRowPointerMove}
-      onPointerUp={handleRowPointerUp}
+      onPointerUp={finishMouseSwipe}
+      onPointerCancel={finishMouseSwipe}
       onClickCapture={onRowClickCapture}
       onContextMenu={onRowContextMenu}
       onClick={(e) => {
@@ -424,6 +452,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       {/* Revealed Swipe Action Buttons on the Right */}
       <div
         ref={drawerRef}
+        data-testid="task-action-drawer"
         className={`absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1] ${
           !isOpen && swipeOffset === 0 ? 'invisible pointer-events-none' : ''
         }`}
@@ -502,8 +531,8 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         className={`relative z-10 w-full flex items-start gap-3 px-3 sm:px-4 ${
           selected
             ? 'bg-tt-blue-soft'
-            : 'bg-tt-surface hover:bg-tt-hover'
-        } ${rowPad} ${justCompleted ? 'opacity-50' : ''} ${completed ? 'opacity-60' : ''}`}
+            : 'bg-tt-surface hover:[background-image:linear-gradient(var(--tt-hover),var(--tt-hover))]'
+        } ${rowPad}`}
       >
         <button
           type="button"
@@ -512,7 +541,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           onTouchStart={(e) => e.stopPropagation()}
           disabled={completed && !onUncomplete}
           title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-          className="relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-['']"
+          className={`relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-[''] ${contentOpacityClass}`}
           style={{
             borderColor: completed || justCompleted ? '#34C759' : borderColor,
             backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
@@ -522,7 +551,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           {(completed || justCompleted) && <Check className="w-3 h-3 stroke-[3]" />}
         </button>
 
-      <div className="flex-1 min-w-0">
+      <div className={`flex-1 min-w-0 ${contentOpacityClass}`}>
         <div className="flex items-center gap-2 min-w-0">
           <span
             data-testid="task-title"
@@ -554,7 +583,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px] min-h-[26px]">
+      <div className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px] min-h-[26px] ${contentOpacityClass}`}>
         {windowPeriodic && progress && task.completedAt == null ? (
           <RadialProgressRingWithTooltip progress={progress} />
         ) : (

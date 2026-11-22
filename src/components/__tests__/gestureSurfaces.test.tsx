@@ -106,6 +106,17 @@ function slidingRow(container: HTMLElement): HTMLElement {
   return el;
 }
 
+function actionDrawer(container: HTMLElement): HTMLElement {
+  const el = container.querySelector<HTMLElement>('[data-testid="task-action-drawer"]');
+  if (!el) throw new Error('action drawer not found');
+  return el;
+}
+
+function isDrawerHidden(drawer: HTMLElement): boolean {
+  if (drawer.style.visibility === 'visible') return false;
+  return drawer.style.visibility === 'hidden' || drawer.classList.contains('invisible');
+}
+
 function visibleDotsOnDay(container: HTMLElement, dayNum: string): number {
   return [...container.querySelectorAll('button')].filter((button) => {
     if (button.closest('[aria-hidden="true"]')) return false;
@@ -166,6 +177,124 @@ describe('TaskCard swipe', () => {
     dispatchTouch(row, 'touchmove', 50, 40);
     dispatchTouch(row, 'touchend', 50, 40);
     expect(row.style.transform).toBe('translateX(0px)');
+    view.unmount();
+  });
+
+  it('keeps the action drawer hidden and foreground opaque while touching and vertically scrolling a completed task', () => {
+    const view = mount(
+      <TaskCard
+        task={task({ id: 'done-1', title: 'Completed chore', completedAt: 1700000000000 })}
+        onComplete={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    );
+    const row = slidingRow(view.container);
+    const drawer = actionDrawer(view.container);
+
+    expect(row.classList.contains('opacity-60')).toBe(false);
+    expect(row.classList.contains('opacity-50')).toBe(false);
+    expect(row.classList.contains('hover:bg-tt-hover')).toBe(false);
+    const titleWrapper = view.container.querySelector('[data-testid="task-title"]')?.closest('.flex-1');
+    expect(titleWrapper?.classList.contains('opacity-60')).toBe(true);
+
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchstart', 100, 120);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchmove', 100, 40);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    expect(row.style.transform).toBe('translateX(0px)');
+    act(() => {
+      dispatchTouch(row, 'touchend', 100, 40);
+    });
+    expect(isDrawerHidden(drawer)).toBe(true);
+    expect(row.style.transform).toBe('translateX(0px)');
+    view.unmount();
+  });
+
+  it('keeps the action drawer hidden during a right swipe on a closed card', () => {
+    const view = mount(
+      <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
+    );
+    const row = slidingRow(view.container);
+    const drawer = actionDrawer(view.container);
+
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchstart', 100, 40);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchmove', 160, 40);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    expect(row.style.transform).toBe('translateX(0px)');
+    act(() => {
+      dispatchTouch(row, 'touchend', 160, 40);
+    });
+    expect(isDrawerHidden(drawer)).toBe(true);
+    expect(row.style.transform).toBe('translateX(0px)');
+    view.unmount();
+  });
+
+  it('reveals the action drawer only once a left swipe moves the card and toggles pointerEvents properly', () => {
+    const view = mount(
+      <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
+    );
+    const row = slidingRow(view.container);
+    const drawer = actionDrawer(view.container);
+
+    dispatchTouch(row, 'touchstart', 180, 40);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchmove', 150, 40);
+    expect(drawer.style.visibility).toBe('visible');
+    expect(drawer.style.pointerEvents).toBe('none');
+    expect(row.style.transform).toBe('translateX(-30px)');
+    act(() => {
+      dispatchTouch(row, 'touchend', 150, 40);
+    });
+    expect(row.style.transform).toBe('translateX(0px)');
+    expect(isDrawerHidden(drawer)).toBe(true);
+    expect(drawer.style.pointerEvents).toBe('none');
+
+    dispatchTouch(row, 'touchstart', 180, 40);
+    expect(isDrawerHidden(drawer)).toBe(true);
+    dispatchTouch(row, 'touchmove', 100, 40);
+    expect(drawer.style.visibility).toBe('visible');
+    expect(drawer.style.pointerEvents).toBe('none');
+    act(() => {
+      dispatchTouch(row, 'touchend', 100, 40);
+    });
+    expect(row.style.transform).toBe('translateX(-160px)');
+    expect(drawer.style.visibility).toBe('visible');
+    expect(drawer.style.pointerEvents).toBe('auto');
+    view.unmount();
+  });
+
+  it('keeps the drawer hidden on mouse press and snaps shut on pointercancel', () => {
+    const view = mount(
+      <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
+    );
+    const row = slidingRow(view.container);
+    const drawer = actionDrawer(view.container);
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 180, 40, 1));
+    });
+    expect(isDrawerHidden(drawer)).toBe(true);
+    act(() => {
+      row.dispatchEvent(pointer('pointerup', 180, 40, 0));
+    });
+    expect(isDrawerHidden(drawer)).toBe(true);
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 180, 40, 1));
+    });
+    act(() => {
+      row.dispatchEvent(pointer('pointermove', 140, 40, 1));
+    });
+    expect(drawer.style.visibility).toBe('visible');
+    expect(row.style.transform).toBe('translateX(-40px)');
+    act(() => {
+      row.dispatchEvent(pointer('pointercancel', 140, 40, 0));
+    });
+    expect(row.style.transform).toBe('translateX(0px)');
+    expect(isDrawerHidden(drawer)).toBe(true);
     view.unmount();
   });
 });

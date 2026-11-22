@@ -34,6 +34,15 @@ export interface RecurrenceRule {
   endAfterCount?: number | null;
 }
 
+export interface RecurrenceScheduleSegment {
+  /** Inclusive start date (YYYY-MM-DD) of this historical schedule segment. */
+  startDate: string;
+  /** Inclusive end date (YYYY-MM-DD) of this historical schedule segment. */
+  endDate: string;
+  /** The recurrence rule that was active during [startDate, endDate]. */
+  recurrence: RecurrenceRule;
+}
+
 export interface Subtask {
   id: string;
   title: string;
@@ -63,6 +72,12 @@ export interface Task {
   removedCompletions?: number[];
   /** Local calendar dates (YYYY-MM-DD) where scheduled occurrences were skipped. */
   skippedDates?: string[];
+  /** Skipped dates explicitly restored/unskipped (CRDT tombstones subtracted during merge). */
+  removedSkippedDates?: string[];
+  /** Single-occurrence date overrides: original scheduled date (YYYY-MM-DD) -> target date (YYYY-MM-DD). */
+  rescheduledDates?: Record<string, string>;
+  /** Prior schedule segments preserved when a recurring task's schedule was moved. */
+  scheduleHistory?: RecurrenceScheduleSegment[];
   sortOrder?: number;
   createdAt: number;
   updatedAt: number;

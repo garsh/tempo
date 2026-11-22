@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   Folder,
+  RecurrenceRule,
   Task,
   TaskInput,
   TaskList,
@@ -8,20 +9,31 @@ import type {
 import { INBOX_LIST_ID } from '../types/task';
 import {
   addDays,
+  combineDueAt,
   completionTimestampForDate,
+  findRescheduledOrigin,
   formatDate,
   getDayBoundsMs,
   getDueDatePart,
   getLatestCompletionMs,
   getRecurrenceAnchor,
+  getRuleActiveOnDate,
   getSkipOccurrenceDate,
   getWindowBounds,
+  hasDueTime,
   isCompleted,
   isCompletedOnDate,
   isFixedRecurring,
+  isSkippedOnDate,
   isWindowPeriodic,
   parseDate,
+  splitDueAt,
+  taskOccursOnDate,
 } from '../domain/recurrence';
+import {
+  buildSeriesMoveRule,
+  buildUpdatedScheduleHistory,
+} from '../domain/moveRecurring';
 import { newId } from '../domain/id';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { getStoredClientId } from '../sync/googleAuth';
@@ -230,6 +242,29 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       });
     }
 
+    const prevIsFixed = !!existing && isFixedRecurring(existing);
+    const nextIsFixed = !isWindow && !!recurrenceRule;
+    const effectiveDateChanged =
+      prevIsFixed && nextIsFixed
+        ? task.startDate !== undefined && task.startDate !== existing.startDate
+        : dateChanged;
+
+    const nextRescheduled = nextIsFixed
+      ? task.rescheduledDates !== undefined
+        ? task.rescheduledDates
+        : existing?.rescheduledDates
+      : undefined;
+    const nextScheduleHistory = nextIsFixed
+      ? task.scheduleHistory !== undefined
+        ? task.scheduleHistory
+        : existing?.scheduleHistory
+      : undefined;
+    const nextRemovedSkipped = !isWindow
+      ? task.removedSkippedDates !== undefined
+        ? task.removedSkippedDates
+        : existing?.removedSkippedDates
+      : undefined;
+
     fullTask = {
       ...(existing || {}),
       ...task,
@@ -240,7 +275,7 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       sortOrder:
         task.sortOrder !== undefined
           ? task.sortOrder
-          : dateChanged
+          : effectiveDateChanged
             ? undefined
             : existing?.sortOrder,
       createdAt: existing?.createdAt || now,
@@ -251,6 +286,15 @@ export async function saveTask(task: TaskInput): Promise<Task> {
           : existing?.completionHistory || [],
       ...(existing?.removedCompletions ? { removedCompletions: existing.removedCompletions } : {}),
       skippedDates: task.skippedDates !== undefined ? task.skippedDates : existing?.skippedDates || [],
+      ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
+        ? { removedSkippedDates: nextRemovedSkipped }
+        : { removedSkippedDates: undefined }),
+      ...(nextRescheduled && Object.keys(nextRescheduled).length > 0
+        ? { rescheduledDates: nextRescheduled }
+        : { rescheduledDates: undefined }),
+      ...(nextScheduleHistory && nextScheduleHistory.length > 0
+        ? { scheduleHistory: nextScheduleHistory }
+        : { scheduleHistory: undefined }),
       completedAt: task.completedAt !== undefined ? task.completedAt : existing?.completedAt ?? null,
       recurrence: recurrenceRule,
       subtasks: task.subtasks !== undefined ? task.subtasks : existing?.subtasks,
@@ -467,7 +511,11 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       : [...(task.completionHistory || []), ts];
 
     // If this date was previously marked skipped, completing it removes it from skippedDates
+    const hadSkipped = (task.skippedDates || []).includes(targetDateStr);
     const skipped = (task.skippedDates || []).filter((d) => d !== targetDateStr);
+    const removedSkippedDates = hadSkipped
+      ? mergeRemovedSkipped(task.removedSkippedDates, [targetDateStr])
+      : task.removedSkippedDates;
     const startDate = task.startDate || getRecurrenceAnchor(task);
 
     updated = {
@@ -477,6 +525,9 @@ export async function completeTask(id: string, dateStr?: string): Promise<Task |
       completedAt: null,
       completionHistory: history,
       skippedDates: skipped,
+      ...(removedSkippedDates && removedSkippedDates.length > 0
+        ? { removedSkippedDates }
+        : { removedSkippedDates: undefined }),
       updatedAt: now,
       // Reset check items for the next cycle
       subtasks: (task.subtasks || []).map((s) => ({ ...s, completed: false })),
@@ -528,10 +579,22 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
   }
 
   const now = Date.now();
+  const origDate = findRescheduledOrigin(task, dateStr);
+  const skipKey = origDate ?? dateStr;
+
+  let nextRescheduled = task.rescheduledDates ? { ...task.rescheduledDates } : undefined;
+  if (origDate && nextRescheduled) {
+    delete nextRescheduled[origDate];
+    if (Object.keys(nextRescheduled).length === 0) {
+      nextRescheduled = undefined;
+    }
+  }
+
   const existingSkipped = task.skippedDates || [];
-  const updatedSkipped = existingSkipped.includes(dateStr)
+  const updatedSkipped = existingSkipped.includes(skipKey)
     ? existingSkipped
-    : [...existingSkipped, dateStr];
+    : [...existingSkipped, skipKey];
+  const updatedRemovedSkipped = removeFromSkippedTombstones(task.removedSkippedDates, [skipKey]);
 
   let updatedDueAt = task.dueAt;
   const masterDueDate = task.dueAt ? getDueDatePart(task.dueAt) : null;
@@ -539,7 +602,7 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
   // Only advance task.dueAt if the date being skipped was the master task's current dueAt (or earlier)
   if (masterDueDate && dateStr <= masterDueDate) {
     const nextOccurrence = getSkipOccurrenceDate(
-      { ...task, skippedDates: updatedSkipped },
+      { ...task, skippedDates: updatedSkipped, rescheduledDates: nextRescheduled },
       dateStr
     );
     if (nextOccurrence) {
@@ -554,12 +617,16 @@ export async function skipTaskOccurrence(id: string, dateStr: string): Promise<T
     startDate,
     dueAt: updatedDueAt,
     skippedDates: updatedSkipped,
+    ...(updatedRemovedSkipped && updatedRemovedSkipped.length > 0
+      ? { removedSkippedDates: updatedRemovedSkipped }
+      : { removedSkippedDates: undefined }),
+    ...(nextRescheduled ? { rescheduledDates: nextRescheduled } : { rescheduledDates: undefined }),
     updatedAt: now,
   };
 
   recordDiagEvent(
     'skip_occurrence',
-    `id=${id} title=${task.title.slice(0, 30)} skipped=${dateStr} dueAt=${updated.dueAt ?? ''}`
+    `id=${id} title=${task.title.slice(0, 30)} skipped=${skipKey} dueAt=${updated.dueAt ?? ''}`
   );
 
   await db.tasks.put(updated);
@@ -570,6 +637,337 @@ function mergeRemovedTimestamps(existing: number[] | undefined, removed: number[
   if (removed.length === 0) return existing;
   const merged = Array.from(new Set([...(existing || []), ...removed])).sort((a, b) => a - b);
   return merged.length > 0 ? merged : undefined;
+}
+
+function mergeRemovedSkipped(existing: string[] | undefined, added: string[]): string[] | undefined {
+  if (added.length === 0) return existing && existing.length > 0 ? existing : undefined;
+  const merged = Array.from(new Set([...(existing || []), ...added])).sort();
+  return merged.length > 0 ? merged : undefined;
+}
+
+function removeFromSkippedTombstones(
+  existing: string[] | undefined,
+  activeSkips: string[]
+): string[] | undefined {
+  if (!existing || existing.length === 0) return undefined;
+  const activeSet = new Set(activeSkips);
+  const filtered = existing.filter((d) => !activeSet.has(d));
+  return filtered.length > 0 ? filtered : undefined;
+}
+
+function capRescheduledDates(map: Record<string, string>): Record<string, string> | undefined {
+  const entries = Object.entries(map)
+    .filter(([k, v]) => k !== v)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return undefined;
+  const capped = entries.length > 365 ? entries.slice(-365) : entries;
+  return Object.fromEntries(capped);
+}
+
+export interface MoveRecurringResult {
+  task: Task;
+  previousTask: Task;
+}
+
+/**
+ * Move only a single occurrence of a fixed-interval recurring task from `fromDate` to `toDate`
+ * while preserving the rest of the series (Decision A2 + Decision D1).
+ */
+export async function moveRecurringOccurrenceOnly(params: {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  title?: string;
+  notes?: string;
+  listId?: string;
+  today?: Date;
+}): Promise<MoveRecurringResult | null> {
+  const task = await db.tasks.get(params.id);
+  if (!task || !isFixedRecurring(task) || !task.recurrence) {
+    return null;
+  }
+
+  const previousTask: Task = structuredClone(task);
+  const now = Date.now();
+  const nextTitle = params.title !== undefined ? params.title : task.title;
+  const nextNotes = params.notes !== undefined ? params.notes : task.notes;
+  const nextListId = params.listId !== undefined ? params.listId : task.listId;
+  const origDate = findRescheduledOrigin(task, params.fromDate) ?? params.fromDate;
+  const startDate = task.startDate || getRecurrenceAnchor(task);
+
+  const nextRescheduled: Record<string, string> = { ...(task.rescheduledDates || {}) };
+  let nextSkipped = [...(task.skippedDates || [])];
+  const addedTombstones: string[] = [];
+
+  const unskip = (dateStr: string) => {
+    if (nextSkipped.includes(dateStr)) {
+      nextSkipped = nextSkipped.filter((d) => d !== dateStr);
+      addedTombstones.push(dateStr);
+    }
+  };
+
+  if (isCompletedOnDate(task, params.fromDate)) {
+    const todayStr = formatDate(params.today ?? new Date(now));
+    if (params.toDate > todayStr) {
+      return null;
+    }
+
+    const [dayStartMs, dayEndMs] = getDayBoundsMs(params.fromDate);
+    const removedFromDay: number[] = [];
+    const filteredHistory = (task.completionHistory || []).filter((ts) => {
+      if (ts >= dayStartMs && ts < dayEndMs) {
+        removedFromDay.push(ts);
+        return false;
+      }
+      return true;
+    });
+
+    const alreadyCompletedTarget = isCompletedOnDate(
+      { ...task, completionHistory: filteredHistory },
+      params.toDate
+    );
+    const toTs = completionTimestampForDate(params.toDate, now);
+    const nextHistory = alreadyCompletedTarget
+      ? filteredHistory
+      : [...filteredHistory, toTs].sort((a, b) => a - b);
+
+    const nextRemovedCompletions = mergeRemovedTimestamps(
+      task.removedCompletions,
+      removedFromDay
+    )?.filter((ts) => ts !== toTs);
+
+    const hasCollisionOnTarget =
+      taskOccursOnDate(task, params.toDate) &&
+      !isSkippedOnDate(task, params.toDate) &&
+      !isCompletedOnDate(task, params.toDate);
+
+    if (params.toDate === origDate) {
+      delete nextRescheduled[origDate];
+      unskip(origDate);
+    } else if (hasCollisionOnTarget) {
+      delete nextRescheduled[origDate];
+      if (!nextSkipped.includes(origDate)) {
+        nextSkipped.push(origDate);
+      }
+    } else {
+      nextRescheduled[origDate] = params.toDate;
+      unskip(origDate);
+      unskip(params.toDate);
+    }
+
+    const cappedRescheduled = capRescheduledDates(nextRescheduled);
+    const nextRemovedSkipped = removeFromSkippedTombstones(
+      mergeRemovedSkipped(task.removedSkippedDates, addedTombstones),
+      nextSkipped
+    );
+
+    const updated: Task = {
+      ...task,
+      title: nextTitle,
+      notes: nextNotes,
+      listId: nextListId,
+      startDate,
+      completionHistory: nextHistory,
+      ...(nextRemovedCompletions && nextRemovedCompletions.length > 0
+        ? { removedCompletions: nextRemovedCompletions }
+        : { removedCompletions: undefined }),
+      skippedDates: nextSkipped,
+      ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
+        ? { removedSkippedDates: nextRemovedSkipped }
+        : { removedSkippedDates: undefined }),
+      ...(cappedRescheduled ? { rescheduledDates: cappedRescheduled } : { rescheduledDates: undefined }),
+      updatedAt: now,
+    };
+
+    await db.tasks.put(updated);
+    recordDiagEvent(
+      'move_completion',
+      `id=${task.id} from=${params.fromDate} to=${params.toDate}`
+    );
+    return { task: updated, previousTask };
+  }
+
+  const hasCollision =
+    taskOccursOnDate(task, params.toDate) &&
+    !isSkippedOnDate(task, params.toDate) &&
+    !isCompletedOnDate(task, params.toDate);
+
+  if (params.toDate === origDate) {
+    delete nextRescheduled[origDate];
+    unskip(origDate);
+  } else if (hasCollision) {
+    delete nextRescheduled[origDate];
+    if (!nextSkipped.includes(origDate)) {
+      nextSkipped.push(origDate);
+    }
+  } else {
+    nextRescheduled[origDate] = params.toDate;
+    unskip(origDate);
+    unskip(params.toDate);
+  }
+
+  const cappedRescheduled = capRescheduledDates(nextRescheduled);
+  const nextRemovedSkipped = removeFromSkippedTombstones(
+    mergeRemovedSkipped(task.removedSkippedDates, addedTombstones),
+    nextSkipped
+  );
+
+  const updated: Task = {
+    ...task,
+    title: nextTitle,
+    notes: nextNotes,
+    listId: nextListId,
+    startDate,
+    skippedDates: nextSkipped,
+    ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
+      ? { removedSkippedDates: nextRemovedSkipped }
+      : { removedSkippedDates: undefined }),
+    ...(cappedRescheduled ? { rescheduledDates: cappedRescheduled } : { rescheduledDates: undefined }),
+    updatedAt: now,
+  };
+
+  await db.tasks.put(updated);
+  recordDiagEvent(
+    'move_occurrence',
+    `id=${task.id} from=${params.fromDate} to=${params.toDate} orig=${origDate}`
+  );
+  return { task: updated, previousTask };
+}
+
+/**
+ * Move the recurring task's schedule forward/backward to `toDate` while preserving all historical
+ * occurrences on their original dates via `scheduleHistory` (Decision B3-Single-Task + Decision C1).
+ */
+export async function moveRecurringSeries(params: {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  title?: string;
+  notes?: string;
+  listId?: string;
+  explicitRecurrence?: RecurrenceRule;
+}): Promise<MoveRecurringResult | null> {
+  const task = await db.tasks.get(params.id);
+  if (!task || !isFixedRecurring(task) || !task.recurrence) {
+    return null;
+  }
+
+  const previousTask: Task = structuredClone(task);
+  const now = Date.now();
+  const nextTitle = params.title !== undefined ? params.title : task.title;
+  const nextNotes = params.notes !== undefined ? params.notes : task.notes;
+  const nextListId = params.listId !== undefined ? params.listId : task.listId;
+
+  const origFromDate = findRescheduledOrigin(task, params.fromDate) ?? params.fromDate;
+  const cutoffDate = params.toDate < origFromDate ? params.toDate : origFromDate;
+  const segmentEnd = formatDate(addDays(parseDate(cutoffDate), -1));
+
+  const baseRuleForMove = getRuleActiveOnDate(task, origFromDate) ?? task.recurrence;
+  const rawNextRule = params.explicitRecurrence
+    ? normalizeRecurrenceForSave(params.explicitRecurrence)!
+    : buildSeriesMoveRule(
+        baseRuleForMove,
+        origFromDate,
+        params.toDate,
+        task.recurrence.endOnDate,
+        task.recurrence.endAfterCount
+      ).nextRule;
+
+  const nextScheduleHistory = buildUpdatedScheduleHistory(task, segmentEnd);
+
+  const keptRescheduledMap: Record<string, string> = {};
+  for (const [orig, target] of Object.entries(task.rescheduledDates || {})) {
+    if (orig <= segmentEnd) {
+      keptRescheduledMap[orig] = target;
+    }
+  }
+  const keptRescheduled = capRescheduledDates(keptRescheduledMap);
+
+  const nextSkipped: string[] = [];
+  const prunedSkipped: string[] = [];
+  for (const d of task.skippedDates || []) {
+    if (d <= segmentEnd) {
+      nextSkipped.push(d);
+    } else {
+      prunedSkipped.push(d);
+    }
+  }
+  const nextRemovedSkipped = removeFromSkippedTombstones(
+    mergeRemovedSkipped(task.removedSkippedDates, prunedSkipped),
+    nextSkipped
+  );
+
+  const existingTime = task.dueAt && hasDueTime(task.dueAt) ? splitDueAt(task.dueAt).time : null;
+  const nextDueAt = combineDueAt(params.toDate, existingTime);
+
+  const updated: Task = {
+    ...task,
+    title: nextTitle,
+    notes: nextNotes,
+    listId: nextListId,
+    startDate: params.toDate,
+    dueAt: nextDueAt,
+    recurrence: rawNextRule,
+    ...(nextScheduleHistory.length > 0
+      ? { scheduleHistory: nextScheduleHistory }
+      : { scheduleHistory: undefined }),
+    ...(keptRescheduled ? { rescheduledDates: keptRescheduled } : { rescheduledDates: undefined }),
+    skippedDates: nextSkipped,
+    ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
+      ? { removedSkippedDates: nextRemovedSkipped }
+      : { removedSkippedDates: undefined }),
+    sortOrder: undefined,
+    updatedAt: now,
+  };
+
+  await db.tasks.put(updated);
+  recordDiagEvent(
+    'move_series',
+    `id=${task.id} from=${params.fromDate} to=${params.toDate} segments=${nextScheduleHistory.length}`
+  );
+  return { task: updated, previousTask };
+}
+
+/**
+ * Restore a prior task snapshot (for Undo), updating CRDT tombstones so undone completions/skips
+ * do not resurrect on Google Drive sync.
+ */
+export async function restoreTaskSnapshot(
+  previousTask: Task,
+  currentTask?: Task
+): Promise<Task> {
+  const now = Date.now();
+  const prevHistorySet = new Set(previousTask.completionHistory || []);
+  const addedCompletions = (currentTask?.completionHistory || []).filter(
+    (ts) => !prevHistorySet.has(ts)
+  );
+  const mergedRemovedCompletions = mergeRemovedTimestamps(
+    previousTask.removedCompletions,
+    addedCompletions
+  )?.filter((ts) => !prevHistorySet.has(ts));
+
+  const prevSkippedSet = new Set(previousTask.skippedDates || []);
+  const addedSkipped = (currentTask?.skippedDates || []).filter(
+    (d) => !prevSkippedSet.has(d)
+  );
+  const mergedRemovedSkipped = removeFromSkippedTombstones(
+    mergeRemovedSkipped(previousTask.removedSkippedDates, addedSkipped),
+    previousTask.skippedDates || []
+  );
+
+  const restored: Task = {
+    ...previousTask,
+    ...(mergedRemovedCompletions && mergedRemovedCompletions.length > 0
+      ? { removedCompletions: mergedRemovedCompletions }
+      : { removedCompletions: undefined }),
+    ...(mergedRemovedSkipped && mergedRemovedSkipped.length > 0
+      ? { removedSkippedDates: mergedRemovedSkipped }
+      : { removedSkippedDates: undefined }),
+    updatedAt: now,
+  };
+  await db.tasks.put(restored);
+  recordDiagEvent('restore_snapshot', `id=${restored.id}`);
+  return restored;
 }
 
 export async function undoCompleteUndatedTask(id: string): Promise<Task | null> {

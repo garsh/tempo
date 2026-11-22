@@ -70,4 +70,53 @@ describe('parseSyncPayload', () => {
     expect(parsed.tasks[0]?.notes).toHaveLength(10_000);
     expect(parsed.tasks[0]).not.toHaveProperty('admin');
   });
+
+  it('sanitizes rescheduledDates, scheduleHistory, and removedSkippedDates on fixed recurring tasks', () => {
+    const valid = task(10, {
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [0] },
+      removedSkippedDates: ['2026-11-28', 'bad-date', '2026-11-28'],
+      rescheduledDates: {
+        '2026-11-21': '2026-11-22',
+        '2026-11-14': '2026-11-14', // self-map dropped
+        '2026-11-28': '2026-11-22', // duplicate target dropped
+        bad: '2026-11-25',
+      },
+      scheduleHistory: [
+        {
+          startDate: '2026-11-01',
+          endDate: '2026-11-20',
+          recurrence: {
+            type: 'fixed_interval',
+            intervalValue: 1,
+            intervalUnit: 'weeks',
+            weekdays: [6],
+            endOnDate: '2026-12-31',
+          },
+        },
+        // Overlapping segment dropped
+        {
+          startDate: '2026-11-15',
+          endDate: '2026-11-25',
+          recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks' },
+        },
+        // Invalid range dropped
+        {
+          startDate: '2026-11-10',
+          endDate: '2026-11-01',
+          recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks' },
+        },
+      ],
+    });
+    const parsed = parseSyncPayload(JSON.stringify({ tasks: [valid] }), { now });
+    const t = parsed.tasks[0]!;
+    expect(t.removedSkippedDates).toEqual(['2026-11-28']);
+    expect(t.rescheduledDates).toEqual({ '2026-11-21': '2026-11-22' });
+    expect(t.scheduleHistory).toEqual([
+      {
+        startDate: '2026-11-01',
+        endDate: '2026-11-20',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [6] },
+      },
+    ]);
+  });
 });

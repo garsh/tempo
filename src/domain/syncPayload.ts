@@ -1,4 +1,13 @@
-import type { Folder, RecurrenceRule, Subtask, Task, TaskList, TaskPriority, Weekday } from '../types/task';
+import type {
+  Folder,
+  RecurrenceRule,
+  RecurrenceScheduleSegment,
+  Subtask,
+  Task,
+  TaskList,
+  TaskPriority,
+  Weekday,
+} from '../types/task';
 
 /** Refuse backup bodies larger than this before they are parsed. */
 export const MAX_SYNC_BYTES = 5 * 1024 * 1024;
@@ -7,6 +16,8 @@ export const MAX_ID_LENGTH = 128;
 export const MAX_TITLE_LENGTH = 2_000;
 export const MAX_NOTES_LENGTH = 10_000;
 export const MAX_HISTORY = 365;
+export const MAX_SCHEDULE_HISTORY = 100;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Timestamps further ahead than this are hostile and are rewritten to `now`. */
 export const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -90,10 +101,66 @@ function asDateList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const dates: string[] = [];
   for (const item of value) {
-    if (typeof item === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item)) dates.push(item);
+    if (typeof item === 'string' && DATE_RE.test(item)) dates.push(item);
   }
   const unique = [...new Set(dates)].sort();
   return unique.length > MAX_HISTORY ? unique.slice(-MAX_HISTORY) : unique;
+}
+
+function asRescheduledDates(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([k, v]) => typeof v === 'string' && DATE_RE.test(k) && DATE_RE.test(v) && k !== v)
+    .sort(([a], [b]) => a.localeCompare(b)) as [string, string][];
+
+  const seenTargets = new Set<string>();
+  const uniqueEntries: [string, string][] = [];
+  for (const [k, v] of entries) {
+    if (seenTargets.has(v)) continue;
+    seenTargets.add(v);
+    uniqueEntries.push([k, v]);
+  }
+  if (uniqueEntries.length === 0) return undefined;
+  const capped =
+    uniqueEntries.length > MAX_HISTORY ? uniqueEntries.slice(-MAX_HISTORY) : uniqueEntries;
+  return Object.fromEntries(capped);
+}
+
+function asScheduleHistory(value: unknown): RecurrenceScheduleSegment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed: RecurrenceScheduleSegment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    if (typeof raw.startDate !== 'string' || !DATE_RE.test(raw.startDate)) continue;
+    if (typeof raw.endDate !== 'string' || !DATE_RE.test(raw.endDate)) continue;
+    if (raw.startDate > raw.endDate) continue;
+    const rec = asRecurrence(raw.recurrence);
+    if (!rec || rec.type !== 'fixed_interval') continue;
+    const segRec: RecurrenceRule = { ...rec };
+    delete segRec.endOnDate;
+    delete segRec.endAfterCount;
+    delete segRec.maxIntervalValue;
+    parsed.push({
+      startDate: raw.startDate,
+      endDate: raw.endDate,
+      recurrence: segRec,
+    });
+  }
+  if (parsed.length === 0) return undefined;
+  parsed.sort((a, b) =>
+    a.startDate !== b.startDate
+      ? a.startDate.localeCompare(b.startDate)
+      : a.endDate.localeCompare(b.endDate)
+  );
+  const disjoint: RecurrenceScheduleSegment[] = [];
+  let lastEnd = '';
+  for (const seg of parsed) {
+    if (lastEnd && seg.startDate <= lastEnd) continue;
+    disjoint.push(seg);
+    lastEnd = seg.endDate;
+  }
+  return disjoint.length > MAX_SCHEDULE_HISTORY ? disjoint.slice(-MAX_SCHEDULE_HISTORY) : disjoint;
 }
 
 function asPriority(value: unknown): TaskPriority | undefined {
@@ -227,6 +294,16 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (deletedAt !== undefined) task.deletedAt = deletedAt;
   const skipped = asDateList(record.skippedDates);
   if (skipped && skipped.length > 0) task.skippedDates = skipped;
+  if (task.recurrence?.type !== 'after_completion') {
+    const removedSkipped = asDateList(record.removedSkippedDates);
+    if (removedSkipped && removedSkipped.length > 0) task.removedSkippedDates = removedSkipped;
+    if (task.recurrence) {
+      const rescheduled = asRescheduledDates(record.rescheduledDates);
+      if (rescheduled) task.rescheduledDates = rescheduled;
+      const scheduleHistory = asScheduleHistory(record.scheduleHistory);
+      if (scheduleHistory && scheduleHistory.length > 0) task.scheduleHistory = scheduleHistory;
+    }
+  }
   const sortOrder = asFinite(record.sortOrder);
   if (sortOrder !== undefined) task.sortOrder = sortOrder;
   return task;

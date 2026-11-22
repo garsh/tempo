@@ -160,10 +160,10 @@ export function RecurringTasksView({
                           showDetails={showDetails}
                           subtitle={label}
                           occurrenceDateStr={nextDate ?? undefined}
-                          onSelect={() => onEdit(raw)}
+                          onSelect={() => onEdit(projected)}
                           onComplete={onComplete}
                           onUncomplete={onUncomplete}
-                          onEdit={() => onEdit(raw)}
+                          onEdit={() => onEdit(projected)}
                           onDelete={onDelete}
                           onRequestChangeDate={onRequestChangeDate}
                           onRequestSkipOccurrence={onRequestSkipOccurrence}

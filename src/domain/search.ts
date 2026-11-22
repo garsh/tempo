@@ -272,7 +272,9 @@ function getCachedNextOccurrence(
     cache.todayStr = todayStr;
     cache.map.clear();
   }
-  const key = `${task.id}|${task.updatedAt}|${task.completionHistory.length}|${task.skippedDates?.length ?? 0}|${todayStr}`;
+  const rescheduledCount = task.rescheduledDates ? Object.keys(task.rescheduledDates).length : 0;
+  const scheduleHistoryCount = task.scheduleHistory?.length ?? 0;
+  const key = `${task.id}|${task.updatedAt}|${task.completionHistory.length}|${task.skippedDates?.length ?? 0}|${rescheduledCount}|${scheduleHistoryCount}|${todayStr}`;
   if (cache.map.has(key)) {
     return cache.map.get(key) ?? null;
   }

@@ -108,11 +108,21 @@ export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
         .sort((a, b) => a - b)
     );
 
+    const allRemovedSkipped = capTail(
+      Array.from(
+        new Set([...(local.removedSkippedDates || []), ...(remote.removedSkippedDates || [])])
+      ).sort()
+    );
+    const removedSkippedSet = new Set(allRemovedSkipped);
+
     const allSkipped = capTail(
-      Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])])).sort()
+      Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])]))
+        .filter((d) => !removedSkippedSet.has(d))
+        .sort()
     );
 
     const isWindow = isWindowPeriodic(winner);
+    const isFixed = !isWindow && !!winner.recurrence;
 
     return {
       ...winner,
@@ -120,6 +130,15 @@ export function mergeTasks(localTasks: Task[], remoteTasks: Task[]): Task[] {
       completionHistory: allCompletions,
       ...(allRemoved.length > 0 ? { removedCompletions: allRemoved } : { removedCompletions: undefined }),
       skippedDates: allSkipped,
+      ...(isWindow || allRemovedSkipped.length === 0
+        ? { removedSkippedDates: undefined }
+        : { removedSkippedDates: allRemovedSkipped }),
+      ...(isFixed && winner.rescheduledDates
+        ? { rescheduledDates: winner.rescheduledDates }
+        : { rescheduledDates: undefined }),
+      ...(isFixed && winner.scheduleHistory && winner.scheduleHistory.length > 0
+        ? { scheduleHistory: winner.scheduleHistory }
+        : { scheduleHistory: undefined }),
     };
   });
 }

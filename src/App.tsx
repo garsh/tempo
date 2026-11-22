@@ -5,8 +5,11 @@ import {
   db,
   initDatabase,
   logTaskCompletion,
+  moveRecurringOccurrenceOnly,
+  moveRecurringSeries,
   removeTaskCompletion,
   reorderTasks,
+  restoreTaskSnapshot,
   saveTask,
   setTaskEndOnDate,
   skipTaskOccurrence,
@@ -29,6 +32,7 @@ import {
   projectTaskForDate,
   type WindowProgress,
 } from './domain/recurrence';
+import { recurrenceRulesEqual } from './domain/moveRecurring';
 import {
   sortTasksForDailyView,
   sortUndatedOneTimeTasks,
@@ -75,6 +79,7 @@ import {
 } from './components/dialogs/ChangeDatePicker';
 import { SkipOccurrenceDialog } from './components/dialogs/SkipOccurrenceDialog';
 import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
+import { MoveRecurringDialog } from './components/dialogs/MoveRecurringDialog';
 import { ShortcutsHelpDialog } from './components/dialogs/ShortcutsHelpDialog';
 import { InstallPrompt } from './components/InstallPrompt';
 import { UndoToast } from './components/ui/UndoToast';
@@ -95,6 +100,17 @@ import {
 } from 'lucide-react';
 
 const EMPTY_TASKS: Task[] = [];
+
+interface PendingRecurringMove {
+  source: 'sheet' | 'picker';
+  rawTask: Task;
+  fromDate: string;
+  toDate: string;
+  title: string;
+  notes?: string;
+  listId: string;
+  textChanged: boolean;
+}
 
 export function App() {
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -207,6 +223,7 @@ export function App() {
   const logDatePickerRef = useRef<ChangeDatePickerHandle | null>(null);
   const [skipOccurrenceTask, setSkipOccurrenceTask] = useState<Task | null>(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingRecurringMove | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const openSettings = useCallback((page: SettingsPageId = 'root') => {
@@ -451,10 +468,66 @@ export function App() {
     }
   }, [scheduleSync, showUndoToast]);
 
-  const handleSave = async (taskData: TaskInput) => {
+  const handleSave = async (taskData: TaskInput): Promise<boolean> => {
+    if (taskData.id) {
+      const existing = await db.tasks.get(taskData.id);
+      const fromDate = editingTask?.dueAt
+        ? getDueDatePart(editingTask.dueAt)
+        : existing?.dueAt
+          ? getDueDatePart(existing.dueAt)
+          : null;
+      const toDate = taskData.dueAt ? getDueDatePart(taskData.dueAt) : null;
+
+      if (
+        existing &&
+        isFixedRecurring(existing) &&
+        taskData.recurrence &&
+        isFixedRecurring({ recurrence: taskData.recurrence }) &&
+        fromDate &&
+        toDate &&
+        fromDate !== toDate
+      ) {
+        const recurrenceChanged = !recurrenceRulesEqual(existing.recurrence, taskData.recurrence);
+        if (!recurrenceChanged) {
+          setPendingMove({
+            source: 'sheet',
+            rawTask: existing,
+            fromDate,
+            toDate,
+            title: taskData.title,
+            notes: taskData.notes,
+            listId: taskData.listId ?? existing.listId,
+            textChanged:
+              existing.title !== taskData.title ||
+              (existing.notes || undefined) !== taskData.notes,
+          });
+          return false;
+        }
+        const res = await moveRecurringSeries({
+          id: existing.id,
+          fromDate,
+          toDate,
+          title: taskData.title,
+          notes: taskData.notes,
+          listId: taskData.listId ?? existing.listId,
+          explicitRecurrence: taskData.recurrence,
+        });
+        setEditingTask(null);
+        scheduleSync();
+        if (res) {
+          showUndoToast(`Moved "${res.task.title}"`, async () => {
+            await restoreTaskSnapshot(res.previousTask, res.task);
+            scheduleSync();
+          });
+        }
+        return true;
+      }
+    }
+
     await saveTask(taskData);
     setEditingTask(null);
     scheduleSync();
+    return true;
   };
 
   const handleRequestChangeDate = useCallback((task: Task, anchorRect?: DOMRect) => {
@@ -465,9 +538,32 @@ export function App() {
     logDatePickerRef.current?.open(task, anchorRect);
   }, []);
 
-  const handleConfirmChangeDate = async (taskId: string, newDueAt: string | null) => {
-    const existing = await db.tasks.get(taskId);
+  const handleConfirmChangeDateTask = useCallback(async (task: Task, newDueAt: string | null) => {
+    const existing = await db.tasks.get(task.id);
     if (!existing) return;
+
+    const fromDate = task.dueAt
+      ? getDueDatePart(task.dueAt)
+      : existing.dueAt
+        ? getDueDatePart(existing.dueAt)
+        : null;
+    const toDate = newDueAt ? getDueDatePart(newDueAt) : null;
+
+    if (isFixedRecurring(existing) && fromDate && toDate) {
+      if (fromDate === toDate) return;
+      setPendingMove({
+        source: 'picker',
+        rawTask: existing,
+        fromDate,
+        toDate,
+        title: existing.title,
+        notes: existing.notes,
+        listId: existing.listId,
+        textChanged: false,
+      });
+      return;
+    }
+
     await saveTask({
       id: existing.id,
       title: existing.title,
@@ -477,7 +573,55 @@ export function App() {
       recurrence: existing.recurrence,
     });
     scheduleSync();
-  };
+  }, [scheduleSync]);
+
+  const handleConfirmMoveOccurrence = useCallback(async () => {
+    const move = pendingMove;
+    if (!move) return;
+    const res = await moveRecurringOccurrenceOnly({
+      id: move.rawTask.id,
+      fromDate: move.fromDate,
+      toDate: move.toDate,
+      title: move.title,
+      notes: move.notes,
+      listId: move.listId,
+    });
+    setPendingMove(null);
+    if (move.source === 'sheet') {
+      setIsTaskModalOpen(false);
+      setEditingTask(null);
+    }
+    if (!res) return;
+    scheduleSync();
+    showUndoToast(`Moved occurrence of "${res.task.title}"`, async () => {
+      await restoreTaskSnapshot(res.previousTask, res.task);
+      scheduleSync();
+    });
+  }, [pendingMove, scheduleSync, showUndoToast]);
+
+  const handleConfirmMoveSeries = useCallback(async () => {
+    const move = pendingMove;
+    if (!move) return;
+    const res = await moveRecurringSeries({
+      id: move.rawTask.id,
+      fromDate: move.fromDate,
+      toDate: move.toDate,
+      title: move.title,
+      notes: move.notes,
+      listId: move.listId,
+    });
+    setPendingMove(null);
+    if (move.source === 'sheet') {
+      setIsTaskModalOpen(false);
+      setEditingTask(null);
+    }
+    if (!res) return;
+    scheduleSync();
+    showUndoToast(`Moved recurring task "${res.task.title}"`, async () => {
+      await restoreTaskSnapshot(res.previousTask, res.task);
+      scheduleSync();
+    });
+  }, [pendingMove, scheduleSync, showUndoToast]);
 
   const handleConfirmLogDate = useCallback(async (taskId: string, pickedDate: string | null) => {
     if (!pickedDate) return;
@@ -510,6 +654,7 @@ export function App() {
     !showShortcutsHelp &&
     !skipOccurrenceTask &&
     !deleteConfirmTask &&
+    !pendingMove &&
     !isMonthYearPickerOpen;
 
   useKeyboardShortcuts(
@@ -517,6 +662,7 @@ export function App() {
       onCapture: openCapture,
       onSearch: canOpenSearch ? openSearch : undefined,
       onEscape: () => {
+        if (pendingMove) return;
         if (showShortcutsHelp) {
           setShowShortcutsHelp(false);
           return;
@@ -553,7 +699,7 @@ export function App() {
       },
       onOpenHelp: () => setShowShortcutsHelp(true),
     },
-    !isMonthYearPickerOpen
+    !isMonthYearPickerOpen && !pendingMove
   );
 
   const toggleGroup = (id: string) => {
@@ -973,13 +1119,24 @@ export function App() {
       {/* Swipe Action Dialogs */}
       <ChangeDatePicker
         ref={changeDatePickerRef}
-        onSave={handleConfirmChangeDate}
+        onSaveTask={handleConfirmChangeDateTask}
       />
       <ChangeDatePicker
         ref={logDatePickerRef}
         maxDate={todayDateStr}
         ariaLabel="Log completion date"
         onSave={handleConfirmLogDate}
+      />
+
+      <MoveRecurringDialog
+        isOpen={!!pendingMove}
+        task={pendingMove?.rawTask ?? null}
+        fromDate={pendingMove?.fromDate ?? null}
+        toDate={pendingMove?.toDate ?? null}
+        textChanged={pendingMove?.textChanged}
+        onClose={() => setPendingMove(null)}
+        onMoveOccurrence={handleConfirmMoveOccurrence}
+        onMoveSeries={handleConfirmMoveSeries}
       />
 
       <SkipOccurrenceDialog

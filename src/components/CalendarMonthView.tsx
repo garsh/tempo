@@ -7,7 +7,8 @@ import {
   formatDate,
   getCompletedDateSet,
   getDueDatePart,
-  getRecurrenceAnchor,
+  getEarliestOccurrenceBound,
+  getEffectiveEndOnDate,
   isCompleted,
   isCompletedOnDate,
   isFixedRecurring,
@@ -156,18 +157,18 @@ export function CalendarMonthView({
 
       if (minDateStr && maxDateStr) {
         for (const t of recurringTasks) {
-          const anchor = getRecurrenceAnchor(t);
-          if (anchor > maxDateStr) continue;
-          const endOnDate = t.recurrence?.endOnDate;
-          if (endOnDate && endOnDate < minDateStr) continue;
+          const earliestBound = getEarliestOccurrenceBound(t);
+          if (earliestBound > maxDateStr) continue;
+          const effectiveEnd = getEffectiveEndOnDate(t);
+          if (effectiveEnd && effectiveEnd < minDateStr) continue;
           const endAfterCount = t.recurrence?.endAfterCount;
           if (endAfterCount != null && endAfterCount > 0 && getCompletedDateSet(t).size >= endAfterCount) {
             continue;
           }
 
           for (const dateStr of uniqueDates) {
-            if (dateStr < anchor) continue;
-            if (endOnDate && dateStr > endOnDate) break;
+            if (dateStr < earliestBound) continue;
+            if (effectiveEnd && dateStr > effectiveEnd) break;
             if (set.has(dateStr)) continue;
             if (
               !isCompletedOnDate(t, dateStr) &&
