@@ -533,10 +533,30 @@ function GeneralPage({
   onShowShortcuts,
   setStatus,
 }: SettingsPageProps & { setStatus: (s: Status) => void }) {
+  const [prefs, update] = usePrefs();
   const hasSampleTasks = tasks.some((t) => isSampleId(t.id) && !t.deletedAt);
 
   return (
     <>
+      <SectionLabel>New task placement</SectionLabel>
+      <Card>
+        <div role="radiogroup" aria-label="New task placement">
+          <RadioRow
+            label="Bottom of list"
+            sub="Add newly created tasks after existing ones"
+            checked={prefs.newTaskPosition === 'bottom'}
+            onSelect={() => update({ newTaskPosition: 'bottom' })}
+          />
+          <RadioRow
+            label="Top of list"
+            sub="Add newly created tasks above existing ones"
+            checked={prefs.newTaskPosition === 'top'}
+            onSelect={() => update({ newTaskPosition: 'top' })}
+          />
+        </div>
+      </Card>
+      <Note>Applies when adding new tasks on this device. Existing task order is unchanged.</Note>
+
       <SectionLabel>Sample tasks</SectionLabel>
       <Card>
         <div data-tempo-sample-tasks="1">

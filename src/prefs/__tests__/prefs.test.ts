@@ -26,6 +26,7 @@ describe('prefs persistence', () => {
     const p = loadPrefs(storage);
     expect(p).toEqual(DEFAULT_PREFS);
     expect(p.theme).toBe('system');
+    expect(p.newTaskPosition).toBe('bottom');
     expect(p.showOverdue).toBe(true);
     expect(p.hideCompleted).toBe(false);
     expect(p.showDetails).toBe(false);
@@ -35,6 +36,7 @@ describe('prefs persistence', () => {
     const next = {
       ...DEFAULT_PREFS,
       theme: 'dark' as const,
+      newTaskPosition: 'top' as const,
       showDetails: true,
       hideCompleted: true,
       showOverdue: false,
@@ -53,6 +55,7 @@ describe('prefs persistence', () => {
       theme: 'neon',
       weekStart: 3,
       timeFormat: '13h',
+      newTaskPosition: 'middle',
       showOverdue: 'yes',
       defaultReminderTime: '08:30',
       defaultListId: 'work',

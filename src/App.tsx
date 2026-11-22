@@ -524,7 +524,7 @@ export function App() {
       }
     }
 
-    await saveTask(taskData);
+    await saveTask(taskData, { newTaskPosition: prefs.newTaskPosition });
     setEditingTask(null);
     scheduleSync();
     return true;

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasksForDailyView } from '../sorting';
+import {
+  computeTopSortOrder,
+  sortTasksForDailyView,
+  sortUndatedOneTimeTasks,
+} from '../sorting';
 import type { Task } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
@@ -53,6 +57,77 @@ describe('Sorting & search', () => {
       'untimed',
       'afternoon',
       'morning',
+    ]);
+  });
+});
+
+describe('computeTopSortOrder', () => {
+  it('returns 0 when empty or when no non-deleted task has a finite sortOrder', () => {
+    expect(computeTopSortOrder([])).toBe(0);
+    expect(
+      computeTopSortOrder([
+        task({ id: 'a', title: 'Unordered' }),
+        task({ id: 'b', title: 'Deleted ordered', sortOrder: 500, deletedAt: 1000 }),
+      ])
+    ).toBe(0);
+  });
+
+  it('returns minSortOrder - 1000 across positive, zero, and negative values while ignoring deleted tasks', () => {
+    expect(
+      computeTopSortOrder([
+        task({ id: 'a', title: 'A', sortOrder: 2000 }),
+        task({ id: 'b', title: 'B', sortOrder: 1000 }),
+        task({ id: 'deleted', title: 'Deleted', sortOrder: -50000, deletedAt: 999 }),
+      ])
+    ).toBe(0);
+
+    expect(
+      computeTopSortOrder([
+        task({ id: 'a', title: 'A', sortOrder: 0 }),
+        task({ id: 'b', title: 'B', sortOrder: 1000 }),
+      ])
+    ).toBe(-1000);
+
+    expect(
+      computeTopSortOrder([
+        task({ id: 'a', title: 'A', sortOrder: -1000 }),
+        task({ id: 'b', title: 'B', sortOrder: 0 }),
+      ])
+    ).toBe(-2000);
+  });
+
+  it('places sequentially top-inserted tasks ahead of both ordered and unordered tasks', () => {
+    const existing = [
+      task({ id: 'old-ordered', title: 'Old ordered', dueAt: '2026-10-05', sortOrder: 1000, createdAt: 100 }),
+      task({ id: 'old-unordered', title: 'Old unordered', dueAt: '2026-10-05', createdAt: 200 }),
+    ];
+    const firstNew = task({
+      id: 'new-1',
+      title: 'New 1',
+      dueAt: '2026-10-05',
+      sortOrder: computeTopSortOrder(existing),
+      createdAt: 300,
+    });
+    const secondNew = task({
+      id: 'new-2',
+      title: 'New 2',
+      dueAt: '2026-10-05',
+      sortOrder: computeTopSortOrder([...existing, firstNew]),
+      createdAt: 400,
+    });
+
+    const all = [...existing, firstNew, secondNew];
+    expect(sortTasksForDailyView(all).map((t) => t.id)).toEqual([
+      'new-2',
+      'new-1',
+      'old-ordered',
+      'old-unordered',
+    ]);
+    expect(sortUndatedOneTimeTasks(all).map((t) => t.id)).toEqual([
+      'new-2',
+      'new-1',
+      'old-ordered',
+      'old-unordered',
     ]);
   });
 });

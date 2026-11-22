@@ -35,7 +35,9 @@ import {
   buildUpdatedScheduleHistory,
 } from '../domain/moveRecurring';
 import { newId } from '../domain/id';
+import { computeTopSortOrder } from '../domain/sorting';
 import { recordDiagEvent } from '../domain/diagnostics';
+import type { NewTaskPosition } from '../prefs/prefs';
 import { getStoredClientId } from '../sync/googleAuth';
 import { buildSampleData, isSampleId } from './sampleData';
 
@@ -208,7 +210,12 @@ function normalizeRecurrenceForSave(
   return fixed;
 }
 
-export async function saveTask(task: TaskInput): Promise<Task> {
+export interface SaveTaskOptions {
+  /** Where to place a newly created task when `task.sortOrder` is not explicitly provided. Defaults to `'bottom'`. */
+  newTaskPosition?: NewTaskPosition;
+}
+
+export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Promise<Task> {
   const now = Date.now();
   let fullTask: Task;
 
@@ -317,6 +324,7 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       tags: task.tags,
       subtasks: task.subtasks,
       recurrence: recurrenceRule,
+      ...(task.sortOrder !== undefined ? { sortOrder: task.sortOrder } : {}),
       id: newId(),
       createdAt: now,
       updatedAt: now,
@@ -327,6 +335,15 @@ export async function saveTask(task: TaskInput): Promise<Task> {
       completedAt: null,
       deletedAt: null,
     };
+
+    if (task.sortOrder === undefined && !isWindow && options?.newTaskPosition === 'top') {
+      await db.transaction('rw', db.tasks, async () => {
+        const existingTasks = await db.tasks.toArray();
+        fullTask.sortOrder = computeTopSortOrder(existingTasks);
+        await db.tasks.put(fullTask);
+      });
+      return fullTask;
+    }
   }
 
   await db.tasks.put(fullTask);

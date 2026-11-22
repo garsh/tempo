@@ -70,6 +70,22 @@ export function sortWindowTasks(
 }
 
 /**
+ * Compute a `sortOrder` strictly smaller than every non-deleted task's finite `sortOrder`
+ * (or `0` when no task has a `sortOrder` yet), leaving a 1000-unit gap for midpoint reorders.
+ */
+export function computeTopSortOrder(
+  tasks: readonly Pick<Task, 'sortOrder' | 'deletedAt'>[]
+): number {
+  let minSortOrder = Number.POSITIVE_INFINITY;
+  for (const t of tasks) {
+    if (!t.deletedAt && typeof t.sortOrder === 'number' && Number.isFinite(t.sortOrder)) {
+      if (t.sortOrder < minSortOrder) minSortOrder = t.sortOrder;
+    }
+  }
+  return Number.isFinite(minSortOrder) ? minSortOrder - 1000 : 0;
+}
+
+/**
  * Sort undated one-time tasks by user-defined `sortOrder` (ordered precede unordered),
  * then creation order (oldest first), then title A–Z.
  */

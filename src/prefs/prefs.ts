@@ -9,11 +9,14 @@ export type ThemePref = 'system' | 'light' | 'dark';
 export type TimeFormat = '12h' | '24h';
 /** 0 = Sunday, 1 = Monday, 6 = Saturday (Date#getDay numbering). */
 export type WeekStart = 0 | 1 | 6;
+export type NewTaskPosition = 'bottom' | 'top';
 
 export interface Prefs {
   theme: ThemePref;
   weekStart: WeekStart;
   timeFormat: TimeFormat;
+  /** Where newly created tasks are inserted in manually orderable lists. */
+  newTaskPosition: NewTaskPosition;
   /** Task rows show a notes preview line. */
   showDetails: boolean;
   /** Calendar view hides the trailing Completed group. */
@@ -26,6 +29,7 @@ export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
   weekStart: 0,
   timeFormat: '12h',
+  newTaskPosition: 'bottom',
   showDetails: false,
   hideCompleted: false,
   showOverdue: true,
@@ -42,6 +46,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     theme: oneOf(r.theme, ['system', 'light', 'dark'] as const, DEFAULT_PREFS.theme),
     weekStart: oneOf(r.weekStart, [0, 1, 6] as const, DEFAULT_PREFS.weekStart),
     timeFormat: oneOf(r.timeFormat, ['12h', '24h'] as const, DEFAULT_PREFS.timeFormat),
+    newTaskPosition: oneOf(r.newTaskPosition, ['bottom', 'top'] as const, DEFAULT_PREFS.newTaskPosition),
     showDetails: typeof r.showDetails === 'boolean' ? r.showDetails : DEFAULT_PREFS.showDetails,
     hideCompleted: typeof r.hideCompleted === 'boolean' ? r.hideCompleted : DEFAULT_PREFS.hideCompleted,
     showOverdue: typeof r.showOverdue === 'boolean' ? r.showOverdue : DEFAULT_PREFS.showOverdue,
