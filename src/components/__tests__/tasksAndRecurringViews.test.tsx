@@ -373,10 +373,28 @@ describe('Tasks, Recurring, Progress Ring, Delete Dialog & QuickAddSheet History
   });
 
   describe('RecurringTasksView', () => {
-    it('renders Approximately (including before_min) and On Fixed Interval while excluding stopped/finished series', () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(2026, 4, 20, 12, 0));
+    it('renders empty state when there are no active recurring tasks', () => {
+      const view = mount(
+        <RecurringTasksView
+          tasks={[]}
+          showDetails={false}
+          onClose={vi.fn()}
+          onComplete={vi.fn()}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+      const container = view.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+      expect(container.textContent).toContain('No active recurring tasks');
+      expect(container.querySelectorAll('section')).toHaveLength(0);
+      view.unmount();
+    });
 
+    it('renders active approximate (including before_min) and fixed tasks in a unified flat list ordered by closeness to due while excluding stopped/finished series', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 4, 20, 12, 0)); // 2026-05-20
+
+      // Opens in 4 days (May 24)
       const beforeMinApprox = makeTask('approx-before', 'Flush water heater', {
         recurrence: {
           type: 'after_completion',
@@ -398,6 +416,7 @@ describe('Tasks, Recurring, Progress Ring, Delete Dialog & QuickAddSheet History
         completionHistory: [new Date(2026, 4, 10, 10, 0).getTime()],
       });
 
+      // Due in 2 days (May 22)
       const activeFixed = makeTask('fixed-active', 'Take out trash', {
         dueAt: '2026-05-22',
         startDate: '2026-05-01',
@@ -438,15 +457,168 @@ describe('Tasks, Recurring, Progress Ring, Delete Dialog & QuickAddSheet History
         />
       );
 
-      const approxSection = view.container.querySelector('section[aria-label="Approximately"]');
-      const fixedSection = view.container.querySelector('section[aria-label="On Fixed Interval"]');
+      const list = view.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+      expect(list.querySelectorAll('section')).toHaveLength(0);
 
-      expect(approxSection).toBeTruthy();
-      expect(fixedSection).toBeTruthy();
-      expect(approxSection!.textContent).toContain('Flush water heater');
-      expect(approxSection!.textContent).not.toContain('Seasonal gutter check');
-      expect(fixedSection!.textContent).toContain('Take out trash');
-      expect(fixedSection!.textContent).not.toContain('Old vitamin course');
+      const titles = Array.from(list.querySelectorAll('[data-testid="task-title"]')).map(
+        (el) => el.textContent
+      );
+      expect(titles).toEqual(['Take out trash', 'Flush water heater']);
+      expect(list.textContent).not.toContain('Seasonal gutter check');
+      expect(list.textContent).not.toContain('Old vitamin course');
+      expect(list.textContent).toContain('Every Fri');
+      expect(list.textContent).toContain('Opens in 4 days · every 5–8 days');
+      view.unmount();
+    });
+
+    it('orders mixed overdue, due-today, in-window, not_done_yet, and upcoming series (C3 + D2) and preserves per-type actions', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 10, 22, 12, 0)); // 2026-11-22
+
+      const overdueFixed = makeTask('fixed-over', 'Daily pills', {
+        dueAt: '2026-11-20',
+        startDate: '2026-11-01',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+      });
+      const dueTodayApprox = makeTask('approx-today', 'Exact max chore', {
+        recurrence: {
+          type: 'after_completion',
+          intervalValue: 3,
+          maxIntervalValue: 5,
+          intervalUnit: 'days',
+        },
+        completionHistory: [new Date(2026, 10, 17, 10, 0).getTime()],
+      });
+      const inWinApprox = makeTask('approx-inwin', 'Descaling cycle', {
+        recurrence: {
+          type: 'after_completion',
+          intervalValue: 3,
+          maxIntervalValue: 5,
+          intervalUnit: 'days',
+        },
+        completionHistory: [new Date(2026, 10, 18, 10, 0).getTime()],
+      });
+      const notDoneApprox = makeTask('approx-notdone', 'Brand new routine', {
+        recurrence: {
+          type: 'after_completion',
+          intervalValue: 3,
+          maxIntervalValue: 5,
+          intervalUnit: 'days',
+        },
+      });
+      const upcomingFixed1d = makeTask('fixed-1d', 'Trash tomorrow', {
+        dueAt: '2026-11-23',
+        startDate: '2026-11-02',
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks' },
+        completionHistory: [new Date(2026, 10, 16, 10, 0).getTime()],
+      });
+      const upcomingApprox2d = makeTask('approx-2d', 'Water ferns', {
+        recurrence: {
+          type: 'after_completion',
+          intervalValue: 3,
+          maxIntervalValue: 5,
+          intervalUnit: 'days',
+        },
+        completionHistory: [new Date(2026, 10, 21, 10, 0).getTime()],
+      });
+      const upcomingAnnual60d = makeTask('annual-60d', 'Drain tank', {
+        createdAt: new Date(2025, 11, 1).getTime(),
+        recurrence: {
+          type: 'annual_window',
+          intervalValue: 1,
+          intervalUnit: 'years',
+          annualWindows: [{ startMonth: 1, startDay: 21, endMonth: 2, endDay: 20 }],
+        },
+        completionHistory: [new Date(2026, 1, 1, 10, 0).getTime()],
+      });
+
+      const onEdit = vi.fn();
+      const onRequestLogDate = vi.fn();
+      const onRequestChangeDate = vi.fn();
+      const onRequestSkipOccurrence = vi.fn();
+      const onRequestDelete = vi.fn();
+
+      const view = mount(
+        <RecurringTasksView
+          tasks={[
+            upcomingAnnual60d,
+            notDoneApprox,
+            upcomingApprox2d,
+            overdueFixed,
+            upcomingFixed1d,
+            inWinApprox,
+            dueTodayApprox,
+          ]}
+          showDetails={false}
+          onClose={vi.fn()}
+          onComplete={vi.fn()}
+          onEdit={onEdit}
+          onDelete={vi.fn()}
+          onRequestLogDate={onRequestLogDate}
+          onRequestChangeDate={onRequestChangeDate}
+          onRequestSkipOccurrence={onRequestSkipOccurrence}
+          onRequestDelete={onRequestDelete}
+        />
+      );
+
+      const list = view.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+      const titles = Array.from(list.querySelectorAll('[data-testid="task-title"]')).map(
+        (el) => el.textContent
+      );
+      expect(titles).toEqual([
+        'Daily pills',
+        'Exact max chore',
+        'Descaling cycle',
+        'Brand new routine',
+        'Trash tomorrow',
+        'Water ferns',
+        'Drain tank',
+      ]);
+
+      expect(list.textContent).toContain('Last day of window · every 3–5 days');
+      expect(list.textContent).toContain('1 day left · every 3–5 days');
+      expect(list.textContent).toContain('Not done yet · every 3–5 days');
+      expect(list.textContent).toContain('Opens in 2 days · every 3–5 days');
+      expect(list.textContent).toContain('Starts Jan 21, 2027 (in 2 months) · Jan 21 – Feb 20');
+
+      const rows = Array.from(list.children) as HTMLElement[];
+      // Window row click calls onEdit(raw) and has Log Date action
+      const waterFernsRow = rows[5];
+      act(() => {
+        waterFernsRow.click();
+      });
+      expect(onEdit).toHaveBeenLastCalledWith(upcomingApprox2d);
+      const logBtn = waterFernsRow.querySelector<HTMLButtonElement>('button[aria-label="Log Date"]');
+      expect(logBtn).toBeTruthy();
+      act(() => {
+        logBtn!.click();
+      });
+      expect(onRequestLogDate).toHaveBeenCalledTimes(1);
+      expect(onRequestLogDate.mock.calls[0][0].id).toBe('approx-2d');
+
+      // Fixed row click calls onEdit(projected) and delete passes raw task
+      const trashRow = rows[4];
+      act(() => {
+        trashRow.click();
+      });
+      expect(onEdit.mock.calls[1][0].id).toBe('fixed-1d');
+      expect(onEdit.mock.calls[1][0].dueAt).toBe('2026-11-23');
+
+      const changeBtn = trashRow.querySelector<HTMLButtonElement>('button[aria-label="Change Date"]');
+      const skipBtn = trashRow.querySelector<HTMLButtonElement>('button[aria-label="Skip Occurrence"]');
+      const deleteBtn = trashRow.querySelector<HTMLButtonElement>('button[aria-label="Delete"]');
+      expect(changeBtn).toBeTruthy();
+      expect(skipBtn).toBeTruthy();
+      expect(skipBtn!.disabled).toBe(false);
+      act(() => {
+        changeBtn!.click();
+        skipBtn!.click();
+        deleteBtn!.click();
+      });
+      expect(onRequestChangeDate).toHaveBeenCalledTimes(1);
+      expect(onRequestSkipOccurrence).toHaveBeenCalledTimes(1);
+      expect(onRequestDelete).toHaveBeenCalledWith(upcomingFixed1d);
+
       view.unmount();
     });
   });

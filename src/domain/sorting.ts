@@ -1,5 +1,11 @@
 import type { Task } from '../types/task';
-import { getDueDeadline, getWindowProgress, type WindowProgress } from './recurrence';
+import {
+  getDaysDifference,
+  getDueDeadline,
+  getFixedIntervalCycleDays,
+  getWindowProgress,
+  type WindowProgress,
+} from './recurrence';
 
 function compareManualOrder(a: Task, b: Task): number {
   const hasOrderA = a.sortOrder != null;
@@ -95,5 +101,112 @@ export function sortUndatedOneTimeTasks(tasks: Task[]): Task[] {
     if (orderDiff !== 0) return orderDiff;
 
     return compareCreatedThenTitle(a, b);
+  });
+}
+
+export type RecurringSortEntry =
+  | {
+      kind: 'window';
+      raw: Task;
+      progress: WindowProgress;
+      subtitle: string;
+    }
+  | {
+      kind: 'fixed';
+      raw: Task;
+      projected: Task;
+      nextDate: string | null;
+      subtitle: string;
+    };
+
+interface RecurringSortKey {
+  tier: number;
+  primary: number;
+  secondary: number;
+  tertiary: number;
+}
+
+function getRecurringSortKey(entry: RecurringSortEntry, now: Date): RecurringSortKey {
+  if (entry.kind === 'window') {
+    const { progress } = entry;
+    switch (progress.stage) {
+      case 'at_or_past_max':
+        if ((progress.daysUntilMax ?? 0) < 0) {
+          return {
+            tier: 0,
+            primary: -progress.sortScore,
+            secondary: progress.daysUntilMax ?? 0,
+            tertiary: 0,
+          };
+        }
+        return { tier: 1, primary: 0, secondary: 0, tertiary: 0 };
+      case 'in_window':
+        return {
+          tier: 2,
+          primary: -progress.sortScore,
+          secondary: -(progress.elapsedDays ?? -1),
+          tertiary: 0,
+        };
+      case 'not_done_yet':
+        return { tier: 3, primary: 0, secondary: 0, tertiary: 0 };
+      case 'before_min':
+        return {
+          tier: 4,
+          primary: progress.daysUntilOpen ?? Number.POSITIVE_INFINITY,
+          secondary: progress.daysUntilMax ?? Number.POSITIVE_INFINITY,
+          tertiary: 1,
+        };
+      case 'stopped':
+      default:
+        return { tier: 5, primary: Number.POSITIVE_INFINITY, secondary: 0, tertiary: 0 };
+    }
+  }
+
+  const daysUntilDue = entry.nextDate ? getDaysDifference(entry.nextDate, now) : null;
+  if (daysUntilDue == null) {
+    return { tier: 5, primary: Number.POSITIVE_INFINITY, secondary: 0, tertiary: 0 };
+  }
+  if (daysUntilDue < 0) {
+    const overdueDays = -daysUntilDue;
+    const cycleDays = entry.raw.recurrence ? getFixedIntervalCycleDays(entry.raw.recurrence) : 1;
+    const score = 1.01 + overdueDays / cycleDays;
+    return { tier: 0, primary: -score, secondary: daysUntilDue, tertiary: 0 };
+  }
+  if (daysUntilDue === 0) {
+    return { tier: 1, primary: 0, secondary: 0, tertiary: 0 };
+  }
+  return {
+    tier: 4,
+    primary: daysUntilDue,
+    secondary: daysUntilDue,
+    tertiary: 0,
+  };
+}
+
+/**
+ * Sort all recurring tasks (window, annual window, and fixed interval) by closeness to due:
+ * 1. Overdue (relative urgency descending, then more overdue days first)
+ * 2. Due today / last day of window
+ * 3. In window (relative progress sortScore descending)
+ * 4. Not done yet (bottom of Due Now, above Upcoming)
+ * 5. Upcoming (absolute days until open/due ascending, then tighter max deadline)
+ * 6. Undated/fallback entries last
+ */
+export function sortRecurringByDueProximity(
+  entries: readonly RecurringSortEntry[],
+  now: Date = new Date()
+): RecurringSortEntry[] {
+  const keys = new Map<RecurringSortEntry, RecurringSortKey>();
+  for (const entry of entries) {
+    keys.set(entry, getRecurringSortKey(entry, now));
+  }
+  return [...entries].sort((a, b) => {
+    const ka = keys.get(a)!;
+    const kb = keys.get(b)!;
+    if (ka.tier !== kb.tier) return ka.tier - kb.tier;
+    if (ka.primary !== kb.primary) return ka.primary - kb.primary;
+    if (ka.secondary !== kb.secondary) return ka.secondary - kb.secondary;
+    if (ka.tertiary !== kb.tertiary) return ka.tertiary - kb.tertiary;
+    return compareCreatedThenTitle(a.raw, b.raw);
   });
 }

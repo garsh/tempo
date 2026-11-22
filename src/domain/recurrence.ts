@@ -677,6 +677,12 @@ export interface WindowProgress {
   lastDoneMs: number | null;
   doneToday: boolean;
   detailLabel: string;
+  /** Days until the window opens (> 0 when before_min, 0 when open/active/overdue, null when not_done_yet or stopped). */
+  daysUntilOpen: number | null;
+  /** Days remaining before overdue (> 0 while before_min/in_window, 0 on max/last day, < 0 when overdue, null when not_done_yet or stopped). */
+  daysUntilMax: number | null;
+  /** Local YYYY-MM-DD start date of the upcoming window for annual_window before_min tasks (null otherwise). */
+  nextOpenDateStr: string | null;
 }
 
 const UNIT_SINGULAR: Record<IntervalUnit, string> = {
@@ -710,6 +716,17 @@ function formatExpandedElapsed(days: number): string {
   }
   const years = (days / 365).toFixed(1).replace(/\.0$/, '');
   return `Last done ${years} ${years === '1' ? 'year' : 'years'} ago`;
+}
+
+function formatDurationSpan(days: number): string {
+  if (days <= 1) return '1 day';
+  if (days < 60) return `${days} days`;
+  if (days < 365) {
+    const months = Math.max(1, Math.round(days / 30.4375));
+    return `${months} ${months === 1 ? 'month' : 'months'}`;
+  }
+  const years = (days / 365).toFixed(1).replace(/\.0$/, '');
+  return `${years} ${years === '1' ? 'year' : 'years'}`;
 }
 
 function localDaysBetween(fromMidnight: Date, toMidnight: Date): number {
@@ -801,6 +818,9 @@ function resolveAnnualProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `Stopped · every ${scheduleLabel}`,
+      daysUntilOpen: null,
+      daysUntilMax: null,
+      nextOpenDateStr: null,
     };
   }
 
@@ -851,6 +871,9 @@ function resolveAnnualProgress(
         lastDoneMs,
         doneToday,
         detailLabel: `${windowLabel} · ${daysLeft === 1 ? '1 day left' : `${daysLeft} days left`}${elapsedSuffix}`,
+        daysUntilOpen: 0,
+        daysUntilMax: daysLeft,
+        nextOpenDateStr: null,
       };
     }
 
@@ -867,6 +890,9 @@ function resolveAnnualProgress(
         lastDoneMs,
         doneToday,
         detailLabel: `${windowLabel} · Last day of window${elapsedSuffix}`,
+        daysUntilOpen: 0,
+        daysUntilMax: 0,
+        nextOpenDateStr: null,
       };
     }
 
@@ -884,6 +910,9 @@ function resolveAnnualProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `${windowLabel} · ${daysOverdue === 1 ? '1 day overdue' : `${daysOverdue} days overdue`}${elapsedSuffix}`,
+      daysUntilOpen: 0,
+      daysUntilMax: -daysOverdue,
+      nextOpenDateStr: null,
     };
   }
 
@@ -909,6 +938,9 @@ function resolveAnnualProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `Stopped · every ${scheduleLabel}`,
+      daysUntilOpen: null,
+      daysUntilMax: null,
+      nextOpenDateStr: null,
     };
   }
 
@@ -933,6 +965,9 @@ function resolveAnnualProgress(
       ? `${formatExpandedElapsed(elapsedDays)} · next ${nextStartLabel} (${nextWindowLabel})`
       : `Starts ${nextStartLabel} · ${nextWindowLabel}`;
 
+  const daysUntilOpen = Math.max(0, localDaysBetween(today, next.start));
+  const daysUntilMax = Math.max(daysUntilOpen, localDaysBetween(today, next.end));
+
   return {
     stage: 'before_min',
     visibleInTasks: false,
@@ -945,6 +980,9 @@ function resolveAnnualProgress(
     lastDoneMs,
     doneToday,
     detailLabel,
+    daysUntilOpen,
+    daysUntilMax,
+    nextOpenDateStr: next.startStr,
   };
 }
 
@@ -983,6 +1021,9 @@ export function getWindowProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `Stopped · ${periodExpanded}`,
+      daysUntilOpen: null,
+      daysUntilMax: null,
+      nextOpenDateStr: null,
     };
   }
 
@@ -1001,6 +1042,9 @@ export function getWindowProgress(
       lastDoneMs: null,
       doneToday: false,
       detailLabel: `Not done yet · ${periodExpanded}`,
+      daysUntilOpen: null,
+      daysUntilMax: null,
+      nextOpenDateStr: null,
     };
   }
 
@@ -1025,6 +1069,9 @@ export function getWindowProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `${elapsedExpanded} · ${periodExpanded}`,
+      daysUntilOpen: minDays - elapsedDays,
+      daysUntilMax: maxDays - elapsedDays,
+      nextOpenDateStr: null,
     };
   }
 
@@ -1042,6 +1089,9 @@ export function getWindowProgress(
       lastDoneMs,
       doneToday,
       detailLabel: `${elapsedExpanded} · ${periodExpanded}`,
+      daysUntilOpen: 0,
+      daysUntilMax: maxDays - elapsedDays,
+      nextOpenDateStr: null,
     };
   }
 
@@ -1058,7 +1108,103 @@ export function getWindowProgress(
     lastDoneMs,
     doneToday,
     detailLabel: `${elapsedExpanded} · ${periodExpanded}${extra > 0 ? ' (overdue)' : ''}`,
+    daysUntilOpen: 0,
+    daysUntilMax: maxDays - elapsedDays,
+    nextOpenDateStr: null,
   };
+}
+
+/**
+ * Concise countdown + cadence subtitle for window/annual tasks in the Recurring view.
+ */
+export function formatRecurringDueSubtitle(
+  task: Pick<Task, 'recurrence'>,
+  progress: WindowProgress,
+  now: Date = new Date()
+): string {
+  if (!task.recurrence) return '';
+
+  if (isAnnualWindow(task)) {
+    const scheduleLabel = task.recurrence.annualWindows!.map(formatAnnualWindowRange).join(', ');
+    switch (progress.stage) {
+      case 'stopped':
+        return `Stopped · ${scheduleLabel}`;
+      case 'at_or_past_max': {
+        if ((progress.daysUntilMax ?? 0) < 0) {
+          const overdue = -progress.daysUntilMax!;
+          return `${overdue === 1 ? '1 day' : `${overdue} days`} overdue · ${scheduleLabel}`;
+        }
+        return `Last day of window · ${scheduleLabel}`;
+      }
+      case 'in_window': {
+        const left = Math.max(1, progress.daysUntilMax ?? 1);
+        return `${left === 1 ? '1 day' : `${left} days`} left · ${scheduleLabel}`;
+      }
+      case 'before_min': {
+        const nextStartLabel = progress.nextOpenDateStr
+          ? formatAnnualNextStart(parseDate(progress.nextOpenDateStr), startOfDay(now).getFullYear())
+          : null;
+        const until = Math.max(0, progress.daysUntilOpen ?? 0);
+        if (nextStartLabel && until > 0) {
+          return `Starts ${nextStartLabel} (in ${formatDurationSpan(until)}) · ${scheduleLabel}`;
+        }
+        if (nextStartLabel) {
+          return `Starts ${nextStartLabel} · ${scheduleLabel}`;
+        }
+        return `Opens in ${formatDurationSpan(Math.max(1, until))} · ${scheduleLabel}`;
+      }
+      default:
+        return `Not done yet · ${scheduleLabel}`;
+    }
+  }
+
+  if (isWindowPeriodic(task)) {
+    const { min, max, unit } = getWindowBounds(task.recurrence);
+    const period = formatExpandedPeriod(min, max, unit);
+    switch (progress.stage) {
+      case 'stopped':
+        return `Stopped · ${period}`;
+      case 'not_done_yet':
+        return `Not done yet · ${period}`;
+      case 'at_or_past_max': {
+        if ((progress.daysUntilMax ?? 0) < 0) {
+          const overdue = -progress.daysUntilMax!;
+          return `${overdue === 1 ? '1 day' : `${overdue} days`} overdue · ${period}`;
+        }
+        return min === max ? `Due today · ${period}` : `Last day of window · ${period}`;
+      }
+      case 'in_window': {
+        const left = Math.max(1, progress.daysUntilMax ?? 1);
+        return `${left === 1 ? '1 day' : `${left} days`} left · ${period}`;
+      }
+      case 'before_min': {
+        const until = Math.max(1, progress.daysUntilOpen ?? 1);
+        return `Opens in ${formatDurationSpan(until)} · ${period}`;
+      }
+    }
+  }
+
+  return formatRecurrenceLabel(task.recurrence);
+}
+
+const INTERVAL_UNIT_DAYS: Record<IntervalUnit, number> = {
+  days: 1,
+  weeks: 7,
+  months: 30.4375,
+  years: 365.25,
+};
+
+/**
+ * Approximate cycle length in days for a fixed-interval recurrence rule,
+ * used to place overdue fixed tasks on the same relative scale as window tasks.
+ */
+export function getFixedIntervalCycleDays(rule: RecurrenceRule): number {
+  const interval = Math.max(1, Math.floor(rule.intervalValue || 1));
+  if (rule.weekdays && rule.weekdays.length > 0) {
+    const uniqueDays = new Set(rule.weekdays).size;
+    return Math.max(1, (interval * 7) / uniqueDays);
+  }
+  return interval * INTERVAL_UNIT_DAYS[rule.intervalUnit];
 }
 
 export function isCompleted(task: Pick<Task, 'completedAt' | 'recurrence'>): boolean {

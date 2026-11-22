@@ -210,7 +210,7 @@ describe('Annual time-of-year UI', () => {
     view.unmount();
   });
 
-  it('renders Time of Year section in RecurringTasksView and excludes stopped annual tasks', () => {
+  it('renders active annual_window tasks with countdown subtitles in RecurringTasksView and excludes stopped annual tasks', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 15, 12, 0));
 
@@ -260,10 +260,11 @@ describe('Annual time-of-year UI', () => {
       />
     );
 
-    const annualSection = view.container.querySelector('section[aria-label="Time of Year"]');
-    expect(annualSection).toBeTruthy();
-    expect(annualSection!.textContent).toContain('Winterize faucets');
-    expect(annualSection!.textContent).not.toContain('Retired spring routine');
+    const list = view.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+    expect(list.querySelector('section[aria-label="Time of Year"]')).toBeNull();
+    expect(list.textContent).toContain('Winterize faucets');
+    expect(list.textContent).toContain('16 days left · October');
+    expect(list.textContent).not.toContain('Retired spring routine');
 
     view.unmount();
   });

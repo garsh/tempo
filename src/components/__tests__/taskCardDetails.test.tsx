@@ -222,7 +222,7 @@ describe('TaskCard showDetails wrapping', () => {
 });
 
 describe('RecurringTasksView showDetails wrapping', () => {
-  it('always wraps titles in Approximately and On Fixed Interval while toggling subtitle and notes wrapping with showDetails', () => {
+  it('always wraps titles for both approximate and fixed rows while toggling subtitle and notes wrapping with showDetails', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 4, 20, 12, 0));
 
@@ -268,27 +268,27 @@ describe('RecurringTasksView showDetails wrapping', () => {
       />
     );
 
-    const approxTrue = viewTrue.container.querySelector('section[aria-label="Approximately"]');
-    const fixedTrue = viewTrue.container.querySelector('section[aria-label="On Fixed Interval"]');
-    expect(approxTrue).toBeTruthy();
-    expect(fixedTrue).toBeTruthy();
+    const listTrue = viewTrue.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+    expect(listTrue.querySelectorAll('section')).toHaveLength(0);
 
-    for (const section of [approxTrue!, fixedTrue!]) {
-      const titles = section.querySelectorAll('[data-testid="task-title"]');
-      expect(titles.length).toBe(1);
-      const classes = classTokens(titles[0]);
+    const titlesTrue = listTrue.querySelectorAll('[data-testid="task-title"]');
+    expect(titlesTrue.length).toBe(2);
+    for (const titleEl of titlesTrue) {
+      const classes = classTokens(titleEl);
       expect(classes).not.toContain('truncate');
       expect(classes).toContain('min-w-0');
       expect(classes).toContain('wrap-break-word');
       expect(classes).toContain('text-pretty');
     }
-    const fixedNotesTrue = fixedTrue!.querySelector('[data-testid="task-notes-preview"]');
-    expect(fixedNotesTrue).toBeTruthy();
-    const fixedSubtitleTrue = fixedNotesTrue!.previousElementSibling;
-    expect(fixedSubtitleTrue).toBeTruthy();
-    expect(classTokens(fixedSubtitleTrue)).not.toContain('truncate');
-    expect(classTokens(fixedSubtitleTrue)).toContain('wrap-break-word');
-    expect(classTokens(fixedSubtitleTrue)).toContain('text-pretty');
+    const notesTrue = listTrue.querySelectorAll('[data-testid="task-notes-preview"]');
+    expect(notesTrue.length).toBe(2);
+    for (const notesEl of notesTrue) {
+      const subtitleEl = notesEl.previousElementSibling;
+      expect(subtitleEl).toBeTruthy();
+      expect(classTokens(subtitleEl)).not.toContain('truncate');
+      expect(classTokens(subtitleEl)).toContain('wrap-break-word');
+      expect(classTokens(subtitleEl)).toContain('text-pretty');
+    }
     viewTrue.unmount();
 
     const viewFalse = mount(
@@ -302,25 +302,23 @@ describe('RecurringTasksView showDetails wrapping', () => {
       />
     );
 
-    const approxFalse = viewFalse.container.querySelector('section[aria-label="Approximately"]');
-    const fixedFalse = viewFalse.container.querySelector('section[aria-label="On Fixed Interval"]');
-    expect(approxFalse).toBeTruthy();
-    expect(fixedFalse).toBeTruthy();
+    const listFalse = viewFalse.container.querySelector('[data-testid="recurring-tasks-view"]')!;
+    expect(listFalse.querySelectorAll('section')).toHaveLength(0);
 
-    for (const section of [approxFalse!, fixedFalse!]) {
-      const titles = section.querySelectorAll('[data-testid="task-title"]');
-      expect(titles.length).toBe(1);
-      const classes = classTokens(titles[0]);
+    const titlesFalse = listFalse.querySelectorAll('[data-testid="task-title"]');
+    expect(titlesFalse.length).toBe(2);
+    expect(listFalse.querySelector('[data-testid="task-notes-preview"]')).toBeNull();
+    for (const titleEl of titlesFalse) {
+      const classes = classTokens(titleEl);
       expect(classes).not.toContain('truncate');
       expect(classes).toContain('min-w-0');
       expect(classes).toContain('wrap-break-word');
       expect(classes).toContain('text-pretty');
-      expect(section.querySelector('[data-testid="task-notes-preview"]')).toBeNull();
+
+      const subtitleEl = titleEl.parentElement!.nextElementSibling;
+      expect(subtitleEl).toBeTruthy();
+      expect(classTokens(subtitleEl)).toContain('truncate');
     }
-    const fixedTitleWrapperFalse = fixedFalse!.querySelector('[data-testid="task-title"]')!.parentElement!;
-    const fixedSubtitleFalse = fixedTitleWrapperFalse.nextElementSibling;
-    expect(fixedSubtitleFalse).toBeTruthy();
-    expect(classTokens(fixedSubtitleFalse)).toContain('truncate');
     viewFalse.unmount();
   });
 });

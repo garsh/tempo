@@ -3,6 +3,7 @@ import {
   completionTimestampForDate,
   formatAnnualWindowRange,
   formatRecurrenceLabel,
+  formatRecurringDueSubtitle,
   getSeasonPresets,
   getWindowProgress,
   isAnnualWindow,
@@ -321,6 +322,102 @@ describe('Annual time-of-year recurring tasks (domain)', () => {
     // Past endOnDate without completion -> stopped
     expect(isWindowStopped(task, localDay(2026, 10, 16))).toBe(true);
     expect(getWindowProgress(task, localDay(2026, 10, 16))!.stage).toBe('stopped');
+  });
+
+  it('exposes daysUntilOpen, daysUntilMax, nextOpenDateStr, and formats concise due subtitles', () => {
+    const task = makeAnnualTask(
+      'sub-ann',
+      'Swap winter tires',
+      [{ startMonth: 10, startDay: 15, endMonth: 11, endDay: 15 }],
+      [],
+      { createdAt: tsOn(2026, 1, 10) }
+    );
+
+    const jun1 = localDay(2026, 6, 1);
+    const pBefore = getWindowProgress(task, jun1)!;
+    expect(pBefore.daysUntilOpen).toBe(136);
+    expect(pBefore.daysUntilMax).toBe(167);
+    expect(pBefore.nextOpenDateStr).toBe('2026-10-15');
+    expect(formatRecurringDueSubtitle(task, pBefore, jun1)).toBe(
+      'Starts Oct 15 (in 4 months) · Oct 15 – Nov 15'
+    );
+
+    const earlyDone = makeAnnualTask(
+      'sub-early',
+      'Winterize faucets',
+      [{ startMonth: 10, startDay: 1, endMonth: 10, endDay: 31 }],
+      [tsOn(2025, 10, 15), tsOn(2026, 9, 24)],
+      { createdAt: tsOn(2025, 9, 1) }
+    );
+    const sep25 = localDay(2026, 9, 25);
+    const pEarly = getWindowProgress(earlyDone, sep25)!;
+    expect(pEarly.stage).toBe('before_min');
+    expect(pEarly.daysUntilOpen).toBe(371);
+    expect(pEarly.daysUntilMax).toBe(401);
+    expect(pEarly.nextOpenDateStr).toBe('2027-10-01');
+    expect(formatRecurringDueSubtitle(earlyDone, pEarly, sep25)).toBe(
+      'Starts Oct 1, 2027 (in 1 year) · October'
+    );
+
+    const oct30 = localDay(2026, 10, 30);
+    const pInWin = getWindowProgress(task, oct30)!;
+    expect(pInWin.daysUntilOpen).toBe(0);
+    expect(pInWin.daysUntilMax).toBe(16);
+    expect(pInWin.nextOpenDateStr).toBeNull();
+    expect(formatRecurringDueSubtitle(task, pInWin, oct30)).toBe(
+      '16 days left · Oct 15 – Nov 15'
+    );
+
+    const nov14 = localDay(2026, 11, 14);
+    const pLeft1 = getWindowProgress(task, nov14)!;
+    expect(pLeft1.daysUntilMax).toBe(1);
+    expect(formatRecurringDueSubtitle(task, pLeft1, nov14)).toBe('1 day left · Oct 15 – Nov 15');
+
+    const nov15 = localDay(2026, 11, 15);
+    const pLastDay = getWindowProgress(task, nov15)!;
+    expect(pLastDay.daysUntilOpen).toBe(0);
+    expect(pLastDay.daysUntilMax).toBe(0);
+    expect(pLastDay.nextOpenDateStr).toBeNull();
+    expect(formatRecurringDueSubtitle(task, pLastDay, nov15)).toBe(
+      'Last day of window · Oct 15 – Nov 15'
+    );
+
+    const nov16 = localDay(2026, 11, 16);
+    const pOver1 = getWindowProgress(task, nov16)!;
+    expect(pOver1.daysUntilOpen).toBe(0);
+    expect(pOver1.daysUntilMax).toBe(-1);
+    expect(formatRecurringDueSubtitle(task, pOver1, nov16)).toBe(
+      '1 day overdue · Oct 15 – Nov 15'
+    );
+
+    const nov22 = localDay(2026, 11, 22);
+    const pOver7 = getWindowProgress(task, nov22)!;
+    expect(pOver7.daysUntilMax).toBe(-7);
+    expect(formatRecurringDueSubtitle(task, pOver7, nov22)).toBe(
+      '7 days overdue · Oct 15 – Nov 15'
+    );
+
+    const stopped = makeAnnualTask(
+      'sub-stop',
+      'Retired spring task',
+      [{ startMonth: 3, startDay: 1, endMonth: 5, endDay: 31 }],
+      [],
+      {
+        createdAt: tsOn(2026, 1, 1),
+        recurrence: {
+          type: 'annual_window',
+          intervalValue: 1,
+          intervalUnit: 'years',
+          annualWindows: [{ startMonth: 3, startDay: 1, endMonth: 5, endDay: 31 }],
+          endOnDate: '2026-06-01',
+        },
+      }
+    );
+    const pStopped = getWindowProgress(stopped, nov22)!;
+    expect(pStopped.daysUntilOpen).toBeNull();
+    expect(pStopped.daysUntilMax).toBeNull();
+    expect(pStopped.nextOpenDateStr).toBeNull();
+    expect(formatRecurringDueSubtitle(stopped, pStopped, nov22)).toBe('Stopped · Mar–May');
   });
 
   it('stays off Calendar due dates, appears on Calendar Completed, sorts via sortWindowTasks, and indexes in searchTasks', () => {

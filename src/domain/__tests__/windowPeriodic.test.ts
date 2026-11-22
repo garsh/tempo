@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addInterval,
   formatDate,
+  formatRecurringDueSubtitle,
   getNextUncompletedOccurrenceDate,
   getSkipOccurrenceDate,
   getWindowProgress,
@@ -191,6 +192,131 @@ describe('Approximate Window Periodic & Undated One-Time Domain Logic', () => {
         [new Date(2026, 4, 1, 8, 0).getTime()]
       );
       expect(getWindowProgress(stopped, now)!.detailLabel).toBe('Stopped · every 7–10 days');
+    });
+
+    it('exposes daysUntilOpen, daysUntilMax, null nextOpenDateStr, and formats concise due subtitles', () => {
+      const now = new Date(2026, 4, 20, 12, 0);
+
+      const notDone = makeWindowTask('sub-never', 'Clean filter', rule, []);
+      const pNotDone = getWindowProgress(notDone, now)!;
+      expect(pNotDone.daysUntilOpen).toBeNull();
+      expect(pNotDone.daysUntilMax).toBeNull();
+      expect(pNotDone.nextOpenDateStr).toBeNull();
+      expect(formatRecurringDueSubtitle(notDone, pNotDone, now)).toBe(
+        'Not done yet · every 3–5 days'
+      );
+
+      const openIn1 = makeWindowTask('sub-open1', 'Filter', rule, [
+        new Date(2026, 4, 18, 9, 0).getTime(),
+      ]);
+      const pOpen1 = getWindowProgress(openIn1, now)!;
+      expect(pOpen1.daysUntilOpen).toBe(1);
+      expect(pOpen1.daysUntilMax).toBe(3);
+      expect(pOpen1.nextOpenDateStr).toBeNull();
+      expect(formatRecurringDueSubtitle(openIn1, pOpen1, now)).toBe(
+        'Opens in 1 day · every 3–5 days'
+      );
+
+      const openIn2 = makeWindowTask('sub-open2', 'Filter', rule, [
+        new Date(2026, 4, 19, 9, 0).getTime(),
+      ]);
+      const pOpen2 = getWindowProgress(openIn2, now)!;
+      expect(pOpen2.daysUntilOpen).toBe(2);
+      expect(pOpen2.daysUntilMax).toBe(4);
+      expect(formatRecurringDueSubtitle(openIn2, pOpen2, now)).toBe(
+        'Opens in 2 days · every 3–5 days'
+      );
+
+      const longWait = makeWindowTask(
+        'sub-months',
+        'Flush water heater',
+        { type: 'after_completion', intervalValue: 11, maxIntervalValue: 13, intervalUnit: 'months' },
+        [new Date(2026, 4, 20, 8, 0).getTime()]
+      );
+      const pLong = getWindowProgress(longWait, now)!;
+      expect(pLong.daysUntilOpen).toBeGreaterThanOrEqual(330);
+      expect(formatRecurringDueSubtitle(longWait, pLong, now)).toBe(
+        'Opens in 11 months · every 11–13 months'
+      );
+
+      const left2 = makeWindowTask('sub-left2', 'Filter', rule, [
+        new Date(2026, 4, 17, 9, 0).getTime(),
+      ]);
+      const pLeft2 = getWindowProgress(left2, now)!;
+      expect(pLeft2.daysUntilOpen).toBe(0);
+      expect(pLeft2.daysUntilMax).toBe(2);
+      expect(formatRecurringDueSubtitle(left2, pLeft2, now)).toBe('2 days left · every 3–5 days');
+
+      const left1 = makeWindowTask('sub-left1', 'Filter', rule, [
+        new Date(2026, 4, 16, 9, 0).getTime(),
+      ]);
+      const pLeft1 = getWindowProgress(left1, now)!;
+      expect(pLeft1.daysUntilOpen).toBe(0);
+      expect(pLeft1.daysUntilMax).toBe(1);
+      expect(formatRecurringDueSubtitle(left1, pLeft1, now)).toBe('1 day left · every 3–5 days');
+
+      const lastDayRange = makeWindowTask('sub-max', 'Filter', rule, [
+        new Date(2026, 4, 15, 9, 0).getTime(),
+      ]);
+      const pMaxRange = getWindowProgress(lastDayRange, now)!;
+      expect(pMaxRange.daysUntilOpen).toBe(0);
+      expect(pMaxRange.daysUntilMax).toBe(0);
+      expect(formatRecurringDueSubtitle(lastDayRange, pMaxRange, now)).toBe(
+        'Last day of window · every 3–5 days'
+      );
+
+      const tightDue = makeWindowTask(
+        'sub-tight',
+        'Exact approx',
+        { type: 'after_completion', intervalValue: 14, maxIntervalValue: 14, intervalUnit: 'days' },
+        [new Date(2026, 4, 6, 9, 0).getTime()]
+      );
+      const pTight = getWindowProgress(tightDue, now)!;
+      expect(pTight.daysUntilOpen).toBe(0);
+      expect(pTight.daysUntilMax).toBe(0);
+      expect(formatRecurringDueSubtitle(tightDue, pTight, now)).toBe(
+        'Due today · every 14 days'
+      );
+
+      const overdue1 = makeWindowTask('sub-over1', 'Filter', rule, [
+        new Date(2026, 4, 14, 9, 0).getTime(),
+      ]);
+      const pOver1 = getWindowProgress(overdue1, now)!;
+      expect(pOver1.daysUntilOpen).toBe(0);
+      expect(pOver1.daysUntilMax).toBe(-1);
+      expect(formatRecurringDueSubtitle(overdue1, pOver1, now)).toBe(
+        '1 day overdue · every 3–5 days'
+      );
+
+      const overdue3 = makeWindowTask('sub-over3', 'Filter', rule, [
+        new Date(2026, 4, 12, 9, 0).getTime(),
+      ]);
+      const pOver3 = getWindowProgress(overdue3, now)!;
+      expect(pOver3.daysUntilOpen).toBe(0);
+      expect(pOver3.daysUntilMax).toBe(-3);
+      expect(formatRecurringDueSubtitle(overdue3, pOver3, now)).toBe(
+        '3 days overdue · every 3–5 days'
+      );
+
+      const stopped = makeWindowTask(
+        'sub-stop',
+        'Mow',
+        {
+          type: 'after_completion',
+          intervalValue: 7,
+          maxIntervalValue: 10,
+          intervalUnit: 'days',
+          endOnDate: '2026-05-01',
+        },
+        [new Date(2026, 4, 1, 8, 0).getTime()]
+      );
+      const pStopped = getWindowProgress(stopped, now)!;
+      expect(pStopped.daysUntilOpen).toBeNull();
+      expect(pStopped.daysUntilMax).toBeNull();
+      expect(pStopped.nextOpenDateStr).toBeNull();
+      expect(formatRecurringDueSubtitle(stopped, pStopped, now)).toBe(
+        'Stopped · every 7–10 days'
+      );
     });
   });
 

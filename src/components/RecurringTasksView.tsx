@@ -1,19 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { Task } from '../types/task';
 import {
   formatRecurrenceLabel,
+  formatRecurringDueSubtitle,
   getNextUncompletedOccurrenceDate,
-  isAnnualWindow,
+  getWindowProgress,
   isFixedRecurring,
   isRecurrenceFinished,
   isWindowPeriodic,
   isWindowStopped,
   projectTaskForDate,
 } from '../domain/recurrence';
-import { sortWindowTasks } from '../domain/sorting';
+import { sortRecurringByDueProximity, type RecurringSortEntry } from '../domain/sorting';
 import { TaskCard } from './TaskCard';
-import { TaskGroupHeader } from './shell/TaskGroupHeader';
 
 interface RecurringTasksViewProps {
   tasks: Task[];
@@ -31,8 +31,8 @@ interface RecurringTasksViewProps {
 
 /**
  * Full-screen management view opened from Overflow (⋮) → Recurring.
- * Lists all active recurring tasks (both Approximate min–max windows and Fixed Interval schedules)
- * so the user can inspect and adjust any existing series, including not-yet-due ones.
+ * Lists all active recurring tasks (Approximate min–max windows, Annual Time of Year windows,
+ * and Fixed Interval schedules) in a unified flat list ordered by closeness to being due.
  */
 export function RecurringTasksView({
   tasks,
@@ -47,69 +47,39 @@ export function RecurringTasksView({
   onRequestSkipOccurrence,
   onRequestDelete,
 }: RecurringTasksViewProps) {
-  const [approxCollapsed, setApproxCollapsed] = useState(false);
-  const [annualCollapsed, setAnnualCollapsed] = useState(false);
-  const [fixedCollapsed, setFixedCollapsed] = useState(false);
-
-  const { approxTasks, annualTasks, fixedEntries } = useMemo(() => {
+  const entries = useMemo(() => {
     const now = new Date();
-    const approx: Task[] = [];
-    const annual: Task[] = [];
-    const fixed: { raw: Task; projected: Task; nextDate: string | null; label: string }[] = [];
+    const items: RecurringSortEntry[] = [];
 
     for (const t of tasks) {
       if (t.deletedAt || !t.recurrence) continue;
       if (isWindowPeriodic(t)) {
-        if (!isWindowStopped(t, now)) {
-          if (isAnnualWindow(t)) {
-            annual.push(t);
-          } else {
-            approx.push(t);
-          }
-        }
+        if (isWindowStopped(t, now)) continue;
+        const progress = getWindowProgress(t, now);
+        if (!progress || progress.stage === 'stopped') continue;
+        items.push({
+          kind: 'window',
+          raw: t,
+          progress,
+          subtitle: formatRecurringDueSubtitle(t, progress, now),
+        });
         continue;
       }
       if (isFixedRecurring(t) && !isRecurrenceFinished(t, now)) {
         const nextDate = getNextUncompletedOccurrenceDate(t, now);
         const projected = nextDate ? projectTaskForDate(t, nextDate) : { ...t, completedAt: null };
-        fixed.push({
+        items.push({
+          kind: 'fixed',
           raw: t,
           projected,
           nextDate,
-          label: formatRecurrenceLabel(t.recurrence),
+          subtitle: formatRecurrenceLabel(t.recurrence),
         });
       }
     }
 
-    fixed.sort((a, b) => {
-      const da = a.nextDate ?? '9999-99-99';
-      const db = b.nextDate ?? '9999-99-99';
-      if (da !== db) return da.localeCompare(db);
-      return a.raw.title.localeCompare(b.raw.title);
-    });
-
-    return {
-      approxTasks: sortWindowTasks(approx, now),
-      annualTasks: sortWindowTasks(annual, now),
-      fixedEntries: fixed,
-    };
+    return sortRecurringByDueProximity(items, now);
   }, [tasks]);
-
-  const isEmpty = approxTasks.length === 0 && annualTasks.length === 0 && fixedEntries.length === 0;
-  const windowSections = [
-    {
-      label: 'Approximately',
-      items: approxTasks,
-      collapsed: approxCollapsed,
-      onToggle: () => setApproxCollapsed((prev) => !prev),
-    },
-    {
-      label: 'Time of Year',
-      items: annualTasks,
-      collapsed: annualCollapsed,
-      onToggle: () => setAnnualCollapsed((prev) => !prev),
-    },
-  ];
 
   return (
     <>
@@ -131,73 +101,45 @@ export function RecurringTasksView({
       <div className="flex-1 flex min-h-0 relative">
         <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
           <div
-            className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
+            className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 px-3 sm:px-5 pt-2 pb-20 xl:pb-4"
             data-testid="recurring-tasks-view"
           >
-            {isEmpty ? (
+            {entries.length === 0 ? (
               <p className="text-sm text-tt-muted px-4 py-12 text-center">No active recurring tasks</p>
             ) : (
-              <>
-                {windowSections.map(
-                  ({ label, items, collapsed, onToggle }) =>
-                    items.length > 0 && (
-                      <section key={label} aria-label={label}>
-                        <TaskGroupHeader
-                          label={label}
-                          count={items.length}
-                          collapsed={collapsed}
-                          onToggle={onToggle}
-                          sticky={false}
-                        />
-                        {!collapsed &&
-                          items.map((t) => (
-                            <TaskCard
-                              key={t.id}
-                              task={t}
-                              showDetails={showDetails}
-                              onSelect={() => onEdit(t)}
-                              onComplete={onComplete}
-                              onUncomplete={onUncomplete}
-                              onEdit={onEdit}
-                              onDelete={onDelete}
-                              onRequestLogDate={onRequestLogDate}
-                              onRequestDelete={onRequestDelete}
-                            />
-                          ))}
-                      </section>
-                    )
-                )}
-
-                {fixedEntries.length > 0 && (
-                  <section aria-label="On Fixed Interval">
-                    <TaskGroupHeader
-                      label="On Fixed Interval"
-                      count={fixedEntries.length}
-                      collapsed={fixedCollapsed}
-                      onToggle={() => setFixedCollapsed((prev) => !prev)}
-                      sticky={false}
-                    />
-                    {!fixedCollapsed &&
-                      fixedEntries.map(({ raw, projected, nextDate, label }) => (
-                        <TaskCard
-                          key={raw.id}
-                          task={projected}
-                          showDetails={showDetails}
-                          subtitle={label}
-                          occurrenceDateStr={nextDate ?? undefined}
-                          onSelect={() => onEdit(projected)}
-                          onComplete={onComplete}
-                          onUncomplete={onUncomplete}
-                          onEdit={() => onEdit(projected)}
-                          onDelete={onDelete}
-                          onRequestChangeDate={onRequestChangeDate}
-                          onRequestSkipOccurrence={onRequestSkipOccurrence}
-                          onRequestDelete={() => onRequestDelete?.(raw)}
-                        />
-                      ))}
-                  </section>
-                )}
-              </>
+              entries.map((entry) =>
+                entry.kind === 'window' ? (
+                  <TaskCard
+                    key={entry.raw.id}
+                    task={entry.raw}
+                    showDetails={showDetails}
+                    subtitle={entry.subtitle}
+                    onSelect={() => onEdit(entry.raw)}
+                    onComplete={onComplete}
+                    onUncomplete={onUncomplete}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onRequestLogDate={onRequestLogDate}
+                    onRequestDelete={onRequestDelete}
+                  />
+                ) : (
+                  <TaskCard
+                    key={entry.raw.id}
+                    task={entry.projected}
+                    showDetails={showDetails}
+                    subtitle={entry.subtitle}
+                    occurrenceDateStr={entry.nextDate ?? undefined}
+                    onSelect={() => onEdit(entry.projected)}
+                    onComplete={onComplete}
+                    onUncomplete={onUncomplete}
+                    onEdit={() => onEdit(entry.projected)}
+                    onDelete={onDelete}
+                    onRequestChangeDate={onRequestChangeDate}
+                    onRequestSkipOccurrence={onRequestSkipOccurrence}
+                    onRequestDelete={() => onRequestDelete?.(entry.raw)}
+                  />
+                )
+              )
             )}
           </div>
         </main>
