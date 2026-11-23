@@ -85,4 +85,31 @@ describe('SettingsPage new task placement', () => {
 
     view.unmount();
   });
+
+  it('displays last sync error in Account settings even when previously synced', () => {
+    const view = mount(
+      <SettingsPage
+        isOpen={true}
+        initialPage="account"
+        onClose={vi.fn()}
+        tasks={[]}
+        syncStatus={{
+          phase: 'idle',
+          lastSyncedAt: 1_700_000_000_000,
+          lastError: 'Backup is too large.',
+          autoSyncEnabled: true,
+          account: { email: 'user@example.com' },
+        }}
+        onSyncStatusChange={vi.fn()}
+        onShowShortcuts={vi.fn()}
+      />
+    );
+
+    const alert = view.container.querySelector('[role="alert"]');
+    expect(alert).toBeTruthy();
+    expect(alert!.textContent).toContain('Last sync failed: Backup is too large.');
+    expect(view.container.textContent).toContain('Sync failed — tap to fix');
+
+    view.unmount();
+  });
 });

@@ -33,6 +33,7 @@ import {
   signOutGoogleSession,
 } from '../../sync/googleAuth';
 import {
+  clearSyncError,
   isAutoSyncEnabled,
   runDriveSync,
   setAutoSyncEnabled,
@@ -130,7 +131,7 @@ export function SettingsPage(props: SettingsPageProps) {
       body = <RootPage {...props} go={go} />;
       break;
     case 'account':
-      body = <AccountPage {...props} setStatus={setStatus} />;
+      body = <AccountPage {...props} setStatus={setStatus} suppressLastErrorBanner={status?.type === 'error'} />;
       break;
     case 'appearance':
       body = <AppearancePage />;
@@ -346,7 +347,8 @@ function AccountPage({
   syncStatus,
   onSyncStatusChange,
   setStatus,
-}: SettingsPageProps & { setStatus: (s: Status) => void }) {
+  suppressLastErrorBanner = false,
+}: SettingsPageProps & { setStatus: (s: Status) => void; suppressLastErrorBanner?: boolean }) {
   const [customClientId, setCustomClientId] = useState(() => getCustomClientId());
   const [isSyncing, setIsSyncing] = useState(false);
   const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
@@ -445,6 +447,7 @@ function AccountPage({
   const handleSignOut = () => {
     void signOutGoogleSession();
     setGoogleAccount(null);
+    clearSyncError();
     setStatus({ type: 'success', message: 'Signed out on this device. Local tasks are kept.' });
     onSyncStatusChange();
   };
@@ -471,6 +474,16 @@ function AccountPage({
             Set <code className="text-tt-text px-1 py-0.5 bg-tt-input rounded">VITE_GOOGLE_CLIENT_ID</code> in your environment, or expand <em>Advanced Settings</em> below to enter a Client ID.
           </p>
         </Card>
+      )}
+
+      {syncStatus.lastError && !isSyncing && !suppressLastErrorBanner && (
+        <div
+          role="alert"
+          className="mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] border border-tt-overdue/30 bg-tt-overdue/10 text-tt-overdue"
+        >
+          <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
+          <span className="flex-1 break-words">Last sync failed: {syncStatus.lastError}</span>
+        </div>
       )}
 
       <SectionLabel>Google Drive sync</SectionLabel>
@@ -853,7 +866,15 @@ function IntegrationsPage({
         <NavRow
           icon={<DriveIcon />}
           label="Google Drive sync"
-          value={syncStatus.lastSyncedAt ? (syncStatus.autoSyncEnabled ? 'On' : 'Manual') : 'Off'}
+          value={
+            syncStatus.phase === 'error' || Boolean(syncStatus.lastError)
+              ? 'Failed'
+              : syncStatus.lastSyncedAt
+                ? syncStatus.autoSyncEnabled
+                  ? 'On'
+                  : 'Manual'
+                : 'Off'
+          }
           onClick={() => go('account')}
         />
       </Card>

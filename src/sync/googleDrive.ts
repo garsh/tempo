@@ -55,6 +55,28 @@ export function selectBackupFileId(remembered: string | null, idsNewestFirst: st
   return safe[0] ?? null;
 }
 
+/**
+ * Order Drive file metadata objects newest-first by `modifiedTime` descending.
+ * Entries without a valid timestamp are sorted after dated ones, preserving order on ties.
+ */
+export function orderBackupFileIdsNewestFirst(
+  files: ReadonlyArray<{ id?: string; modifiedTime?: string }>
+): string[] {
+  const parseModifiedMs = (value: string | undefined): number => {
+    if (!value) return -Infinity;
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? -Infinity : ms;
+  };
+  return [...files]
+    .sort((a, b) => {
+      const aTime = parseModifiedMs(a.modifiedTime);
+      const bTime = parseModifiedMs(b.modifiedTime);
+      if (aTime === bTime) return 0;
+      return bTime > aTime ? 1 : -1;
+    })
+    .map((file) => file.id ?? '');
+}
+
 function readRememberedFileId(): string | null {
   try {
     if (typeof localStorage === 'undefined') return null;
@@ -98,11 +120,14 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
     throw new Error(`Drive search failed: ${searchRes.statusText}`);
   }
 
-  const searchData = (await searchRes.json()) as { files?: { id?: string }[] };
-  const ids = (searchData.files ?? []).map((file) => file.id ?? '');
+  const searchData = (await searchRes.json()) as {
+    files?: { id?: string; modifiedTime?: string }[];
+  };
+  const ids = orderBackupFileIdsNewestFirst(searchData.files ?? []);
   const chosen = selectBackupFileId(readRememberedFileId(), ids);
   if (chosen) {
     rememberFileId(chosen);
+    recordDiagEvent('drive_file', `chosen=${chosen} matches=${ids.filter(isSafeDriveFileId).length}`);
     return chosen;
   }
 
@@ -127,6 +152,7 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
     throw new Error('Drive returned an invalid file id');
   }
   rememberFileId(createdFile.id);
+  recordDiagEvent('drive_file', `created=${createdFile.id}`);
   return createdFile.id;
 }
 

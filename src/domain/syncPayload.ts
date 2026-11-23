@@ -18,6 +18,7 @@ export const MAX_ID_LENGTH = 128;
 export const MAX_TITLE_LENGTH = 2_000;
 export const MAX_NOTES_LENGTH = 10_000;
 export const MAX_HISTORY = 365;
+const MAX_HISTORY_SCAN = 50_000;
 export const MAX_SCHEDULE_HISTORY = 100;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Timestamps further ahead than this are hostile and are rewritten to `now`. */
@@ -123,13 +124,19 @@ function asOptionalStamp(value: unknown, now: number): number | null | undefined
 
 function asHistory(value: unknown): number[] {
   if (!Array.isArray(value)) return [];
-  const nums: number[] = [];
-  for (const item of value) {
-    if (typeof item === 'number' && Number.isFinite(item)) nums.push(item);
-    if (nums.length > MAX_HISTORY * 4) break;
+  const seen = new Set<number>();
+  const add = (item: unknown) => {
+    if (typeof item === 'number' && Number.isFinite(item)) seen.add(item);
+  };
+  if (value.length <= MAX_HISTORY_SCAN) {
+    for (let i = 0; i < value.length; i++) add(value[i]);
+  } else {
+    const half = Math.floor(MAX_HISTORY_SCAN / 2);
+    for (let i = 0; i < half; i++) add(value[i]);
+    for (let i = value.length - half; i < value.length; i++) add(value[i]);
   }
-  nums.sort((a, b) => a - b);
-  return nums.length > MAX_HISTORY ? nums.slice(-MAX_HISTORY) : nums;
+  const sorted = [...seen].sort((a, b) => a - b);
+  return sorted.length > MAX_HISTORY ? sorted.slice(-MAX_HISTORY) : sorted;
 }
 
 function asDateList(value: unknown): string[] | undefined {

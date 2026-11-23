@@ -39,6 +39,30 @@ describe('account summary (drawer header / settings account)', () => {
     expect(summarizeAccount(null, snap({ lastSyncedAt: 1, autoSyncEnabled: false }), true).subtitle).toMatch(/auto-sync off$/);
   });
 
+  it('surfaces lastError even when lastSyncedAt is already present, while syncing takes precedence', () => {
+    const failed = summarizeAccount(
+      { email: 'a@b.c' },
+      snap({ phase: 'idle', lastSyncedAt: 1_000, lastError: 'Backup is too large.' }),
+      true
+    );
+    expect(failed).toEqual({
+      title: 'a@b.c',
+      subtitle: 'Sync failed — tap to fix',
+      warn: true,
+    });
+
+    const syncing = summarizeAccount(
+      { email: 'a@b.c' },
+      snap({ phase: 'syncing', lastSyncedAt: 1_000, lastError: 'Backup is too large.' }),
+      true
+    );
+    expect(syncing).toEqual({
+      title: 'a@b.c',
+      subtitle: 'Syncing…',
+      warn: false,
+    });
+  });
+
   it('formats relative times', () => {
     expect(formatAgo(1000, 1000 + 30_000)).toBe('just now');
     expect(formatAgo(0, 3 * 3600_000)).toBe('3h ago');

@@ -30,7 +30,7 @@ export function summarizeAccount(
     account?.email ??
     (status.lastSyncedAt ? 'Google Drive' : isSyncing ? 'Connecting to Drive…' : 'Not signed in');
   if (isSyncing) return { title, subtitle: account ? 'Syncing…' : 'Syncing routines…', warn: false };
-  if (status.phase === 'error' || (status.lastError && !status.lastSyncedAt)) {
+  if (status.phase === 'error' || Boolean(status.lastError)) {
     return { title, subtitle: 'Sync failed — tap to fix', warn: true };
   }
   if (!hasClientId && !account) return { title, subtitle: 'Sign in to sync with Drive', warn: true };

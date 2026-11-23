@@ -51,6 +51,13 @@ describe('autoSync', () => {
     autoSync.recordSyncSuccess(987654321);
     expect(autoSync.getLastSyncedAt()).toBe(987654321);
     expect(autoSync.getLastSyncError()).toBeNull();
+
+    // clearSyncError removes stored error without erasing lastSyncedAt
+    autoSync.recordSyncError('Upload interrupted');
+    expect(autoSync.getLastSyncError()).toBe('Upload interrupted');
+    autoSync.clearSyncError();
+    expect(autoSync.getLastSyncError()).toBeNull();
+    expect(autoSync.getLastSyncedAt()).toBe(987654321);
   });
 
   it('reads sync status snapshot with requested phase', () => {

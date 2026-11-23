@@ -1116,7 +1116,13 @@ export function App() {
           activeNav={desktopActiveNav}
           tasksDotTone={tasksDotTone}
           tasksCount={tasksCount}
-          syncPhase={syncStatus.phase}
+          syncPhase={
+            syncStatus.phase === 'syncing'
+              ? 'syncing'
+              : syncStatus.lastError
+                ? 'error'
+                : syncStatus.phase
+          }
           onSelectCalendar={() => {
             setIsSearchOpen(false);
             setIsRecurringOpen(false);

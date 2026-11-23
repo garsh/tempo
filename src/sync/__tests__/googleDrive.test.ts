@@ -116,6 +116,39 @@ describe('googleDrive', () => {
         'Failed to create backup file in Drive: Internal Error'
       );
     });
+
+    it('sorts unsorted fallback results by modifiedTime when orderBy is rejected with 400', async () => {
+      const store = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            files: [
+              { id: 'older-file', name: 'tempo_backup.json', modifiedTime: '2026-11-01T12:00:00.000Z' },
+              { id: 'newest-file', name: 'tempo_backup.json', modifiedTime: '2026-11-23T12:00:00.000Z' },
+              { id: 'middle-file', name: 'tempo_backup.json', modifiedTime: '2026-11-10T12:00:00.000Z' },
+            ],
+          }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const fileId = await getOrCreateAppDataFile('test-token');
+      expect(fileId).toBe('newest-file');
+      expect(store.get('tempo_drive_backup_file_id')).toBe('newest-file');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('downloadDriveBackup', () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AUTO_SYNC_INTERVAL_MS,
   canAutoSync,
+  clearSyncError,
   isAutoSyncEnabled,
   isQuietSyncError,
   readSyncStatusSnapshot,
@@ -96,6 +97,7 @@ export function useAutoSync(onSynced?: () => void): {
     const unsubscribeSignOut = subscribeGoogleSignOut(() => {
       applyRemoteSignOut();
       setGoogleAccount(null);
+      clearSyncError();
       refreshStatus('idle');
     });
 

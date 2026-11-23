@@ -266,6 +266,35 @@ describe('parseSyncPayload', () => {
       deletedAt: 60,
     });
   });
+
+  it('retains the newest 365 unique completions regardless of input order or > 1,460 entries', () => {
+    const ascending = Array.from({ length: 2_000 }, (_, i) => i + 1);
+    const parsedAsc = parseSyncPayload(
+      JSON.stringify({ tasks: [task(10, { completionHistory: ascending })] }),
+      { now }
+    );
+    expect(parsedAsc.tasks[0]?.completionHistory).toHaveLength(365);
+    expect(parsedAsc.tasks[0]?.completionHistory[0]).toBe(1_636);
+    expect(parsedAsc.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+
+    const descending = [...ascending].reverse();
+    const parsedDesc = parseSyncPayload(
+      JSON.stringify({ tasks: [task(10, { completionHistory: descending })] }),
+      { now }
+    );
+    expect(parsedDesc.tasks[0]?.completionHistory).toHaveLength(365);
+    expect(parsedDesc.tasks[0]?.completionHistory[0]).toBe(1_636);
+    expect(parsedDesc.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+
+    const withDupes = [...ascending, ...ascending.slice(-100)];
+    const parsedDupes = parseSyncPayload(
+      JSON.stringify({ tasks: [task(10, { completionHistory: withDupes })] }),
+      { now }
+    );
+    expect(parsedDupes.tasks[0]?.completionHistory).toHaveLength(365);
+    expect(parsedDupes.tasks[0]?.completionHistory[0]).toBe(1_636);
+    expect(parsedDupes.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+  });
 });
 
 describe('readResponseTextCapped', () => {

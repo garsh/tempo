@@ -57,6 +57,10 @@ export function recordSyncError(message: string): void {
   localStorage.setItem(LAST_ERROR_KEY, message);
 }
 
+export function clearSyncError(): void {
+  localStorage.removeItem(LAST_ERROR_KEY);
+}
+
 export function readSyncStatusSnapshot(phase: SyncPhase = 'idle'): SyncStatusSnapshot {
   return {
     phase,
