@@ -47,12 +47,12 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="skip-dialog-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
+      className="fixed inset-0 z-[65] flex items-center justify-center p-4 compact-landscape:p-2 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-lg bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-8 overflow-hidden text-tt-text space-y-6">
+      <div className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-8 compact-landscape:p-4 text-tt-text space-y-6 compact-landscape:space-y-3">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-3.5 min-w-0">

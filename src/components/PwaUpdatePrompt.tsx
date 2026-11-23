@@ -187,7 +187,8 @@ export function PwaUpdatePrompt() {
       <div
         role="status"
         aria-live="polite"
-        className="fixed bottom-20 sm:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--tt-elevated)] text-[var(--tt-text)] border border-[var(--tt-border)] shadow-[0_8px_24px_var(--tt-shadow)] max-w-[calc(100vw-2rem)]"
+        className="fixed bottom-20 desktop:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--tt-elevated)] text-[var(--tt-text)] border border-[var(--tt-border)] shadow-[0_8px_24px_var(--tt-shadow)] max-w-[calc(100dvw-2rem)]"
+        style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {status.type === 'checking' || status.type === 'downloading' || status.type === 'applying' ? (
           <RefreshCw className="w-4 h-4 shrink-0 text-[var(--tt-blue)] animate-spin" aria-hidden="true" />
@@ -215,7 +216,8 @@ export function PwaUpdatePrompt() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-20 sm:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--tt-elevated)] text-[var(--tt-text)] border border-[var(--tt-border)] shadow-[0_8px_24px_var(--tt-shadow)] max-w-[calc(100vw-2rem)]"
+      className="fixed bottom-20 desktop:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--tt-elevated)] text-[var(--tt-text)] border border-[var(--tt-border)] shadow-[0_8px_24px_var(--tt-shadow)] max-w-[calc(100dvw-2rem)]"
+      style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <RefreshCw className="w-4 h-4 shrink-0 text-[var(--tt-blue)]" aria-hidden="true" />
       <span className="text-sm font-medium whitespace-nowrap">Update available</span>

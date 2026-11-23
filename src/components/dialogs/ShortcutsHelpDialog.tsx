@@ -9,6 +9,9 @@ interface ShortcutsHelpDialogProps {
 const SHORTCUTS: readonly [string, string][] = [
   ['n / c', 'New task (capture)'],
   ['/', 'Search tasks'],
+  ['1 / 2 / 3', 'Calendar / Tasks / Recurring'],
+  ['t', 'Jump to Today'],
+  ['[ / ]', 'Previous / Next period'],
   ['Esc', 'Close modals'],
   ['?', 'This help'],
 ];
@@ -23,12 +26,12 @@ export function ShortcutsHelpDialog({ open, onClose }: ShortcutsHelpDialogProps)
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md bg-tt-elevated border border-tt-border rounded-3xl p-6 shadow-2xl">
+      <div className="w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl p-6 compact-landscape:p-4 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
             <Keyboard className="w-5 h-5 text-tt-blue" />

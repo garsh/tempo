@@ -35,6 +35,8 @@ interface CalendarMonthViewProps {
   monthIndex: number;
   selectedDateStr: string | null;
   expanded: boolean;
+  collapsible?: boolean;
+  rowHeight?: number;
   onToggleExpanded: (next?: boolean) => void;
   onMonthChange: (year: number, monthIndex: number) => void;
   onSelectDate: (dateStr: string) => void;
@@ -55,6 +57,8 @@ export function CalendarMonthView({
   monthIndex,
   selectedDateStr,
   expanded,
+  collapsible = true,
+  rowHeight = CALENDAR_ROW_HEIGHT,
   onToggleExpanded,
   onMonthChange,
   onSelectDate,
@@ -63,6 +67,8 @@ export function CalendarMonthView({
   onSwipeProgress,
   ref,
 }: CalendarMonthViewProps) {
+  const effectiveExpanded = collapsible ? expanded : true;
+  const expandDelta = rowHeight * (CALENDAR_WEEK_COUNT - 1);
   const [{ weekStart, showOverdue }] = usePrefs();
   const todayStr = formatDate(new Date());
   const focusStr = selectedDateStr || todayStr;
@@ -74,10 +80,12 @@ export function CalendarMonthView({
   const pullingRef = useRef(false);
   const releaseFrameRef = useRef<number | null>(null);
   const pullLayoutRef = useRef({
-    expanded,
+    expanded: effectiveExpanded,
     selectedWeekIndex: 0,
     containerHeight: 0,
     gridTranslateY: 0,
+    rowHeight,
+    expandDelta,
   });
   const currentDragOffsetRef = useRef(0);
   const justSwipedRef = useRef(false);
@@ -121,18 +129,24 @@ export function CalendarMonthView({
     [nextWeek, weekStart, todayStr]
   );
 
-  const prevCells = expanded ? prevMonthGrid : prevWeekCells;
+  const prevCells = effectiveExpanded ? prevMonthGrid : prevWeekCells;
   // The entire month is always rendered so that rows expand and shrink smoothly and proportionately
   const currentCells = currentMonthGrid;
-  const nextCells = expanded ? nextMonthGrid : nextWeekCells;
+  const nextCells = effectiveExpanded ? nextMonthGrid : nextWeekCells;
 
   const prevHighlightStr = useMemo(
-    () => (expanded ? defaultDateForMonth(prevMonth.year, prevMonth.monthIndex) : prevWeek.dateStr),
-    [expanded, prevMonth.year, prevMonth.monthIndex, prevWeek.dateStr]
+    () =>
+      effectiveExpanded
+        ? defaultDateForMonth(prevMonth.year, prevMonth.monthIndex)
+        : prevWeek.dateStr,
+    [effectiveExpanded, prevMonth.year, prevMonth.monthIndex, prevWeek.dateStr]
   );
   const nextHighlightStr = useMemo(
-    () => (expanded ? defaultDateForMonth(nextMonth.year, nextMonth.monthIndex) : nextWeek.dateStr),
-    [expanded, nextMonth.year, nextMonth.monthIndex, nextWeek.dateStr]
+    () =>
+      effectiveExpanded
+        ? defaultDateForMonth(nextMonth.year, nextMonth.monthIndex)
+        : nextWeek.dateStr,
+    [effectiveExpanded, nextMonth.year, nextMonth.monthIndex, nextWeek.dateStr]
   );
 
   const dueDateSet = useMemo(() => {
@@ -244,14 +258,14 @@ export function CalendarMonthView({
           if (customHandler) {
             customHandler();
           } else {
-            const shifted = expanded
+            const shifted = effectiveExpanded
               ? shiftMonthView(year, monthIndex, selectedDateStr, target)
               : shiftWeek(selectedDateStr, target);
             onSelectDate(shifted.dateStr);
             if (shifted.year !== year || shifted.monthIndex !== monthIndex) {
               monthWillChange = true;
               onMonthChange(shifted.year, shifted.monthIndex);
-            } else if (expanded) {
+            } else if (effectiveExpanded) {
               onMonthChange(shifted.year, shifted.monthIndex);
             }
           }
@@ -266,7 +280,7 @@ export function CalendarMonthView({
         }, 100);
       }, SNAP_DURATION);
     },
-    [expanded, year, monthIndex, selectedDateStr, onSwipeLeft, onSwipeRight, onSelectDate, onMonthChange, resetHorizontalTrack]
+    [effectiveExpanded, year, monthIndex, selectedDateStr, onSwipeLeft, onSwipeRight, onSelectDate, onMonthChange, resetHorizontalTrack]
   );
 
   useEffect(() => {
@@ -399,30 +413,37 @@ export function CalendarMonthView({
     pointerDirectionRef.current = 'none';
   };
 
-  const progress = expanded ? 1 : 0;
-  const containerHeight = CALENDAR_ROW_HEIGHT + progress * CALENDAR_EXPAND_DELTA;
+  const progress = effectiveExpanded ? 1 : 0;
+  const containerHeight = rowHeight + progress * expandDelta;
 
   const [isExpanding, setIsExpanding] = useState(false);
-  const prevExpandedRef = useRef(expanded);
+  const prevExpandedRef = useRef(effectiveExpanded);
 
   useEffect(() => {
-    const expandedChanged = prevExpandedRef.current !== expanded;
-    prevExpandedRef.current = expanded;
+    const expandedChanged = prevExpandedRef.current !== effectiveExpanded;
+    prevExpandedRef.current = effectiveExpanded;
     if (!expandedChanged) return;
     setIsExpanding(true);
     const timer = setTimeout(() => {
       setIsExpanding(false);
     }, 250);
     return () => clearTimeout(timer);
-  }, [expanded]);
+  }, [effectiveExpanded]);
 
   const selectedWeekIndex = useMemo(() => {
     const idx = currentMonthGrid.findIndex((c) => c.dateStr === focusStr);
     return idx >= 0 ? Math.floor(idx / 7) : 0;
   }, [currentMonthGrid, focusStr]);
 
-  const gridTranslateY = -selectedWeekIndex * CALENDAR_ROW_HEIGHT * (1 - progress);
-  pullLayoutRef.current = { expanded, selectedWeekIndex, containerHeight, gridTranslateY };
+  const gridTranslateY = -selectedWeekIndex * rowHeight * (1 - progress);
+  pullLayoutRef.current = {
+    expanded: effectiveExpanded,
+    selectedWeekIndex,
+    containerHeight,
+    gridTranslateY,
+    rowHeight,
+    expandDelta,
+  };
 
   useImperativeHandle(ref, () => ({
     setPullProgress(progress: number) {
@@ -432,16 +453,16 @@ export function CalendarMonthView({
       }
       pullingRef.current = true;
       const p = Math.max(0, Math.min(1, progress));
-      const week = pullLayoutRef.current.selectedWeekIndex;
+      const { selectedWeekIndex: week, rowHeight: rh, expandDelta: ed } = pullLayoutRef.current;
       const heightEl = heightRef.current;
       const shiftEl = weekShiftRef.current;
       if (heightEl) {
         heightEl.style.transition = 'none';
-        heightEl.style.height = `${CALENDAR_ROW_HEIGHT + p * CALENDAR_EXPAND_DELTA}px`;
+        heightEl.style.height = `${rh + p * ed}px`;
       }
       if (shiftEl) {
         shiftEl.style.transition = 'none';
-        shiftEl.style.transform = `translateY(${-week * CALENDAR_ROW_HEIGHT * (1 - p)}px)`;
+        shiftEl.style.transform = `translateY(${-week * rh * (1 - p)}px)`;
       }
     },
     releasePull(commit: () => void) {
@@ -478,11 +499,11 @@ export function CalendarMonthView({
     },
   }), [resetHorizontalTrack]);
 
-  const prevGridKey = expanded
+  const prevGridKey = effectiveExpanded
     ? `m-${prevMonth.year}-${prevMonth.monthIndex}`
     : `w-${prevWeek.dateStr}`;
   const currentGridKey = `m-${year}-${monthIndex}`;
-  const nextGridKey = expanded
+  const nextGridKey = effectiveExpanded
     ? `m-${nextMonth.year}-${nextMonth.monthIndex}`
     : `w-${nextWeek.dateStr}`;
 
@@ -504,10 +525,11 @@ export function CalendarMonthView({
           return (
             <button
               key={`${gridKey}-${cell.dateStr}`}
-              data-date={cell.dateStr}
-              aria-current={isToday ? 'date' : undefined}
+              data-date={isCurrentPage ? cell.dateStr : undefined}
+              tabIndex={isCurrentPage ? undefined : -1}
+              aria-current={isCurrentPage && isToday ? 'date' : undefined}
               type="button"
-              style={{ height: `${CALENDAR_ROW_HEIGHT}px` }}
+              style={{ height: `${rowHeight}px` }}
               onClick={() => {
                 if (justSwipedRef.current || isSnappingRef.current) return;
                 onSelectDate(cell.dateStr);
@@ -521,7 +543,9 @@ export function CalendarMonthView({
               className="flex flex-col items-center justify-center rounded-xl hover:bg-tt-sidebar/60 transition-colors cursor-pointer"
             >
               <span
-                className={`w-7 h-7 inline-flex items-center justify-center rounded-full text-[15px] leading-none font-semibold ${
+                className={`${
+                  rowHeight >= 40 ? 'w-8 h-8 text-[14px]' : 'w-7 h-7 text-[15px]'
+                } inline-flex items-center justify-center rounded-full leading-none font-semibold ${
                   selected
                     ? 'bg-tt-blue text-white'
                     : isToday
@@ -617,14 +641,16 @@ export function CalendarMonthView({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onToggleExpanded()}
-        aria-label={expanded ? 'Collapse calendar' : 'Expand calendar'}
-        className="w-full flex justify-center pt-1.5 pb-1 cursor-pointer group"
-      >
-        <span className="w-9 h-1 rounded-full bg-tt-border group-hover:bg-tt-muted transition-colors" />
-      </button>
+      {collapsible && (
+        <button
+          type="button"
+          onClick={() => onToggleExpanded()}
+          aria-label={effectiveExpanded ? 'Collapse calendar' : 'Expand calendar'}
+          className="w-full flex justify-center pt-1.5 pb-1 cursor-pointer group"
+        >
+          <span className="w-9 h-1 rounded-full bg-tt-border group-hover:bg-tt-muted transition-colors" />
+        </button>
+      )}
     </div>
   );
 }

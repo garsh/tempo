@@ -152,12 +152,12 @@ export function MoveRecurringDialog({
       ref={dialogRef}
       aria-labelledby={headingId}
       {...({ closedby: 'any' } as Record<string, string>)}
-      className="m-auto p-0 w-[min(calc(100vw-2rem),32rem)] max-w-none max-h-[calc(100dvh-2rem)] bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl text-tt-text overflow-y-auto"
+      className="m-auto p-0 w-[min(calc(100dvw-2rem),32rem)] compact-landscape:w-[min(calc(100dvw-2rem),40rem)] max-w-none max-h-[calc(100dvh-1.5rem)] bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl text-tt-text overflow-y-auto"
     >
       {task && analysis && fromDate && toDate && (
-        <div className="p-6 sm:p-7 space-y-5">
+        <div className="p-6 sm:p-7 compact-landscape:p-4 space-y-5 compact-landscape:space-y-3">
           {/* Header */}
-          <div className="flex items-center justify-between pb-4 border-b border-tt-border">
+          <div className="flex items-center justify-between pb-4 compact-landscape:pb-2.5 border-b border-tt-border">
             <div className="flex items-center gap-3.5 min-w-0">
               <div className="p-3 rounded-2xl bg-tt-blue/15 text-tt-blue shrink-0">
                 <RefreshCw className="w-6 h-6" />
@@ -207,7 +207,7 @@ export function MoveRecurringDialog({
           </div>
 
           {/* Choices */}
-          <div className="space-y-3">
+          <div className="space-y-3 compact-landscape:space-y-0 compact-landscape:grid compact-landscape:grid-cols-2 compact-landscape:gap-2.5">
             <button
               type="button"
               disabled={isApplying || (analysis.isCompletedOccurrence && !analysis.canMoveCompletedOccurrence)}

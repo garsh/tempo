@@ -5,6 +5,7 @@ import {
   Clock,
   Plus,
   RefreshCw,
+  Trash2,
   X,
 } from 'lucide-react';
 import type {
@@ -45,6 +46,11 @@ export interface QuickAddSheetProps {
   initialTask?: Task | null;
   /** Pre-filled due date (YYYY-MM-DD). Calendar passes selected day; Tasks passes null. */
   defaultDueAt?: string | null;
+  /** Modal sheet on mobile/split vs docked right-hand inspector drawer on desktop. */
+  presentation?: 'sheet' | 'drawer';
+  /** Float over the rightmost column at 1280–1679px, switching to inline on ultrawide. */
+  overlayDrawer?: boolean;
+  onRequestDelete?: (task: Task) => void;
   onLogCompletionDate?: (taskId: string, dateStr: string) => Promise<void> | void;
   onRemoveCompletionTimestamp?: (taskId: string, timestamp: number) => Promise<void> | void;
 }
@@ -132,6 +138,9 @@ export function QuickAddSheet({
   onSave,
   initialTask = null,
   defaultDueAt,
+  presentation = 'sheet',
+  overlayDrawer = false,
+  onRequestDelete,
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
 }: QuickAddSheetProps) {
@@ -620,6 +629,13 @@ export function QuickAddSheet({
     }
   };
 
+  const onNotesKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      void handleSubmit();
+    }
+  };
+
   const toolBtn = (
     label: string,
     active: boolean,
@@ -649,6 +665,283 @@ export function QuickAddSheet({
     </button>
   );
 
+  const dateChipControl = toolBtn(
+    isWindowMode ? 'Last done' : 'Date',
+    isWindowMode
+      ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
+      : dateMenuOpen || !!dueAt,
+    () => {
+      setRepeatMenuOpen(false);
+      if (isWindowMode && initialTask?.id && localHistory.length > 0) {
+        setDateMenuOpen(false);
+        setPanel('repeat');
+        window.requestAnimationFrame(() => {
+          historySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      } else {
+        setDateMenuOpen((open) => !open);
+      }
+    },
+    <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
+      {isWindowMode ? (
+        <Clock className="w-4 h-4 stroke-[2.2]" />
+      ) : (
+        <Calendar className="w-4 h-4 stroke-[2.2]" />
+      )}
+      <span>{dateChipLabel}</span>
+    </span>,
+    'shrink-0',
+    undefined,
+    isWindowMode && initialTask?.id && localHistory.length > 0
+      ? undefined
+      : { expanded: dateMenuOpen, controlsId: 'date-choice-menu', buttonRef: dateButtonRef },
+  );
+
+  const repeatChipControl = toolBtn(
+    'Repeat',
+    panel === 'repeat' || isRecurring || repeatMenuOpen,
+    () => {
+      setDateMenuOpen(false);
+      if (!isRecurring) {
+        setRepeatMenuOpen((open) => !open);
+      } else if (panel !== 'repeat') {
+        titleRef.current?.blur();
+        setKeyboardInset(0);
+        setPanel('repeat');
+      } else {
+        setRepeatMenuOpen((open) => !open);
+      }
+    },
+    <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
+      <RefreshCw className="w-4 h-4 stroke-[2.2]" />
+      <span>
+        {!isRecurring
+          ? 'Repeat'
+          : recurrenceType === 'after_completion'
+            ? 'Approx'
+            : recurrenceType === 'annual_window'
+              ? 'Yearly'
+              : 'Fixed'}
+      </span>
+    </span>,
+    'shrink-0',
+    {
+      active: 'bg-tt-blue text-white border border-tt-blue shadow-sm shadow-tt-blue/25',
+      inactive:
+        'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
+    },
+    { expanded: repeatMenuOpen, controlsId: 'repeat-choice-menu', buttonRef: repeatButtonRef },
+  );
+
+  const repeatPanelEl = panel === 'repeat' && (
+    <RepeatPanel
+      recurrenceType={recurrenceType}
+      intervalValue={intervalValue}
+      setIntervalValue={setIntervalValue}
+      maxIntervalValue={maxIntervalValue}
+      setMaxIntervalValue={setMaxIntervalValue}
+      minInput={minInput}
+      setMinInput={setMinInput}
+      maxInput={maxInput}
+      setMaxInput={setMaxInput}
+      intervalUnit={intervalUnit}
+      setIntervalUnit={setIntervalUnit}
+      weekdays={weekdays}
+      toggleWeekday={toggleWeekday}
+      useMonthDay={useMonthDay}
+      setUseMonthDay={setUseMonthDay}
+      monthDay={monthDay}
+      setMonthDay={setMonthDay}
+      setWeekdays={setWeekdays}
+      annualStartMonth={annualStartMonth}
+      setAnnualStartMonth={setAnnualStartMonth}
+      annualStartDay={annualStartDay}
+      setAnnualStartDay={setAnnualStartDay}
+      annualEndMonth={annualEndMonth}
+      setAnnualEndMonth={setAnnualEndMonth}
+      annualEndDay={annualEndDay}
+      setAnnualEndDay={setAnnualEndDay}
+      endMode={endMode}
+      setEndMode={setEndMode}
+      endOnDate={endOnDate}
+      setEndOnDate={setEndOnDate}
+      endAfterCount={endAfterCount}
+      setEndAfterCount={setEndAfterCount}
+      initialTaskId={initialTask?.id}
+      todayStr={todayStr}
+      localHistory={localHistory}
+      setLocalHistory={setLocalHistory}
+      historySectionRef={historySectionRef}
+      onLogCompletionDate={onLogCompletionDate}
+      onRemoveCompletionTimestamp={onRemoveCompletionTimestamp}
+    />
+  );
+
+  const choiceMenusEl = (
+    <>
+      <DateChoiceMenu
+        open={dateMenuOpen}
+        anchorRef={dateButtonRef}
+        active={datePreset}
+        mode={isWindowMode ? 'last_done' : 'due'}
+        allowNoDate={!isRecurring}
+        maxDate={isWindowMode ? todayStr : undefined}
+        dateValue={isWindowMode ? (initialLastDoneDate ?? '') : datePart}
+        onClose={() => setDateMenuOpen(false)}
+        onToday={() => {
+          if (isWindowMode) setInitialLastDoneDate(todayStr);
+          else setDueAt(todayStr);
+        }}
+        onTomorrow={isWindowMode ? undefined : () => setDueAt(tomorrowStr)}
+        onNoDate={() => {
+          if (isWindowMode) setInitialLastDoneDate(null);
+          else setDueAt(null);
+        }}
+        onDatePicked={(val) => {
+          if (isWindowMode) setInitialLastDoneDate(val);
+          else setDueAt(val);
+        }}
+      />
+      <RepeatChoiceMenu
+        open={repeatMenuOpen}
+        anchorRef={repeatButtonRef}
+        active={isRecurring ? recurrenceType : null}
+        onClose={() => setRepeatMenuOpen(false)}
+        onSelectFixed={handleSelectFixed}
+        onSelectApproximate={handleSelectApproximate}
+        onSelectAnnualWindow={handleSelectAnnualWindow}
+        onClearRepeat={handleClearRepeat}
+      />
+    </>
+  );
+
+  if (presentation === 'drawer') {
+    return (
+      <>
+        <aside
+          data-testid="quick-add-sheet"
+          data-presentation="drawer"
+          role="dialog"
+          aria-label={initialTask ? 'Edit routine' : 'Add routine'}
+          className={`${
+            overlayDrawer
+              ? 'absolute inset-y-0 right-0 z-40 shadow-[-8px_0_28px_var(--tt-shadow)] min-[1680px]:static min-[1680px]:shadow-none'
+              : 'relative z-20 shrink-0'
+          } w-[380px] xl:w-[420px] max-w-[calc(100%-24px)] h-full bg-tt-elevated border-l border-tt-border flex flex-col overflow-hidden`}
+        >
+          <div className="shrink-0 h-14 px-5 border-b border-tt-border flex items-center justify-between gap-2">
+            <span className="text-[14px] font-bold uppercase tracking-wider text-tt-secondary">
+              {initialTask ? 'Edit Routine' : 'New Routine'}
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close (Esc)"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto tt-scroll-stable">
+            <div className="px-5 pt-4">
+              <div
+                className="tt-autogrow-field w-full py-1.5 text-[20px] font-semibold leading-snug text-tt-text"
+                data-replicated-value={title || (initialTask ? 'Routine title' : 'What would you like to do?')}
+                style={{ '--tt-autogrow-min': '1lh', '--tt-autogrow-max': '8lh' } as React.CSSProperties}
+              >
+                <textarea
+                  ref={titleRef}
+                  name="routine_title"
+                  id="routine_title"
+                  rows={1}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value.replace(/[\r\n]+/g, ' '))}
+                  onKeyDown={onTitleKeyDown}
+                  enterKeyHint="done"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
+                  aria-label="Routine title"
+                  className="w-full bg-transparent text-tt-text placeholder:text-tt-muted outline-none resize-none wrap-break-word"
+                />
+              </div>
+              <div
+                className="tt-autogrow-field w-full py-1.5 text-[15px] leading-relaxed text-tt-text"
+                data-replicated-value={notes || 'Description (optional)'}
+                style={{ '--tt-autogrow-min': '4lh' } as React.CSSProperties}
+              >
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  onKeyDown={onNotesKeyDown}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  placeholder="Description (optional)"
+                  aria-label="Description"
+                  rows={4}
+                  className="w-full bg-transparent text-tt-text placeholder:text-tt-muted/70 outline-none resize-none wrap-break-word"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 px-4 pt-2 pb-3 flex-wrap">
+              {dateChipControl}
+              {repeatChipControl}
+            </div>
+
+            {repeatPanelEl}
+          </div>
+
+          <div className="shrink-0 px-5 py-3 border-t border-tt-border bg-tt-elevated flex items-center justify-between gap-2">
+            {initialTask?.id && onRequestDelete ? (
+              <button
+                type="button"
+                onClick={() => onRequestDelete(initialTask)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[13px] font-semibold text-tt-overdue hover:bg-red-500/10 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            ) : (
+              <span className="text-[12px] text-tt-muted">Ctrl+Enter to save</span>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3.5 py-2 rounded-xl text-[14px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                aria-label={initialTask ? 'Save routine' : 'Create routine'}
+                disabled={!canSubmit || isSubmitting}
+                onClick={() => void handleSubmit()}
+                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] font-bold tracking-wide transition-all ${
+                  canSubmit && !isSubmitting
+                    ? 'bg-tt-blue hover:bg-tt-blue-hover active:scale-95 text-white shadow-sm shadow-tt-blue/25 cursor-pointer'
+                    : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
+                }`}
+              >
+                {initialTask ? (
+                  <Check className="w-4 h-4 stroke-[3]" />
+                ) : (
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                )}
+                <span>{initialTask ? 'Save' : 'Create'}</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+        {choiceMenusEl}
+      </>
+    );
+  }
+
   const expanded = descriptionExpandsDialog(notes);
 
   const shellClass = expanded
@@ -668,10 +961,10 @@ export function QuickAddSheet({
       className={
         expanded
           ? 'fixed inset-0 z-[60]'
-          : `fixed inset-0 z-[60] flex items-start justify-center p-2.5 sm:p-5 ${
+          : `fixed inset-0 z-[60] flex items-start justify-center p-2.5 sm:p-5 compact-landscape:p-2 ${
               panel !== 'none'
-                ? 'pt-[max(8px,env(safe-area-inset-top))] sm:pt-6'
-                : 'pt-[max(12px,env(safe-area-inset-top))] sm:pt-14'
+                ? 'pt-[max(8px,env(safe-area-inset-top))] sm:pt-6 compact-landscape:pt-2'
+                : 'pt-[max(12px,env(safe-area-inset-top))] sm:pt-14 compact-landscape:pt-2'
             }`
       }
       data-testid="quick-add-sheet"
@@ -762,6 +1055,7 @@ export function QuickAddSheet({
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              onKeyDown={onNotesKeyDown}
               autoComplete="off"
               autoCorrect="off"
               placeholder="Description (optional)"
@@ -774,73 +1068,8 @@ export function QuickAddSheet({
 
         {/* Toolbar */}
         <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 flex-nowrap min-w-0">
-          {toolBtn(
-            isWindowMode ? 'Last done' : 'Date',
-            isWindowMode
-              ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
-              : dateMenuOpen || !!dueAt,
-            () => {
-              setRepeatMenuOpen(false);
-              if (isWindowMode && initialTask?.id && localHistory.length > 0) {
-                setDateMenuOpen(false);
-                setPanel('repeat');
-                window.requestAnimationFrame(() => {
-                  historySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                });
-              } else {
-                setDateMenuOpen((open) => !open);
-              }
-            },
-            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
-              {isWindowMode ? (
-                <Clock className="w-4 h-4 stroke-[2.2]" />
-              ) : (
-                <Calendar className="w-4 h-4 stroke-[2.2]" />
-              )}
-              <span>{dateChipLabel}</span>
-            </span>,
-            'shrink-0',
-            undefined,
-            isWindowMode && initialTask?.id && localHistory.length > 0
-              ? undefined
-              : { expanded: dateMenuOpen, controlsId: 'date-choice-menu', buttonRef: dateButtonRef },
-          )}
-
-          {toolBtn(
-            'Repeat',
-            panel === 'repeat' || isRecurring || repeatMenuOpen,
-            () => {
-              setDateMenuOpen(false);
-              if (!isRecurring) {
-                setRepeatMenuOpen((open) => !open);
-              } else if (panel !== 'repeat') {
-                titleRef.current?.blur();
-                setKeyboardInset(0);
-                setPanel('repeat');
-              } else {
-                setRepeatMenuOpen((open) => !open);
-              }
-            },
-            <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
-              <RefreshCw className="w-4 h-4 stroke-[2.2]" />
-              <span>
-                {!isRecurring
-                  ? 'Repeat'
-                  : recurrenceType === 'after_completion'
-                    ? 'Approx'
-                    : recurrenceType === 'annual_window'
-                      ? 'Yearly'
-                      : 'Fixed'}
-              </span>
-            </span>,
-            'shrink-0',
-            {
-              active: 'bg-tt-blue text-white border border-tt-blue shadow-sm shadow-tt-blue/25',
-              inactive:
-                'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
-            },
-            { expanded: repeatMenuOpen, controlsId: 'repeat-choice-menu', buttonRef: repeatButtonRef },
-          )}
+          {dateChipControl}
+          {repeatChipControl}
 
           <div className="flex-1 min-w-1" />
           <button
@@ -864,83 +1093,9 @@ export function QuickAddSheet({
         </div>
 
         {/* Repeat Panel */}
-        {panel === 'repeat' && (
-          <RepeatPanel
-            recurrenceType={recurrenceType}
-            intervalValue={intervalValue}
-            setIntervalValue={setIntervalValue}
-            maxIntervalValue={maxIntervalValue}
-            setMaxIntervalValue={setMaxIntervalValue}
-            minInput={minInput}
-            setMinInput={setMinInput}
-            maxInput={maxInput}
-            setMaxInput={setMaxInput}
-            intervalUnit={intervalUnit}
-            setIntervalUnit={setIntervalUnit}
-            weekdays={weekdays}
-            toggleWeekday={toggleWeekday}
-            useMonthDay={useMonthDay}
-            setUseMonthDay={setUseMonthDay}
-            monthDay={monthDay}
-            setMonthDay={setMonthDay}
-            setWeekdays={setWeekdays}
-            annualStartMonth={annualStartMonth}
-            setAnnualStartMonth={setAnnualStartMonth}
-            annualStartDay={annualStartDay}
-            setAnnualStartDay={setAnnualStartDay}
-            annualEndMonth={annualEndMonth}
-            setAnnualEndMonth={setAnnualEndMonth}
-            annualEndDay={annualEndDay}
-            setAnnualEndDay={setAnnualEndDay}
-            endMode={endMode}
-            setEndMode={setEndMode}
-            endOnDate={endOnDate}
-            setEndOnDate={setEndOnDate}
-            endAfterCount={endAfterCount}
-            setEndAfterCount={setEndAfterCount}
-            initialTaskId={initialTask?.id}
-            todayStr={todayStr}
-            localHistory={localHistory}
-            setLocalHistory={setLocalHistory}
-            historySectionRef={historySectionRef}
-            onLogCompletionDate={onLogCompletionDate}
-            onRemoveCompletionTimestamp={onRemoveCompletionTimestamp}
-          />
-        )}
+        {repeatPanelEl}
       </div>
-      <DateChoiceMenu
-        open={dateMenuOpen}
-        anchorRef={dateButtonRef}
-        active={datePreset}
-        mode={isWindowMode ? 'last_done' : 'due'}
-        allowNoDate={!isRecurring}
-        maxDate={isWindowMode ? todayStr : undefined}
-        dateValue={isWindowMode ? (initialLastDoneDate ?? '') : datePart}
-        onClose={() => setDateMenuOpen(false)}
-        onToday={() => {
-          if (isWindowMode) setInitialLastDoneDate(todayStr);
-          else setDueAt(todayStr);
-        }}
-        onTomorrow={isWindowMode ? undefined : () => setDueAt(tomorrowStr)}
-        onNoDate={() => {
-          if (isWindowMode) setInitialLastDoneDate(null);
-          else setDueAt(null);
-        }}
-        onDatePicked={(val) => {
-          if (isWindowMode) setInitialLastDoneDate(val);
-          else setDueAt(val);
-        }}
-      />
-      <RepeatChoiceMenu
-        open={repeatMenuOpen}
-        anchorRef={repeatButtonRef}
-        active={isRecurring ? recurrenceType : null}
-        onClose={() => setRepeatMenuOpen(false)}
-        onSelectFixed={handleSelectFixed}
-        onSelectApproximate={handleSelectApproximate}
-        onSelectAnnualWindow={handleSelectAnnualWindow}
-        onClearRepeat={handleClearRepeat}
-      />
+      {choiceMenusEl}
     </div>
   );
 }

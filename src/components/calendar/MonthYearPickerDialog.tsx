@@ -147,11 +147,11 @@ export function MonthYearPickerDialog({
       ref={dialogRef}
       aria-labelledby={headingId}
       {...({ closedby: 'any' } as Record<string, string>)}
-      className="m-auto p-0 w-[min(calc(100vw-2rem),340px)] max-w-none rounded-3xl bg-tt-elevated border border-tt-border shadow-2xl text-tt-text overflow-hidden"
+      className="m-auto p-0 w-[min(calc(100dvw-2rem),340px)] split:w-[min(calc(100dvw-2rem),520px)] max-w-none max-h-[calc(100dvh-1.5rem)] overflow-y-auto rounded-3xl bg-tt-elevated border border-tt-border shadow-2xl text-tt-text"
     >
       <div className="flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-tt-border">
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 compact-landscape:pt-2.5 compact-landscape:pb-2 border-b border-tt-border">
           <h2 id={headingId} className="text-lg font-bold text-tt-text">
             {calendarHeaderTitle(draftYear, draftMonth)}
           </h2>
@@ -166,7 +166,7 @@ export function MonthYearPickerDialog({
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 space-y-4">
+        <div className="px-5 py-4 space-y-4 split:space-y-0 split:grid split:grid-cols-2 split:gap-4 compact-landscape:py-2.5">
           {/* Year grid */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider text-tt-secondary mb-2">

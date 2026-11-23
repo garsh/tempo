@@ -11,6 +11,36 @@
   }
 }
 
+@custom-variant split {
+  @media (min-width: 640px), (orientation: landscape) and (min-width: 568px) {
+    @slot;
+  }
+}
+
+@custom-variant compact-landscape {
+  @media (orientation: landscape) and (min-width: 568px) and (max-height: 540px) {
+    @slot;
+  }
+}
+
+@custom-variant desktop {
+  @media (min-width: 1024px) and (min-height: 541px) {
+    @slot;
+  }
+}
+
+@custom-variant wide-desktop {
+  @media (min-width: 1280px) and (min-height: 541px) {
+    @slot;
+  }
+}
+
+@custom-variant hover-pointer {
+  @media (hover: hover) and (pointer: fine) {
+    @slot;
+  }
+}
+
 /*
  * Tempo theme — follows the OS via `prefers-color-scheme` (default LIGHT).
  * Light = TickTick Android light (ref: ticktick-refs/android/brad-inbox-empty-light.png)
@@ -319,4 +349,14 @@ dialog::backdrop {
     overflow-y: auto;
   }
 }
+
+.tt-scroll-stable {
+  scrollbar-gutter: stable;
+}
+
+.tt-safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { useLayoutMode } from '../../hooks/useLayoutMode';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react';
 import type { Task } from '../../types/task';
 import {
@@ -98,19 +100,23 @@ type Status = { type: 'success' | 'error'; message: string } | null;
  */
 export function SettingsPage(props: SettingsPageProps) {
   const { isOpen, initialPage = 'root', onClose } = props;
+  const layout = useLayoutMode();
+  const isTwoPane = layout.isSplit;
   const [page, setPage] = useState<SettingsPageId>(initialPage);
   const [status, setStatus] = useState<Status>(null);
 
   useEscapeKey(
     isOpen,
     () => {
-      if (page === 'root' || page === initialPage) onClose();
+      if (isTwoPane || page === 'root' || page === initialPage) onClose();
       else setPage('root');
     },
     { capture: true, stopPropagation: true }
   );
 
   if (!isOpen) return null;
+
+  const activePage: SettingsPageId = isTwoPane && page === 'root' ? 'account' : page;
 
   const go = (p: SettingsPageId) => {
     setStatus(null);
@@ -119,7 +125,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const back = () => (page === 'root' || page === initialPage ? onClose() : go('root'));
 
   let body: ReactNode;
-  switch (page) {
+  switch (activePage) {
     case 'root':
       body = <RootPage {...props} go={go} />;
       break;
@@ -140,37 +146,153 @@ export function SettingsPage(props: SettingsPageProps) {
       break;
   }
 
+  const statusBanner = status && (
+    <div
+      role="status"
+      className={`mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] ${
+        status.type === 'success' ? 'bg-tt-success/10 text-tt-success' : 'bg-tt-overdue/10 text-tt-overdue'
+      }`}
+    >
+      {status.type === 'success' ? (
+        <CheckCircle2 className="w-4 h-4 shrink-0 mt-px" />
+      ) : (
+        <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
+      )}
+      <span className="flex-1">{status.message}</span>
+    </div>
+  );
+
+  if (isTwoPane) {
+    const summary = summarizeAccount(props.syncStatus.account, props.syncStatus, !!getStoredClientId());
+    const navItems: ReadonlyArray<{ id: Exclude<SettingsPageId, 'root'>; icon: ReactNode; label: string }> = [
+      { id: 'appearance', icon: <AppearanceIcon />, label: 'Appearance' },
+      { id: 'datetime', icon: <DateTimeIcon />, label: 'Date & Time' },
+      { id: 'general', icon: <GeneralIcon />, label: 'General' },
+      { id: 'integrations', icon: <IntegrationsIcon />, label: 'Integrations & Import' },
+    ];
+
+    return (
+      <div
+        className="fixed inset-0 z-[55] bg-tt-scrim flex items-center justify-center p-4 compact-landscape:p-0"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+        data-testid="settings-page"
+        data-settings-page={activePage}
+        data-settings-layout="two-pane"
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={TITLES[activePage]}
+          className="w-full max-w-[820px] h-[min(680px,86dvh)] rounded-2xl shadow-2xl border border-tt-border bg-tt-bg flex flex-col overflow-hidden compact-landscape:max-w-none compact-landscape:h-full compact-landscape:rounded-none compact-landscape:border-0 tt-safe-x"
+          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        >
+          <header className="shrink-0 h-14 compact-landscape:h-12 px-5 border-b border-tt-border bg-tt-surface flex items-center justify-between">
+            <h1 className="text-[19px] font-bold text-tt-text">Settings</h1>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close settings"
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </header>
+
+          <div className="flex-1 min-h-0 flex overflow-hidden">
+            <nav
+              aria-label="Settings categories"
+              className="w-[220px] compact-landscape:w-[190px] shrink-0 border-r border-tt-border bg-tt-sidebar overflow-y-auto p-2.5 space-y-1"
+            >
+              <button
+                type="button"
+                onClick={() => go('account')}
+                aria-current={activePage === 'account' ? 'page' : undefined}
+                className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors cursor-pointer ${
+                  activePage === 'account'
+                    ? 'bg-tt-blue-soft text-tt-blue font-semibold'
+                    : 'text-tt-text hover:bg-tt-hover'
+                }`}
+              >
+                <Avatar account={props.syncStatus.account} size={34} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold truncate">{summary.title}</span>
+                  <span className="flex items-center gap-1 text-[11px] text-tt-secondary truncate">
+                    <DriveIcon />
+                    <span className="truncate">{summary.subtitle}</span>
+                  </span>
+                </span>
+              </button>
+
+              <div className="my-1.5 h-px bg-tt-border/70" role="separator" />
+
+              {navItems.map((item) => {
+                const selected = activePage === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => go(item.id)}
+                    aria-current={selected ? 'page' : undefined}
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[14px] text-left transition-colors cursor-pointer ${
+                      selected
+                        ? 'bg-tt-blue-soft text-tt-blue font-semibold'
+                        : 'text-tt-text hover:bg-tt-hover font-medium'
+                    }`}
+                  >
+                    <span className="w-5 h-5 shrink-0 flex items-center justify-center">{item.icon}</span>
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+
+              <div className="my-1.5 h-px bg-tt-border/70" role="separator" />
+
+              <a
+                href={FEEDBACK_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[14px] font-medium text-tt-text hover:bg-tt-hover transition-colors"
+              >
+                <span className="w-5 h-5 shrink-0 flex items-center justify-center">
+                  <HelpIcon />
+                </span>
+                <span className="flex-1 truncate">Help &amp; Feedback</span>
+                <ExternalLink className="w-3.5 h-3.5 text-tt-muted shrink-0" />
+              </a>
+            </nav>
+
+            <div
+              className="flex-1 min-w-0 overflow-y-auto tt-scroll-stable py-4 compact-landscape:py-2.5"
+              style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}
+            >
+              <h2 className="px-4 pb-3 text-[18px] font-bold text-tt-text">{TITLES[activePage]}</h2>
+              {statusBanner}
+              {body}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="fixed inset-0 z-[55] bg-tt-bg lg:bg-tt-scrim lg:flex lg:items-center lg:justify-center lg:p-6"
+      className="fixed inset-0 z-[55] bg-tt-bg flex flex-col"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       data-testid="settings-page"
-      data-settings-page={page}
+      data-settings-page={activePage}
+      data-settings-layout="drilldown"
     >
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={TITLES[page]}
-        className="h-full w-full lg:h-[min(780px,92vh)] lg:max-w-[520px] lg:rounded-2xl lg:shadow-2xl bg-tt-bg flex flex-col overflow-hidden"
+        aria-label={TITLES[activePage]}
+        className="h-full w-full bg-tt-bg flex flex-col overflow-hidden"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
-        <SettingsHeader title={TITLES[page]} onBack={back} backLabel={page === 'root' ? 'Close settings' : 'Back'} />
+        <SettingsHeader title={TITLES[activePage]} onBack={back} backLabel={activePage === 'root' ? 'Close settings' : 'Back'} />
         <div className="flex-1 min-h-0 overflow-y-auto pb-6" style={{ paddingBottom: 'max(24px, env(safe-area-inset-bottom))' }}>
-          {status && (
-            <div
-              role="status"
-              className={`mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] ${
-                status.type === 'success' ? 'bg-tt-success/10 text-tt-success' : 'bg-tt-overdue/10 text-tt-overdue'
-              }`}
-            >
-              {status.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-px" />
-              ) : (
-                <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
-              )}
-              <span className="flex-1">{status.message}</span>
-            </div>
-          )}
+          {statusBanner}
           {body}
         </div>
       </div>

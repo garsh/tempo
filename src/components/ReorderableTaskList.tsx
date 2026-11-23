@@ -367,12 +367,9 @@ export function ReorderableTaskList({
       const pointerId = e.pointerId;
       const startX = e.clientX;
       const startY = e.clientY;
+      const isDragHandle = Boolean((e.target as HTMLElement).closest('[data-drag-handle="true"]'));
 
-      const timerId = window.setTimeout(() => {
-        const current = pendingRef.current;
-        if (!current || current.taskId !== taskId || current.pointerId !== pointerId) return;
-        pendingRef.current = null;
-
+      const startDrag = (immediate: boolean) => {
         const list = tasksRef.current;
         const fromIndex = list.findIndex((t) => rowKey(t) === taskId);
         const orderKeys = list.map(rowKey);
@@ -389,7 +386,7 @@ export function ReorderableTaskList({
         const draggedHeight = snapshots[fromIndex]?.height ?? 0;
 
         suppressClickRef.current = true;
-        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        if (!immediate && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
           navigator.vibrate(15);
         }
 
@@ -418,6 +415,18 @@ export function ReorderableTaskList({
           indicatorTop: null,
           orderKeys,
         });
+      };
+
+      if (isDragHandle && e.pointerType === 'mouse') {
+        startDrag(true);
+        return;
+      }
+
+      const timerId = window.setTimeout(() => {
+        const current = pendingRef.current;
+        if (!current || current.taskId !== taskId || current.pointerId !== pointerId) return;
+        pendingRef.current = null;
+        startDrag(false);
       }, LONG_PRESS_MS);
 
       pendingRef.current = { taskId, pointerId, startX, startY, timerId };

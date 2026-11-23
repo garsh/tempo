@@ -12,6 +12,7 @@ import {
 } from '../domain/recurrence';
 import {
   Check,
+  GripVertical,
   RefreshCw,
   Calendar,
   SkipForward,
@@ -159,7 +160,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     onComplete(task.id, dateStr);
   };
 
-  const rowPad = 'py-3 min-h-[50px]';
+  const rowPad = 'py-3 min-h-[50px] desktop:py-2 desktop:min-h-[42px]';
   const notesPreview =
     notesSnippet !== undefined
       ? notesSnippet
@@ -354,7 +355,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const handleRowPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     onRowPointerDown?.(e);
     if (e.pointerType === 'mouse' && e.button === 0 && !isDragging) {
-      if ((e.target as HTMLElement).closest('button, input, a')) return;
+      if ((e.target as HTMLElement).closest('button, input, a, [data-drag-handle="true"]')) return;
       mouseStartRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -528,12 +529,22 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
           touchAction: 'pan-y',
         }}
-        className={`relative z-10 w-full flex items-start gap-3 px-3 sm:px-4 ${
+        className={`relative z-10 w-full flex items-start gap-3 desktop:gap-2.5 px-3 sm:px-4 ${
           selected
             ? 'bg-tt-blue-soft'
             : 'bg-tt-surface hover:[background-image:linear-gradient(var(--tt-hover),var(--tt-hover))]'
         } ${rowPad}`}
       >
+        {reorderEnabled && (
+          <span
+            data-drag-handle="true"
+            aria-hidden="true"
+            title="Drag to reorder"
+            className="hidden hover-pointer:flex items-center justify-center -ml-2 -mr-1 w-4 h-6 shrink-0 text-tt-muted/50 group-hover:text-tt-muted opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
+          >
+            <GripVertical className="w-3.5 h-3.5" />
+          </span>
+        )}
         <button
           type="button"
           onClick={handleCheck}
@@ -541,7 +552,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           onTouchStart={(e) => e.stopPropagation()}
           disabled={completed && !onUncomplete}
           title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-          className={`relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-[''] ${contentOpacityClass}`}
+          className={`relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] desktop:mt-[1px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-[''] ${contentOpacityClass}`}
           style={{
             borderColor: completed || justCompleted ? '#34C759' : borderColor,
             backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
@@ -555,7 +566,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         <div className="flex items-center gap-2 min-w-0">
           <span
             data-testid="task-title"
-            className={`text-[19px] leading-snug min-w-0 wrap-break-word text-pretty ${
+            className={`text-[19px] desktop:text-[15px] leading-snug min-w-0 wrap-break-word text-pretty ${
               completed ? 'text-tt-secondary line-through' : 'text-tt-text'
             }`}
           >
@@ -564,7 +575,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         </div>
         {subtitle && (
           <p
-            className={`mt-0.5 text-[13px] leading-snug text-tt-secondary ${
+            className={`mt-0.5 text-[13px] desktop:text-[12px] leading-snug text-tt-secondary ${
               showDetails ? 'wrap-break-word text-pretty' : 'truncate'
             }`}
           >
@@ -573,7 +584,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         )}
         {notesPreview && (
           <p
-            className={`mt-0.5 text-[13px] leading-snug text-tt-secondary ${
+            className={`mt-0.5 text-[13px] desktop:text-[12px] leading-snug text-tt-secondary ${
               showDetails ? 'whitespace-pre-wrap wrap-break-word' : 'truncate'
             }`}
             data-testid="task-notes-preview"
@@ -583,22 +594,97 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         )}
       </div>
 
-      <div className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px] min-h-[26px] ${contentOpacityClass}`}>
-        {windowPeriodic && progress && task.completedAt == null ? (
-          <RadialProgressRingWithTooltip progress={progress} />
-        ) : (
-          <>
-            {recurring && (
-              <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
+      <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 min-h-[26px]">
+        {(onRequestChangeDate || onRequestLogDate || canSkip || onRequestDelete || onDelete) && (
+          <div
+            data-testid="task-hover-actions"
+            className="hidden hover-pointer:flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity"
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            {windowPeriodic && onRequestLogDate ? (
+              <button
+                type="button"
+                data-hover-action="date"
+                aria-label="Log Date"
+                title="Log Date"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRequestLogDate(task, e.currentTarget.getBoundingClientRect());
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-tt-secondary hover:text-amber-600 dark:hover:text-amber-400 hover:bg-tt-hover transition-colors cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </button>
+            ) : !windowPeriodic && onRequestChangeDate ? (
+              <button
+                type="button"
+                data-hover-action="date"
+                aria-label="Change Date"
+                title="Change Date"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRequestChangeDate(task, e.currentTarget.getBoundingClientRect());
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-tt-secondary hover:text-amber-600 dark:hover:text-amber-400 hover:bg-tt-hover transition-colors cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
+            {canSkip && (
+              <button
+                type="button"
+                data-hover-action="skip"
+                aria-label="Skip Occurrence"
+                title="Skip Occurrence"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRequestSkipOccurrence?.(task);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-blue hover:bg-tt-hover transition-colors cursor-pointer"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
             )}
-
-            {dueLabel && (
-              <span className={`tabular-nums font-medium ${dueTextClass(urgency)}`}>
-                {dueLabel}
-              </span>
+            {(onRequestDelete || onDelete) && (
+              <button
+                type="button"
+                data-hover-action="delete"
+                aria-label="Delete"
+                title="Delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onRequestDelete) {
+                    onRequestDelete(task);
+                  } else {
+                    onDelete?.(task.id);
+                  }
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-overdue hover:bg-tt-hover transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             )}
-          </>
+          </div>
         )}
+
+        <div className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 text-[15px] desktop:text-[13px] min-h-[26px] ${contentOpacityClass}`}>
+          {windowPeriodic && progress && task.completedAt == null ? (
+            <RadialProgressRingWithTooltip progress={progress} />
+          ) : (
+            <>
+              {recurring && (
+                <span title="Repeats"><RefreshCw className="w-3 h-3 text-tt-muted" /></span>
+              )}
+
+              {dueLabel && (
+                <span className={`tabular-nums font-medium ${dueTextClass(urgency)}`}>
+                  {dueLabel}
+                </span>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   </div>

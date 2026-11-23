@@ -8,6 +8,9 @@ interface TasksViewProps {
   oneTimeTasks: Task[];
   showDetails: boolean;
   collapsedGroups: Record<string, boolean>;
+  layoutMode?: 'stacked' | 'two-column';
+  selectedTaskId?: string | null;
+  surfaceClassName?: string;
   onToggleGroup: (id: string) => void;
   onReorderOneTime: (orderedIds: string[]) => void;
   onDragActiveChange?: (active: boolean) => void;
@@ -31,6 +34,9 @@ export function TasksView({
   oneTimeTasks,
   showDetails,
   collapsedGroups,
+  layoutMode = 'stacked',
+  selectedTaskId = null,
+  surfaceClassName,
   onToggleGroup,
   onReorderOneTime,
   onDragActiveChange,
@@ -44,16 +50,103 @@ export function TasksView({
   onRequestDelete,
 }: TasksViewProps) {
   const isEmpty = periodicTasks.length === 0 && oneTimeTasks.length === 0;
+  const useTwoColumns =
+    layoutMode === 'two-column' && periodicTasks.length > 0 && oneTimeTasks.length > 0;
+
+  const renderPeriodicList = () =>
+    periodicTasks.map((t) => (
+      <TaskCard
+        key={t.id}
+        task={t}
+        selected={selectedTaskId === t.id}
+        showDetails={showDetails}
+        onSelect={onSelect}
+        onComplete={onComplete}
+        onUncomplete={onUncomplete}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onRequestLogDate={onRequestLogDate}
+        onRequestDelete={onRequestDelete}
+      />
+    ));
+
+  const renderOneTimeList = () => (
+    <ReorderableTaskList
+      tasks={oneTimeTasks}
+      enabled={true}
+      onDragActiveChange={onDragActiveChange}
+      onReorder={onReorderOneTime}
+      renderRow={(t, dragProps) => (
+        <TaskCard
+          key={t.id}
+          task={t}
+          selected={selectedTaskId === t.id}
+          showDetails={showDetails}
+          onSelect={onSelect}
+          onComplete={onComplete}
+          onUncomplete={onUncomplete}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRequestChangeDate={onRequestChangeDate}
+          onRequestDelete={onRequestDelete}
+          {...dragProps}
+        />
+      )}
+    />
+  );
+
+  if (useTwoColumns) {
+    return (
+      <div
+        className="flex-1 min-h-0 overflow-hidden grid grid-cols-2 divide-x divide-tt-border max-w-6xl mx-auto w-full"
+        data-testid="tasks-view"
+        data-layout="two-column"
+      >
+        <section aria-label="Recurring" className="min-h-0 flex flex-col overflow-hidden">
+          <div className="shrink-0 px-3 sm:px-4 pt-2">
+            <TaskGroupHeader
+              label="Recurring"
+              count={periodicTasks.length}
+              collapsed={!!collapsedGroups['tasks-periodic']}
+              onToggle={() => onToggleGroup('tasks-periodic')}
+              sticky={false}
+              bgClassName={surfaceClassName}
+            />
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6">
+            {!collapsedGroups['tasks-periodic'] && renderPeriodicList()}
+          </div>
+        </section>
+
+        <section aria-label="One-Time" className="min-h-0 flex flex-col overflow-hidden">
+          <div className="shrink-0 px-3 sm:px-4 pt-2">
+            <TaskGroupHeader
+              label="One-Time"
+              count={oneTimeTasks.length}
+              collapsed={!!collapsedGroups['tasks-onetime']}
+              onToggle={() => onToggleGroup('tasks-onetime')}
+              sticky={false}
+              bgClassName={surfaceClassName}
+            />
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6">
+            {!collapsedGroups['tasks-onetime'] && renderOneTimeList()}
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div
-      className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
+      className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-4 pt-2 pb-20 desktop:pb-6 space-y-2"
       data-testid="tasks-view"
+      data-layout="stacked"
     >
       {isEmpty ? (
         <p className="text-sm text-tt-muted px-4 py-12 text-center">No undated or periodic tasks due</p>
       ) : (
-        <>
+        <div className={layoutMode === 'two-column' ? 'max-w-3xl mx-auto w-full space-y-2' : 'space-y-2'}>
           {periodicTasks.length > 0 && (
             <section aria-label="Recurring">
               <TaskGroupHeader
@@ -62,22 +155,9 @@ export function TasksView({
                 collapsed={!!collapsedGroups['tasks-periodic']}
                 onToggle={() => onToggleGroup('tasks-periodic')}
                 sticky={false}
+                bgClassName={surfaceClassName}
               />
-              {!collapsedGroups['tasks-periodic'] &&
-                periodicTasks.map((t) => (
-                  <TaskCard
-                    key={t.id}
-                    task={t}
-                    showDetails={showDetails}
-                    onSelect={onSelect}
-                    onComplete={onComplete}
-                    onUncomplete={onUncomplete}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onRequestLogDate={onRequestLogDate}
-                    onRequestDelete={onRequestDelete}
-                  />
-                ))}
+              {!collapsedGroups['tasks-periodic'] && renderPeriodicList()}
             </section>
           )}
 
@@ -89,33 +169,12 @@ export function TasksView({
                 collapsed={!!collapsedGroups['tasks-onetime']}
                 onToggle={() => onToggleGroup('tasks-onetime')}
                 sticky={false}
+                bgClassName={surfaceClassName}
               />
-              {!collapsedGroups['tasks-onetime'] && (
-                <ReorderableTaskList
-                  tasks={oneTimeTasks}
-                  enabled={true}
-                  onDragActiveChange={onDragActiveChange}
-                  onReorder={onReorderOneTime}
-                  renderRow={(t, dragProps) => (
-                    <TaskCard
-                      key={t.id}
-                      task={t}
-                      showDetails={showDetails}
-                      onSelect={onSelect}
-                      onComplete={onComplete}
-                      onUncomplete={onUncomplete}
-                      onEdit={onEdit}
-                      onDelete={onDelete}
-                      onRequestChangeDate={onRequestChangeDate}
-                      onRequestDelete={onRequestDelete}
-                      {...dragProps}
-                    />
-                  )}
-                />
-              )}
+              {!collapsedGroups['tasks-onetime'] && renderOneTimeList()}
             </section>
           )}
-        </>
+        </div>
       )}
     </div>
   );

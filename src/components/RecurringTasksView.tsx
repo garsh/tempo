@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { Task } from '../types/task';
 import {
@@ -6,6 +6,7 @@ import {
   formatRecurringDueSubtitle,
   getNextUncompletedOccurrenceDate,
   getWindowProgress,
+  isAnnualWindow,
   isFixedRecurring,
   isRecurrenceFinished,
   isWindowPeriodic,
@@ -15,9 +16,20 @@ import {
 import { sortRecurringByDueProximity, type RecurringSortEntry } from '../domain/sorting';
 import { TaskCard } from './TaskCard';
 
+type RecurringFilter = 'all' | 'fixed' | 'approx' | 'annual';
+
+const FILTER_OPTIONS: ReadonlyArray<{ id: RecurringFilter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'fixed', label: 'Fixed' },
+  { id: 'approx', label: 'Approx' },
+  { id: 'annual', label: 'Yearly' },
+];
+
 interface RecurringTasksViewProps {
   tasks: Task[];
   showDetails: boolean;
+  embedded?: boolean;
+  selectedTaskId?: string | null;
   onClose: () => void;
   onComplete: (id: string, dateStr?: string) => void;
   onUncomplete?: (id: string, dateStr?: string) => void;
@@ -30,13 +42,15 @@ interface RecurringTasksViewProps {
 }
 
 /**
- * Full-screen management view opened from Overflow (⋮) → Recurring.
+ * Full-screen management view opened from Overflow (⋮) → Recurring (or embedded in desktop workspace).
  * Lists all active recurring tasks (Approximate min–max windows, Annual Time of Year windows,
  * and Fixed Interval schedules) in a unified flat list ordered by closeness to being due.
  */
 export function RecurringTasksView({
   tasks,
   showDetails,
+  embedded = false,
+  selectedTaskId = null,
   onClose,
   onComplete,
   onUncomplete,
@@ -47,6 +61,8 @@ export function RecurringTasksView({
   onRequestSkipOccurrence,
   onRequestDelete,
 }: RecurringTasksViewProps) {
+  const [filter, setFilter] = useState<RecurringFilter>('all');
+
   const entries = useMemo(() => {
     const now = new Date();
     const items: RecurringSortEntry[] = [];
@@ -81,66 +97,116 @@ export function RecurringTasksView({
     return sortRecurringByDueProximity(items, now);
   }, [tasks]);
 
+  const filteredEntries = useMemo(() => {
+    if (filter === 'all') return entries;
+    return entries.filter((entry) => {
+      if (filter === 'fixed') return entry.kind === 'fixed';
+      if (filter === 'annual') return entry.kind === 'window' && isAnnualWindow(entry.raw);
+      return entry.kind === 'window' && !isAnnualWindow(entry.raw);
+    });
+  }, [entries, filter]);
+
   return (
     <>
-      <header className="shrink-0 flex items-center gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Back"
-          title="Back"
-          className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
-        >
-          <ArrowLeft className="w-5 h-5" strokeWidth={2} />
-        </button>
-        <h1 className="text-[20px] sm:text-[22px] font-bold tracking-tight text-tt-text">
-          Recurring
-        </h1>
+      <header className="shrink-0 flex items-center justify-between gap-2 h-14 sm:h-16 compact-landscape:h-12 desktop:h-14 px-2.5 sm:px-5 bg-tt-bg desktop:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+        <div className="flex items-center gap-2 min-w-0">
+          {!embedded && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Back"
+              title="Back"
+              className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 compact-landscape:w-8 compact-landscape:h-8 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-5 h-5" strokeWidth={2} />
+            </button>
+          )}
+          <h1 className="text-[20px] sm:text-[22px] desktop:text-[18px] font-bold tracking-tight text-tt-text truncate">
+            Recurring
+          </h1>
+          {entries.length > 0 && (
+            <span className="text-xs font-medium text-tt-muted tabular-nums">
+              {filteredEntries.length}
+            </span>
+          )}
+        </div>
+
+        {entries.length > 0 && (
+          <div
+            role="group"
+            aria-label="Filter recurring tasks"
+            className="flex items-center gap-1 overflow-x-auto shrink-0"
+          >
+            {FILTER_OPTIONS.map((opt) => {
+              const active = filter === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setFilter(opt.id)}
+                  className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-tt-blue-soft text-tt-blue'
+                      : 'text-tt-secondary hover:text-tt-text hover:bg-tt-hover'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 flex min-h-0 relative">
-        <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
-          <div
-            className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 px-3 sm:px-5 pt-2 pb-20 xl:pb-4"
-            data-testid="recurring-tasks-view"
-          >
-            {entries.length === 0 ? (
-              <p className="text-sm text-tt-muted px-4 py-12 text-center">No active recurring tasks</p>
-            ) : (
-              entries.map((entry) =>
-                entry.kind === 'window' ? (
-                  <TaskCard
-                    key={entry.raw.id}
-                    task={entry.raw}
-                    showDetails={showDetails}
-                    subtitle={entry.subtitle}
-                    onSelect={() => onEdit(entry.raw)}
-                    onComplete={onComplete}
-                    onUncomplete={onUncomplete}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onRequestLogDate={onRequestLogDate}
-                    onRequestDelete={onRequestDelete}
-                  />
-                ) : (
-                  <TaskCard
-                    key={entry.raw.id}
-                    task={entry.projected}
-                    showDetails={showDetails}
-                    subtitle={entry.subtitle}
-                    occurrenceDateStr={entry.nextDate ?? undefined}
-                    onSelect={() => onEdit(entry.projected)}
-                    onComplete={onComplete}
-                    onUncomplete={onUncomplete}
-                    onEdit={() => onEdit(entry.projected)}
-                    onDelete={onDelete}
-                    onRequestChangeDate={onRequestChangeDate}
-                    onRequestSkipOccurrence={onRequestSkipOccurrence}
-                    onRequestDelete={() => onRequestDelete?.(entry.raw)}
-                  />
+        <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg desktop:bg-tt-surface">
+          <div className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-5 pt-2 pb-20 desktop:pb-6">
+            <div className="max-w-3xl mx-auto w-full" data-testid="recurring-tasks-view">
+              {entries.length === 0 ? (
+                <p className="text-sm text-tt-muted px-4 py-12 text-center">No active recurring tasks</p>
+              ) : filteredEntries.length === 0 ? (
+                <p className="text-sm text-tt-muted px-4 py-12 text-center">
+                  No matching recurring tasks
+                </p>
+              ) : (
+                filteredEntries.map((entry) =>
+                  entry.kind === 'window' ? (
+                    <TaskCard
+                      key={entry.raw.id}
+                      task={entry.raw}
+                      selected={selectedTaskId === entry.raw.id}
+                      showDetails={showDetails}
+                      subtitle={entry.subtitle}
+                      onSelect={() => onEdit(entry.raw)}
+                      onComplete={onComplete}
+                      onUncomplete={onUncomplete}
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onRequestLogDate={onRequestLogDate}
+                      onRequestDelete={onRequestDelete}
+                    />
+                  ) : (
+                    <TaskCard
+                      key={entry.raw.id}
+                      task={entry.projected}
+                      selected={selectedTaskId === entry.raw.id}
+                      showDetails={showDetails}
+                      subtitle={entry.subtitle}
+                      occurrenceDateStr={entry.nextDate ?? undefined}
+                      onSelect={() => onEdit(entry.projected)}
+                      onComplete={onComplete}
+                      onUncomplete={onUncomplete}
+                      onEdit={() => onEdit(entry.projected)}
+                      onDelete={onDelete}
+                      onRequestChangeDate={onRequestChangeDate}
+                      onRequestSkipOccurrence={onRequestSkipOccurrence}
+                      onRequestDelete={() => onRequestDelete?.(entry.raw)}
+                    />
+                  )
                 )
-              )
-            )}
+              )}
+            </div>
           </div>
         </main>
       </div>

@@ -5,6 +5,12 @@ export type ShortcutHandlers = {
   onSearch?: () => void;
   onEscape?: () => void;
   onOpenHelp?: () => void;
+  onViewCalendar?: () => void;
+  onViewTasks?: () => void;
+  onViewRecurring?: () => void;
+  onToday?: () => void;
+  onPrevPeriod?: () => void;
+  onNextPeriod?: () => void;
 };
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -54,6 +60,42 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: boolea
           break;
         case '?':
           h.onOpenHelp?.();
+          break;
+        case '1':
+          if (h.onViewCalendar) {
+            e.preventDefault();
+            h.onViewCalendar();
+          }
+          break;
+        case '2':
+          if (h.onViewTasks) {
+            e.preventDefault();
+            h.onViewTasks();
+          }
+          break;
+        case '3':
+          if (h.onViewRecurring) {
+            e.preventDefault();
+            h.onViewRecurring();
+          }
+          break;
+        case 't':
+          if (h.onToday) {
+            e.preventDefault();
+            h.onToday();
+          }
+          break;
+        case '[':
+          if (h.onPrevPeriod) {
+            e.preventDefault();
+            h.onPrevPeriod();
+          }
+          break;
+        case ']':
+          if (h.onNextPeriod) {
+            e.preventDefault();
+            h.onNextPeriod();
+          }
           break;
         default:
           break;

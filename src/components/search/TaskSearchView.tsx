@@ -27,6 +27,8 @@ export interface TaskSearchViewProps {
   onQueryChange: (nextQuery: string) => void;
   onClose: () => void;
   showDetails: boolean;
+  embedded?: boolean;
+  selectedTaskId?: string | null;
   onJumpToDate: (dateStr: string, expandCompleted: boolean) => void;
   onComplete: (id: string, dateStr?: string) => void;
   onUncomplete: (id: string, dateStr?: string) => void;
@@ -49,6 +51,8 @@ export function TaskSearchView({
   onQueryChange,
   onClose,
   showDetails,
+  embedded = false,
+  selectedTaskId = null,
   onJumpToDate,
   onComplete,
   onUncomplete,
@@ -187,7 +191,7 @@ export function TaskSearchView({
       <TaskCard
         key={rowKey}
         task={item.task}
-        selected={flatIndex === effectiveActiveIndex}
+        selected={flatIndex === effectiveActiveIndex || (selectedTaskId != null && selectedTaskId === item.id)}
         showDetails={showDetails}
         notesSnippet={item.notesSnippet}
         highlightTokens={results.tokens}
@@ -208,55 +212,64 @@ export function TaskSearchView({
 
   return (
     <>
-      <header className="shrink-0 flex items-center gap-1 sm:gap-2 h-14 sm:h-16 px-2.5 sm:px-5 bg-tt-bg xl:bg-tt-surface border-b border-tt-border text-tt-text z-20">
-        <search className="flex-1 flex items-center gap-1 sm:gap-2 min-w-0">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close search"
-            title="Close search"
-            className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-5 h-5" strokeWidth={2} />
-          </button>
+      <header className="shrink-0 flex items-center gap-1 sm:gap-2 h-14 sm:h-16 compact-landscape:h-12 desktop:h-14 px-2.5 sm:px-5 bg-tt-bg desktop:bg-tt-surface border-b border-tt-border text-tt-text z-20">
+        <div className="max-w-3xl mx-auto w-full flex items-center gap-2 min-w-0">
+          <search className="flex-1 flex items-center gap-1 sm:gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close search"
+              title="Close search"
+              className="shrink-0 w-9 h-9 sm:w-10 sm:h-10 compact-landscape:w-8 compact-landscape:h-8 flex items-center justify-center rounded-lg text-tt-secondary hover:text-tt-text hover:bg-tt-sidebar transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-5 h-5" strokeWidth={2} />
+            </button>
 
-          <label htmlFor={inputId} className="sr-only">
-            Search tasks
-          </label>
-          <div className="flex-1 flex items-center gap-2 min-w-0 h-10 px-3 rounded-xl bg-tt-input">
-            <Search className="w-4 h-4 shrink-0 text-tt-muted" aria-hidden="true" />
-            <input
-              ref={resolvedInputRef}
-              id={inputId}
-              data-testid="search-tasks-input"
-              type="search"
-              value={query}
-              onChange={(e) => onQueryChange(e.target.value)}
-              onKeyDown={handleInputKeyDown}
-              enterKeyHint="search"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              placeholder="Search tasks…"
-              className="flex-1 min-w-0 bg-transparent text-[16px] text-tt-text placeholder:text-tt-muted focus:outline-none [&::-webkit-search-cancel-button]:hidden"
-            />
-            {query.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  onQueryChange('');
-                  resolvedInputRef.current?.focus({ preventScroll: true });
-                }}
-                aria-label="Clear search"
-                title="Clear search"
-                className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" strokeWidth={2} />
-              </button>
-            )}
-          </div>
-        </search>
+            <label htmlFor={inputId} className="sr-only">
+              Search tasks
+            </label>
+            <div className="flex-1 flex items-center gap-2 min-w-0 h-10 compact-landscape:h-9 px-3 rounded-xl bg-tt-input">
+              <Search className="w-4 h-4 shrink-0 text-tt-muted" aria-hidden="true" />
+              <input
+                ref={resolvedInputRef}
+                id={inputId}
+                data-testid="search-tasks-input"
+                type="search"
+                value={query}
+                onChange={(e) => onQueryChange(e.target.value)}
+                onKeyDown={handleInputKeyDown}
+                enterKeyHint="search"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder="Search tasks…"
+                className="flex-1 min-w-0 bg-transparent text-[16px] desktop:text-[15px] text-tt-text placeholder:text-tt-muted focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+              />
+              {query.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onQueryChange('');
+                    resolvedInputRef.current?.focus({ preventScroll: true });
+                  }}
+                  aria-label="Clear search"
+                  title="Clear search"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" strokeWidth={2} />
+                </button>
+              )}
+            </div>
+          </search>
+          {embedded && (
+            <span className="hidden desktop:inline-flex items-center gap-1.5 text-[11px] text-tt-muted shrink-0 select-none">
+              <kbd className="px-1.5 py-0.5 rounded bg-tt-sidebar border border-tt-border font-mono">↑↓</kbd>
+              <kbd className="px-1.5 py-0.5 rounded bg-tt-sidebar border border-tt-border font-mono">↵</kbd>
+              <kbd className="px-1.5 py-0.5 rounded bg-tt-sidebar border border-tt-border font-mono">Esc</kbd>
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="sr-only" role="status" aria-live="polite" data-testid="search-status">
@@ -264,50 +277,49 @@ export function TaskSearchView({
       </div>
 
       <div className="flex-1 flex min-h-0 relative">
-        <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg xl:bg-tt-surface">
-          <div
-            className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 px-3 sm:px-5 pt-2 pb-20 xl:pb-4 space-y-2"
-            data-testid="search-results"
-          >
-            {!hasQuery && !trimmedDeferred ? (
-              <p className="text-sm text-tt-muted px-4 py-10 text-center">
-                Search by title or notes
-              </p>
-            ) : trimmedDeferred && totalMatches === 0 ? (
-              <p className="text-sm text-tt-muted px-4 py-10 text-center">
-                No tasks matching &ldquo;{trimmedDeferred}&rdquo;
-              </p>
-            ) : (
-              <>
-                {results.active.length > 0 && (
-                  <div>
-                    <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg xl:bg-tt-surface">
-                      <span className="text-[20px] font-bold text-tt-text">Tasks</span>
-                      <span className="text-[13px] text-tt-muted tabular-nums">
-                        {results.active.length}
-                      </span>
+        <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg desktop:bg-tt-surface">
+          <div className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-5 pt-2 pb-20 desktop:pb-6">
+            <div className="max-w-3xl mx-auto w-full space-y-2" data-testid="search-results">
+              {!hasQuery && !trimmedDeferred ? (
+                <p className="text-sm text-tt-muted px-4 py-10 text-center">
+                  Search by title or notes
+                </p>
+              ) : trimmedDeferred && totalMatches === 0 ? (
+                <p className="text-sm text-tt-muted px-4 py-10 text-center">
+                  No tasks matching &ldquo;{trimmedDeferred}&rdquo;
+                </p>
+              ) : (
+                <>
+                  {results.active.length > 0 && (
+                    <div>
+                      <div className="px-3 sm:px-4 py-2 flex items-center gap-1.5 bg-tt-bg desktop:bg-tt-surface">
+                        <span className="text-[20px] desktop:text-[16px] font-bold text-tt-text">Tasks</span>
+                        <span className="text-[13px] text-tt-muted tabular-nums">
+                          {results.active.length}
+                        </span>
+                      </div>
+                      {results.active.map((item, idx) => renderRow(item, idx))}
                     </div>
-                    {results.active.map((item, idx) => renderRow(item, idx))}
-                  </div>
-                )}
+                  )}
 
-                {results.completed.length > 0 && (
-                  <div>
-                    <TaskGroupHeader
-                      label="Completed"
-                      count={results.completed.length}
-                      collapsed={completedCollapsed}
-                      onToggle={() => setCompletedCollapsed((prev) => !prev)}
-                      sticky={false}
-                    />
-                    {!completedCollapsed &&
-                      results.completed.map((item, idx) =>
-                        renderRow(item, results.active.length + idx)
-                      )}
-                  </div>
-                )}
-              </>
-            )}
+                  {results.completed.length > 0 && (
+                    <div>
+                      <TaskGroupHeader
+                        label="Completed"
+                        count={results.completed.length}
+                        collapsed={completedCollapsed}
+                        onToggle={() => setCompletedCollapsed((prev) => !prev)}
+                        sticky={false}
+                      />
+                      {!completedCollapsed &&
+                        results.completed.map((item, idx) =>
+                          renderRow(item, results.active.length + idx)
+                        )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </main>
       </div>

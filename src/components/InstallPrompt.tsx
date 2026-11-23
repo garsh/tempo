@@ -12,9 +12,9 @@ const DISMISS_KEY = 'tempo_install_prompt_dismissed';
 const S = {
   wrap: {
     position: 'fixed' as const,
-    bottom: 16,
-    left: 16,
-    right: 16,
+    bottom: 'calc(84px + env(safe-area-inset-bottom, 0px))',
+    left: 'max(16px, env(safe-area-inset-left, 0px))',
+    right: 'max(16px, env(safe-area-inset-right, 0px))',
     zIndex: 60,
     maxWidth: 384,
     marginLeft: 'auto',

@@ -81,8 +81,8 @@ export function NavRow({
   const inner = (
     <>
       {icon && <span className="w-5 h-5 shrink-0 flex items-center justify-center">{icon}</span>}
-      <span className={`flex-1 min-w-0 truncate text-[18px] ${danger ? 'text-tt-overdue' : 'text-tt-text'}`}>{label}</span>
-      {value != null && <span className="shrink-0 text-[14px] text-tt-secondary truncate max-w-[45%]">{value}</span>}
+      <span className={`flex-1 min-w-0 truncate text-[18px] desktop:text-[15px] ${danger ? 'text-tt-overdue' : 'text-tt-text'}`}>{label}</span>
+      {value != null && <span className="shrink-0 text-[14px] desktop:text-[13px] text-tt-secondary truncate max-w-[45%]">{value}</span>}
       {chevron && <ChevronRight className="w-4 h-4 shrink-0 text-tt-chevron -mr-[2px]" strokeWidth={2} />}
     </>
   );
@@ -106,7 +106,7 @@ export function ControlRow({ icon, label, sub, children }: { icon?: ReactNode; l
     <div className={rowBase}>
       {icon && <span className="w-5 h-5 shrink-0 flex items-center justify-center">{icon}</span>}
       <span className="flex-1 min-w-0 py-2">
-        <span className="block text-[17px] text-tt-text">{label}</span>
+        <span className="block text-[17px] desktop:text-[15px] text-tt-text">{label}</span>
         {sub && <span className="block text-[12px] text-tt-secondary leading-snug mt-0.5">{sub}</span>}
       </span>
       {children}
@@ -116,9 +116,9 @@ export function ControlRow({ icon, label, sub, children }: { icon?: ReactNode; l
 
 export function RadioRow({ label, checked, onSelect, sub }: { label: ReactNode; checked: boolean; onSelect: () => void; sub?: ReactNode }) {
   return (
-    <button type="button" role="radio" aria-checked={checked} onClick={onSelect} className={`${rowBase} hover:bg-tt-hover`}>
+    <button type="button" role="radio" aria-checked={checked} onClick={onSelect} className={`${rowBase} hover:bg-tt-hover cursor-pointer`}>
       <span className="flex-1 min-w-0">
-        <span className={`block text-[17px] ${checked ? 'text-tt-blue font-medium' : 'text-tt-text'}`}>{label}</span>
+        <span className={`block text-[17px] desktop:text-[15px] ${checked ? 'text-tt-blue font-medium' : 'text-tt-text'}`}>{label}</span>
         {sub && <span className="block text-[12px] text-tt-secondary">{sub}</span>}
       </span>
       {checked && <Check className="w-5 h-5 text-tt-blue" strokeWidth={2.4} />}

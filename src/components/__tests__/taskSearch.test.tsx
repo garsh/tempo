@@ -358,48 +358,65 @@ describe('TaskSearchView & App Search integration', () => {
   });
 
   it('restores day-list scrollTop and re-arms calendar pull-to-expand touch listeners after closing Search', () => {
-    const todayStr = formatDate(new Date());
-    mockDbState.tasks = Array.from({ length: 12 }, (_, idx) =>
-      makeTask({ id: `t-${idx}`, title: `Routine ${idx}`, dueAt: todayStr })
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as unknown as MediaQueryList
     );
+    try {
+      const todayStr = formatDate(new Date());
+      mockDbState.tasks = Array.from({ length: 12 }, (_, idx) =>
+        makeTask({ id: `t-${idx}`, title: `Routine ${idx}`, dueAt: todayStr })
+      );
 
-    const view = mount(<App />);
-    mounted.push(view.unmount);
+      const view = mount(<App />);
+      mounted.push(view.unmount);
 
-    const getScrollBox = () =>
-      Array.from(view.container.querySelectorAll<HTMLDivElement>('div')).find(
-        (el) => el.className.includes('overflow-y-auto') && el.className.includes('border-t')
-      )!;
+      const getScrollBox = () =>
+        Array.from(view.container.querySelectorAll<HTMLDivElement>('div')).find(
+          (el) => el.className.includes('overflow-y-auto') && el.className.includes('border-t')
+        )!;
 
-    const initialScroller = getScrollBox();
-    expect(initialScroller).toBeTruthy();
-    initialScroller.scrollTop = 180;
+      const initialScroller = getScrollBox();
+      expect(initialScroller).toBeTruthy();
+      initialScroller.scrollTop = 180;
 
-    act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
-    });
-    act(() => {
-      view.container.querySelector<HTMLButtonElement>('button[aria-label="Close search"]')!.click();
-    });
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+      });
+      act(() => {
+        view.container.querySelector<HTMLButtonElement>('button[aria-label="Close search"]')!.click();
+      });
 
-    const restoredScroller = getScrollBox();
-    expect(restoredScroller.scrollTop).toBe(180);
+      const restoredScroller = getScrollBox();
+      expect(restoredScroller.scrollTop).toBe(180);
 
-    // Reset to top so pull-to-expand gesture classifies as 'drag' rather than scroll
-    restoredScroller.scrollTop = 0;
+      // Reset to top so pull-to-expand gesture classifies as 'drag' rather than scroll
+      restoredScroller.scrollTop = 0;
 
-    // Verify pull-to-expand touch listener re-attached to the remounted calAreaRef
-    const calArea = restoredScroller.parentElement!.parentElement!;
-    const startEv = new Event('touchstart', { bubbles: true }) as unknown as TouchEvent;
-    Object.defineProperty(startEv, 'touches', { value: [{ clientX: 50, clientY: 100 }] });
-    const moveEv = new Event('touchmove', { bubbles: true, cancelable: true }) as unknown as TouchEvent;
-    Object.defineProperty(moveEv, 'touches', { value: [{ clientX: 50, clientY: 160 }] });
+      // Verify pull-to-expand touch listener re-attached to the remounted calAreaRef
+      const calArea = restoredScroller.parentElement!.parentElement!;
+      const startEv = new Event('touchstart', { bubbles: true }) as unknown as TouchEvent;
+      Object.defineProperty(startEv, 'touches', { value: [{ clientX: 50, clientY: 100 }] });
+      const moveEv = new Event('touchmove', { bubbles: true, cancelable: true }) as unknown as TouchEvent;
+      Object.defineProperty(moveEv, 'touches', { value: [{ clientX: 50, clientY: 160 }] });
 
-    act(() => {
-      calArea.dispatchEvent(startEv);
-      calArea.dispatchEvent(moveEv);
-    });
-    expect(moveEv.defaultPrevented).toBe(true);
+      act(() => {
+        calArea.dispatchEvent(startEv);
+        calArea.dispatchEvent(moveEv);
+      });
+      expect(moveEv.defaultPrevented).toBe(true);
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
   });
 
   it('renders highlights, single-line notes snippets, keyboard arrow/IME-safe Enter, and ended recurring disabled controls', () => {
