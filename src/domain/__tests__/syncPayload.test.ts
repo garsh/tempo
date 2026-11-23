@@ -295,6 +295,24 @@ describe('parseSyncPayload', () => {
     expect(parsedDupes.tasks[0]?.completionHistory[0]).toBe(1_636);
     expect(parsedDupes.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
   });
+
+  it('parses and clamps tombstonesPrunedBefore when valid and omits invalid values', () => {
+    const future = now + CLOCK_SKEW_MS + 60_000;
+    const valid = parseSyncPayload(
+      JSON.stringify({ tasks: [], tombstonesPrunedBefore: now - 1000 }),
+      { now }
+    );
+    expect(valid.tombstonesPrunedBefore).toBe(now - 1000);
+
+    const clamped = parseSyncPayload(
+      JSON.stringify({ tasks: [], tombstonesPrunedBefore: future }),
+      { now }
+    );
+    expect(clamped.tombstonesPrunedBefore).toBe(now);
+
+    const absent = parseSyncPayload(JSON.stringify({ tasks: [], tombstonesPrunedBefore: 0 }), { now });
+    expect(absent.tombstonesPrunedBefore).toBeUndefined();
+  });
 });
 
 describe('readResponseTextCapped', () => {
@@ -479,5 +497,9 @@ describe('compactSyncData', () => {
       { id: 'f1', name: 'Work', sortOrder: 1, createdAt: 1, updatedAt: 2 },
       { id: 'f-del', name: '', createdAt: 1, updatedAt: 60, deletedAt: 60 },
     ]);
+    expect(compacted).not.toHaveProperty('tombstonesPrunedBefore');
+
+    const withWatermark = compactSyncData({ ...input, tombstonesPrunedBefore: 987654 });
+    expect(withWatermark.tombstonesPrunedBefore).toBe(987654);
   });
 });

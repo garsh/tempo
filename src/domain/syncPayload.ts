@@ -40,6 +40,8 @@ export interface ParsedSyncPayload {
   folders: Folder[];
   /** Present when the backup named an exportedAt. Clamped the same way as record timestamps. */
   exportedAt?: number;
+  /** Present when the backup declared a tombstone prune watermark. */
+  tombstonesPrunedBefore?: number;
 }
 
 export interface ParseSyncOptions {
@@ -481,6 +483,7 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
   let listRows: unknown[] = [];
   let folderRows: unknown[] = [];
   let exportedAt: number | undefined;
+  let tombstonesPrunedBefore: number | undefined;
 
   if (Array.isArray(parsed)) {
     taskRows = requireBoundedRecords(parsed, maxRecords);
@@ -494,6 +497,8 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
     folderRows = requireBoundedRecords(record.folders, maxRecords);
     const stamped = asFinite(record.exportedAt);
     if (stamped !== undefined) exportedAt = clampTimestamp(stamped, now);
+    const pruned = asFinite(record.tombstonesPrunedBefore);
+    if (pruned !== undefined && pruned > 0) tombstonesPrunedBefore = clampTimestamp(pruned, now);
   } else {
     throw new SyncPayloadError('Invalid format: tasks array missing.', 'invalid');
   }
@@ -505,6 +510,7 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
       .map((row) => sanitizeNamed(row, now, 'folder'))
       .filter((row): row is Folder => row !== null),
     exportedAt,
+    ...(tombstonesPrunedBefore !== undefined ? { tombstonesPrunedBefore } : {}),
   };
 }
 
@@ -647,6 +653,11 @@ export function compactSyncData(data: SyncData): SyncData {
   return {
     version: data.version,
     exportedAt: data.exportedAt,
+    ...(typeof data.tombstonesPrunedBefore === 'number' &&
+    Number.isFinite(data.tombstonesPrunedBefore) &&
+    data.tombstonesPrunedBefore > 0
+      ? { tombstonesPrunedBefore: data.tombstonesPrunedBefore }
+      : {}),
     tasks: data.tasks.map(compactTaskForSync),
     lists: data.lists.map(compactListForSync),
     folders: (data.folders ?? []).map(compactFolderForSync),

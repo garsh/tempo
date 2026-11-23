@@ -1,6 +1,12 @@
 import { db, ensureInboxList } from '../db/db';
 import { recordDiagEvent } from '../domain/diagnostics';
-import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
+import {
+  hasExpiredTombstones,
+  mergeFolders,
+  mergeLists,
+  mergeTasks,
+  TOMBSTONE_TTL_MS,
+} from '../domain/merge';
 import {
   compactSyncData,
   MAX_SYNC_BYTES,
@@ -9,6 +15,12 @@ import {
   SyncPayloadError,
   utf8ByteLength,
 } from '../domain/syncPayload';
+import {
+  getLocalSyncedBeforeForFile,
+  getTombstonesPrunedBefore,
+  recordSyncedFile,
+  setTombstonesPrunedBefore,
+} from './syncWatermark';
 import type { Folder, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
@@ -190,6 +202,9 @@ export async function downloadDriveBackup(
     const data: SyncData = {
       version: SYNC_VERSION,
       exportedAt: parsed.exportedAt ?? Date.now(),
+      ...(parsed.tombstonesPrunedBefore !== undefined
+        ? { tombstonesPrunedBefore: parsed.tombstonesPrunedBefore }
+        : {}),
       tasks: parsed.tasks,
       lists: parsed.lists,
       folders: parsed.folders,
@@ -299,14 +314,98 @@ function getChangedEntities<T extends { id: string }>(local: T[], merged: T[]): 
   });
 }
 
-async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
+interface PrunedEntityIds {
+  tasks: string[];
+  lists: string[];
+  folders: string[];
+}
+
+interface MergedSyncResult {
   tasks: Task[];
   lists: TaskList[];
   folders: Folder[];
-}> {
+  tombstonesPrunedBefore: number;
+  prunedIds: PrunedEntityIds;
+}
+
+function collectPrunedIds<T extends { id: string }>(localItems: T[], mergedItems: T[]): string[] {
+  const mergedIds = new Set(mergedItems.map((item) => item.id));
+  return localItems.filter((item) => !mergedIds.has(item.id)).map((item) => item.id);
+}
+
+interface PrunableTable<T> {
+  bulkGet?: (ids: string[]) => Promise<(T | undefined)[]>;
+  bulkDelete?: (ids: string[]) => Promise<void>;
+}
+
+async function deleteStillPrunableRows<
+  T extends { id: string; updatedAt: number; deletedAt?: number | null },
+>(table: PrunableTable<T>, ids: string[], cutoff: number): Promise<void> {
+  if (ids.length === 0 || typeof table.bulkDelete !== 'function') return;
+  if (typeof table.bulkGet !== 'function') {
+    await table.bulkDelete(ids);
+    return;
+  }
+  const current = await table.bulkGet(ids);
+  const safeToDelete: string[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const row = current[i];
+    if (!row) continue;
+    if (row.deletedAt) {
+      if (cutoff <= 0 || row.deletedAt <= cutoff) safeToDelete.push(ids[i]);
+    } else if (cutoff > 0 && row.updatedAt <= cutoff) {
+      safeToDelete.push(ids[i]);
+    }
+  }
+  if (safeToDelete.length > 0) {
+    await table.bulkDelete(safeToDelete);
+  }
+}
+
+async function deletePrunedEntities(prunedIds: PrunedEntityIds, cutoff: number): Promise<void> {
+  if (
+    prunedIds.tasks.length === 0 &&
+    prunedIds.lists.length === 0 &&
+    prunedIds.folders.length === 0
+  ) {
+    return;
+  }
+
+  await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
+    await Promise.all([
+      deleteStillPrunableRows(
+        db.tasks as unknown as PrunableTable<Task>,
+        prunedIds.tasks,
+        cutoff
+      ),
+      deleteStillPrunableRows(
+        db.lists as unknown as PrunableTable<TaskList>,
+        prunedIds.lists,
+        cutoff
+      ),
+      deleteStillPrunableRows(
+        db.folders as unknown as PrunableTable<Folder>,
+        prunedIds.folders,
+        cutoff
+      ),
+    ]);
+  });
+}
+
+async function mergeRemoteIntoLocal(
+  remoteData: SyncData | null,
+  fileId: string,
+  now: number
+): Promise<MergedSyncResult> {
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
   const remoteFolders: Folder[] = remoteData?.folders || [];
+  const localPrunedBefore = getTombstonesPrunedBefore(fileId);
+  const localSyncedBefore = getLocalSyncedBeforeForFile(fileId, now);
+  let effectivePrunedBefore = Math.max(
+    localPrunedBefore,
+    remoteData?.tombstonesPrunedBefore ?? 0
+  );
 
   return await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
     const [localTasks, localLists, localFolders] = await Promise.all([
@@ -315,9 +414,28 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
       db.folders.toArray(),
     ]);
 
-    const mergedTasks = mergeTasks(localTasks, remoteTasks);
-    const mergedLists = mergeLists(localLists, remoteLists);
-    const mergedFolders = mergeFolders(localFolders, remoteFolders);
+    const autoCutoff = now - TOMBSTONE_TTL_MS;
+    if (
+      autoCutoff > effectivePrunedBefore &&
+      (hasExpiredTombstones(localTasks, autoCutoff) ||
+        hasExpiredTombstones(remoteTasks, autoCutoff) ||
+        hasExpiredTombstones(localLists, autoCutoff) ||
+        hasExpiredTombstones(remoteLists, autoCutoff) ||
+        hasExpiredTombstones(localFolders, autoCutoff) ||
+        hasExpiredTombstones(remoteFolders, autoCutoff))
+    ) {
+      effectivePrunedBefore = autoCutoff;
+    }
+
+    const pruneOptions = {
+      prunedBefore: effectivePrunedBefore,
+      localSyncedBefore,
+      hasRemote: remoteData !== null,
+    };
+
+    const mergedTasks = mergeTasks(localTasks, remoteTasks, pruneOptions);
+    const mergedLists = mergeLists(localLists, remoteLists, pruneOptions);
+    const mergedFolders = mergeFolders(localFolders, remoteFolders, pruneOptions);
 
     const tasksToPut = getChangedEntities(localTasks, mergedTasks);
     const listsToPut = getChangedEntities(localLists, mergedLists);
@@ -327,16 +445,32 @@ async function mergeRemoteIntoLocal(remoteData: SyncData | null): Promise<{
     if (listsToPut.length > 0) await db.lists.bulkPut(listsToPut);
     if (foldersToPut.length > 0) await db.folders.bulkPut(foldersToPut);
 
-    await ensureInboxList();
+    const ensuredInbox = await ensureInboxList();
+    const listPayloadMap = new Map(mergedLists.map((l) => [l.id, l]));
+    if (ensuredInbox && !ensuredInbox.deletedAt) {
+      listPayloadMap.set(ensuredInbox.id, ensuredInbox);
+    }
+    const finalLists = Array.from(listPayloadMap.values());
+
+    const prunedIds: PrunedEntityIds = {
+      tasks: collectPrunedIds(localTasks, mergedTasks),
+      lists: collectPrunedIds(localLists, finalLists),
+      folders: collectPrunedIds(localFolders, mergedFolders),
+    };
+    const totalPruned =
+      prunedIds.tasks.length + prunedIds.lists.length + prunedIds.folders.length;
+
     recordDiagEvent(
       'drive_sync',
-      `local=${localTasks.length} remote=${remoteTasks.length} merged=${mergedTasks.length} updatedTasks=${tasksToPut.length}`
+      `local=${localTasks.length} remote=${remoteTasks.length} merged=${mergedTasks.length} updatedTasks=${tasksToPut.length} pruned=${totalPruned}`
     );
 
     return {
       tasks: mergedTasks,
-      lists: await db.lists.toArray(),
+      lists: finalLists,
       folders: mergedFolders,
+      tombstonesPrunedBefore: effectivePrunedBefore,
+      prunedIds,
     };
   });
 }
@@ -351,18 +485,26 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
 
   const attempt = async (): Promise<DriveSyncResult> => {
     const { data: remoteData, etag } = await downloadDriveBackup(fileId, accessToken);
-    const merged = await mergeRemoteIntoLocal(remoteData);
-
     const now = Date.now();
+    const merged = await mergeRemoteIntoLocal(remoteData, fileId, now);
+
     const syncPayload: SyncData = {
       version: SYNC_VERSION,
       exportedAt: now,
+      ...(merged.tombstonesPrunedBefore > 0
+        ? { tombstonesPrunedBefore: merged.tombstonesPrunedBefore }
+        : {}),
       tasks: merged.tasks,
       lists: merged.lists,
       folders: merged.folders,
     };
 
     await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
+    await deletePrunedEntities(merged.prunedIds, merged.tombstonesPrunedBefore);
+    recordSyncedFile(fileId);
+    if (merged.tombstonesPrunedBefore > 0) {
+      setTombstonesPrunedBefore(merged.tombstonesPrunedBefore, fileId);
+    }
 
     return {
       success: true,

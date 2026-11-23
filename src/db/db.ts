@@ -38,8 +38,10 @@ import {
 import { newId } from '../domain/id';
 import { computeTopSortOrder } from '../domain/sorting';
 import { recordDiagEvent } from '../domain/diagnostics';
+import { TOMBSTONE_TTL_MS } from '../domain/merge';
 import type { NewTaskPosition } from '../prefs/prefs';
-import { getStoredClientId } from '../sync/googleAuth';
+import { getGoogleAccount } from '../sync/googleAccount';
+import { setTombstonesPrunedBefore } from '../sync/syncWatermark';
 import { buildSampleData, isSampleId } from './sampleData';
 
 export { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from './sampleData';
@@ -165,10 +167,40 @@ export async function clearSampleTasks(): Promise<number> {
   return removed;
 }
 
+export interface ClearAllDataPreview {
+  openTasks: number;
+  completedTasks: number;
+  activeTasks: number;
+  customLists: number;
+  folders: number;
+}
+
+export async function getClearAllDataPreview(): Promise<ClearAllDataPreview> {
+  const [allTasks, allLists, allFolders] = await Promise.all([
+    db.tasks.toArray(),
+    db.lists.toArray(),
+    db.folders.toArray(),
+  ]);
+  let openTasks = 0;
+  let completedTasks = 0;
+  for (const t of allTasks) {
+    if (t.deletedAt) continue;
+    if (isCompleted(t)) completedTasks += 1;
+    else openTasks += 1;
+  }
+  return {
+    openTasks,
+    completedTasks,
+    activeTasks: openTasks + completedTasks,
+    customLists: allLists.filter((l) => !l.deletedAt && l.id !== INBOX_LIST_ID).length,
+    folders: allFolders.filter((f) => !f.deletedAt).length,
+  };
+}
+
 /**
- * Settings › Integrations & Import → "Clear all current data":
- * soft-delete (tombstone) all tasks, custom lists, folders, and saved filters
- * so the removal also propagates through Drive sync, keeping the built-in Inbox list.
+ * Settings › Integrations & Import › Diagnostics & Repair → "Clear all current data":
+ * soft-delete (tombstone) all tasks, custom lists, and folders so the removal also
+ * propagates through Drive sync, keeping the built-in Inbox list.
  */
 export async function clearAllData(): Promise<number> {
   const now = Date.now();
@@ -1184,13 +1216,50 @@ export async function softDeleteTask(id: string): Promise<void> {
   recordDiagEvent('delete_task', `id=${id} title=${task.title.slice(0, 30)}`);
 }
 
-function hasGoogleSyncConfigured(): boolean {
-  if (typeof localStorage === 'undefined') return false;
-  try {
-    return Boolean(getStoredClientId());
-  } catch {
-    return false;
+function isGoogleSyncActive(): boolean {
+  return Boolean(getGoogleAccount());
+}
+
+/**
+ * Identify historical completed tasks created by bulk TickTick CSV imports (which share an
+ * identical import `updatedAt` across multiple non-recurring completed rows whose `completedAt`
+ * predates the import timestamp by > 1s).
+ */
+export function findImportedCompletedTaskIds(tasks: ReadonlyArray<Task>): string[] {
+  const byUpdatedAt = new Map<number, Task[]>();
+  for (const t of tasks) {
+    if (
+      t.deletedAt ||
+      t.recurrence ||
+      typeof t.completedAt !== 'number' ||
+      t.sortOrder !== undefined ||
+      isSampleId(t.id)
+    ) {
+      continue;
+    }
+    const bucket = byUpdatedAt.get(t.updatedAt);
+    if (bucket) bucket.push(t);
+    else byUpdatedAt.set(t.updatedAt, [t]);
   }
+
+  const ids: string[] = [];
+  for (const [updatedAt, bucket] of byUpdatedAt) {
+    if (bucket.length < 2) continue;
+    let olderCount = 0;
+    for (const t of bucket) {
+      if (t.completedAt! < updatedAt - 1000) {
+        olderCount++;
+        if (olderCount >= 2) break;
+      }
+    }
+    if (olderCount < 2) continue;
+    for (const t of bucket) {
+      if (t.completedAt! <= updatedAt) {
+        ids.push(t.id);
+      }
+    }
+  }
+  return ids;
 }
 
 function hasActiveRecurrence(task: Task): boolean {
@@ -1238,15 +1307,16 @@ function mergeTaskGroup(group: Task[], now: number): { keeper: Task; dropped: Ta
 
 /**
  * Merges duplicate lists/tasks left behind by earlier TickTick imports and purges
- * soft-delete tombstones when Google Drive sync is not configured.
+ * soft-delete tombstones (all when signed out, or expired >30d tombstones when Drive sync is active).
  */
 export async function repairAndDeduplicateDatabase(): Promise<{
   mergedLists: number;
   deduplicatedTasks: number;
   purgedTombstones: number;
 }> {
-  const syncConfigured = hasGoogleSyncConfigured();
+  const syncActive = isGoogleSyncActive();
   const now = Date.now();
+  const expiredCutoff = now - TOMBSTONE_TTL_MS;
 
   const result = await db.transaction(
     'rw',
@@ -1348,21 +1418,33 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 
       let purgedTombstones = 0;
       const hasAnyActiveTask = Array.from(taskMap.values()).some((t) => !t.deletedAt);
-      if (!syncConfigured && hasAnyActiveTask) {
+      if (hasAnyActiveTask) {
+        const shouldPurgeTombstone = (item: { deletedAt?: number | null }) =>
+          Boolean(item.deletedAt) && (!syncActive || item.deletedAt! <= expiredCutoff);
+
         const deletedTaskIds = Array.from(taskMap.values())
-          .filter((t) => !!t.deletedAt)
+          .filter(shouldPurgeTombstone)
           .map((t) => t.id);
         const deletedListIds = Array.from(listById.values())
-          .filter((l) => !!l.deletedAt)
+          .filter((l) => l.id !== INBOX_LIST_ID && shouldPurgeTombstone(l))
           .map((l) => l.id);
-        const deletedFolderIds = allFolders.filter((f) => !!f.deletedAt).map((f) => f.id);
+        const deletedFolderIds = allFolders
+          .filter(shouldPurgeTombstone)
+          .map((f) => f.id);
 
         const deletedTaskIdSet = new Set(deletedTaskIds);
+        const deletedListIdSet = new Set(deletedListIds);
         const tasksToPut = Array.from(dirtyTaskIds)
           .filter((id) => !deletedTaskIdSet.has(id))
           .map((id) => taskMap.get(id)!)
           .filter(Boolean);
+        const listsToPut = Array.from(dirtyListIds)
+          .filter((id) => !deletedListIdSet.has(id))
+          .map((id) => listById.get(id)!)
+          .filter(Boolean);
+
         if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
+        if (listsToPut.length) await db.lists.bulkPut(listsToPut);
         if (deletedTaskIds.length) await db.tasks.bulkDelete(deletedTaskIds);
         if (deletedListIds.length) await db.lists.bulkDelete(deletedListIds);
         if (deletedFolderIds.length) await db.folders.bulkDelete(deletedFolderIds);
@@ -1371,6 +1453,9 @@ export async function repairAndDeduplicateDatabase(): Promise<{
           deletedTaskIds.length +
           deletedListIds.length +
           deletedFolderIds.length;
+        if (syncActive && purgedTombstones > 0) {
+          setTombstonesPrunedBefore(expiredCutoff);
+        }
       } else {
         const tasksToPut = Array.from(dirtyTaskIds)
           .map((id) => taskMap.get(id)!)
@@ -1388,7 +1473,123 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 
   recordDiagEvent(
     'db_repair',
-    `mergedLists=${result.mergedLists} deduplicatedTasks=${result.deduplicatedTasks} purgedTombstones=${result.purgedTombstones} sync=${syncConfigured}`,
+    `mergedLists=${result.mergedLists} deduplicatedTasks=${result.deduplicatedTasks} purgedTombstones=${result.purgedTombstones} sync=${syncActive}`,
+  );
+  return result;
+}
+
+export interface StorageCleanupPreview {
+  importedCompletedTasks: number;
+  tombstonedTasks: number;
+  tombstonedLists: number;
+  tombstonedFolders: number;
+  activeRemainingTasks: number;
+}
+
+export interface StorageCleanupResult {
+  removedImportedCompleted: number;
+  purgedTasks: number;
+  purgedLists: number;
+  purgedFolders: number;
+  needsSync: boolean;
+}
+
+export async function getStorageCleanupPreview(): Promise<StorageCleanupPreview> {
+  const [allTasks, allLists, allFolders] = await Promise.all([
+    db.tasks.toArray(),
+    db.lists.toArray(),
+    db.folders.toArray(),
+  ]);
+  const importedIds = findImportedCompletedTaskIds(allTasks);
+  let activeTasks = 0;
+  let tombstonedTasks = 0;
+  for (const t of allTasks) {
+    if (t.deletedAt) tombstonedTasks++;
+    else activeTasks++;
+  }
+  return {
+    importedCompletedTasks: importedIds.length,
+    tombstonedTasks,
+    tombstonedLists: allLists.filter((l) => l.id !== INBOX_LIST_ID && Boolean(l.deletedAt)).length,
+    tombstonedFolders: allFolders.filter((f) => Boolean(f.deletedAt)).length,
+    activeRemainingTasks: Math.max(0, activeTasks - importedIds.length),
+  };
+}
+
+/**
+ * Remove TickTick-imported completed tasks and all deleted tombstones across tasks, lists, and folders.
+ * When signed in to Google Drive, stages tombstones and advances the prune watermark so the next
+ * Drive sync deletes them remotely before removing them locally.
+ */
+export async function cleanupImportedAndTombstones(): Promise<StorageCleanupResult> {
+  const syncActive = isGoogleSyncActive();
+  const now = Date.now();
+
+  const result = await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
+    const [allTasks, allLists, allFolders] = await Promise.all([
+      db.tasks.toArray(),
+      db.lists.toArray(),
+      db.folders.toArray(),
+    ]);
+
+    const importedIdList = findImportedCompletedTaskIds(allTasks);
+    const importedIdSet = new Set(importedIdList);
+    const tombstonedTaskIds = allTasks.filter((t) => Boolean(t.deletedAt)).map((t) => t.id);
+    const tombstonedListIds = allLists
+      .filter((l) => l.id !== INBOX_LIST_ID && Boolean(l.deletedAt))
+      .map((l) => l.id);
+    const tombstonedFolderIds = allFolders.filter((f) => Boolean(f.deletedAt)).map((f) => f.id);
+
+    const total =
+      importedIdList.length +
+      tombstonedTaskIds.length +
+      tombstonedListIds.length +
+      tombstonedFolderIds.length;
+    if (total === 0) {
+      return {
+        removedImportedCompleted: 0,
+        purgedTasks: 0,
+        purgedLists: 0,
+        purgedFolders: 0,
+        needsSync: false,
+      };
+    }
+
+    if (!syncActive) {
+      const taskIdsToDelete = [...importedIdList, ...tombstonedTaskIds];
+      if (taskIdsToDelete.length) await db.tasks.bulkDelete(taskIdsToDelete);
+      if (tombstonedListIds.length) await db.lists.bulkDelete(tombstonedListIds);
+      if (tombstonedFolderIds.length) await db.folders.bulkDelete(tombstonedFolderIds);
+      setTombstonesPrunedBefore(now);
+      return {
+        removedImportedCompleted: importedIdList.length,
+        purgedTasks: tombstonedTaskIds.length,
+        purgedLists: tombstonedListIds.length,
+        purgedFolders: tombstonedFolderIds.length,
+        needsSync: false,
+      };
+    }
+
+    const softDeletedImported = allTasks
+      .filter((t) => importedIdSet.has(t.id))
+      .map((t) => ({ ...t, deletedAt: now, updatedAt: now }));
+    if (softDeletedImported.length > 0) {
+      await db.tasks.bulkPut(softDeletedImported);
+    }
+    setTombstonesPrunedBefore(now);
+
+    return {
+      removedImportedCompleted: softDeletedImported.length,
+      purgedTasks: tombstonedTaskIds.length,
+      purgedLists: tombstonedListIds.length,
+      purgedFolders: tombstonedFolderIds.length,
+      needsSync: true,
+    };
+  });
+
+  recordDiagEvent(
+    'storage_cleanup',
+    `imported=${result.removedImportedCompleted} tasks=${result.purgedTasks} lists=${result.purgedLists} folders=${result.purgedFolders} needsSync=${result.needsSync}`,
   );
   return result;
 }

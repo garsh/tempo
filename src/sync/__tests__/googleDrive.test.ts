@@ -1,16 +1,36 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import type { SyncData } from '../../types/task';
+import type { Folder, SyncData, Task, TaskList } from '../../types/task';
 
 vi.mock('../../db/db', () => ({
   db: {
-    transaction: vi.fn(async (_mode, _t1, _t2, _t3, cb) => cb()),
-    tasks: { toArray: vi.fn().mockResolvedValue([]), bulkPut: vi.fn() },
-    lists: { toArray: vi.fn().mockResolvedValue([]), bulkPut: vi.fn() },
-    folders: { toArray: vi.fn().mockResolvedValue([]), bulkPut: vi.fn() },
+    transaction: vi.fn(async (...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }),
+    tasks: {
+      toArray: vi.fn().mockResolvedValue([]),
+      bulkPut: vi.fn(),
+      bulkGet: vi.fn().mockResolvedValue([]),
+      bulkDelete: vi.fn(),
+    },
+    lists: {
+      toArray: vi.fn().mockResolvedValue([]),
+      bulkPut: vi.fn(),
+      bulkGet: vi.fn().mockResolvedValue([]),
+      bulkDelete: vi.fn(),
+    },
+    folders: {
+      toArray: vi.fn().mockResolvedValue([]),
+      bulkPut: vi.fn(),
+      bulkGet: vi.fn().mockResolvedValue([]),
+      bulkDelete: vi.fn(),
+    },
   },
   ensureInboxList: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { db } from '../../db/db';
+import { TOMBSTONE_TTL_MS } from '../../domain/merge';
 import {
   getOrCreateAppDataFile,
   downloadDriveBackup,
@@ -21,12 +41,72 @@ import {
 } from '../googleDrive';
 import { compactSyncData, utf8ByteLength } from '../../domain/syncPayload';
 
+function createMockStorage(initial: Record<string, string> = {}) {
+  const store = new Map<string, string>(Object.entries(initial));
+  return {
+    store,
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => store.set(k, String(v)),
+    removeItem: (k: string) => store.delete(k),
+    clear: () => store.clear(),
+  };
+}
+
+function wireMockDbTables(seed: {
+  tasks?: Task[];
+  lists?: TaskList[];
+  folders?: Folder[];
+}) {
+  const wireTable = <T extends { id: string }>(table: unknown, initial: T[]) => {
+    const map = new Map<string, T>(initial.map((item) => [item.id, structuredClone(item)]));
+    const mockTable = table as {
+      toArray: ReturnType<typeof vi.fn>;
+      bulkPut: ReturnType<typeof vi.fn>;
+      bulkGet: ReturnType<typeof vi.fn>;
+      bulkDelete: ReturnType<typeof vi.fn>;
+    };
+    mockTable.toArray.mockImplementation(async () => Array.from(map.values()).map((x) => structuredClone(x)));
+    mockTable.bulkPut.mockImplementation(async (items: T[]) => {
+      for (const item of items) map.set(item.id, structuredClone(item));
+    });
+    mockTable.bulkGet.mockImplementation(async (ids: string[]) =>
+      ids.map((id) => {
+        const found = map.get(id);
+        return found ? structuredClone(found) : undefined;
+      })
+    );
+    mockTable.bulkDelete.mockImplementation(async (ids: string[]) => {
+      for (const id of ids) map.delete(id);
+    });
+    return map;
+  };
+
+  return {
+    tasks: wireTable(db.tasks, seed.tasks ?? []),
+    lists: wireTable(db.lists, seed.lists ?? []),
+    folders: wireTable(db.folders, seed.folders ?? []),
+  };
+}
+
 describe('googleDrive', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (db.tasks.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.lists.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.folders.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.tasks.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.lists.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.folders.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (db.tasks.bulkPut as ReturnType<typeof vi.fn>).mockReset();
+    (db.lists.bulkPut as ReturnType<typeof vi.fn>).mockReset();
+    (db.folders.bulkPut as ReturnType<typeof vi.fn>).mockReset();
+    (db.tasks.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
+    (db.lists.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
+    (db.folders.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -642,6 +722,251 @@ describe('googleDrive', () => {
 
       const result = await syncWithGoogleDrive('token-123');
       expect(result.success).toBe(true);
+    });
+
+    it('automatically prunes tombstones older than 30 days across tasks, lists, and folders and updates local DB and watermark', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      const storage = createMockStorage();
+      vi.stubGlobal('localStorage', storage);
+
+      const expiredAt = now - TOMBSTONE_TTL_MS - 5 * 24 * 60 * 60 * 1000;
+      const recentDelAt = now - 5 * 24 * 60 * 60 * 1000;
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'active-1',
+            title: 'Active Task',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 100,
+            updatedAt: now - 1000,
+          },
+          {
+            id: 'old-del-task',
+            title: '',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 100,
+            updatedAt: expiredAt,
+            deletedAt: expiredAt,
+          },
+          {
+            id: 'recent-del-task',
+            title: '',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 100,
+            updatedAt: recentDelAt,
+            deletedAt: recentDelAt,
+          },
+        ],
+        lists: [
+          { id: 'inbox', name: 'Inbox', createdAt: 1, updatedAt: 1 },
+          { id: 'old-del-list', name: '', createdAt: 1, updatedAt: expiredAt, deletedAt: expiredAt },
+        ],
+        folders: [
+          { id: 'old-del-folder', name: '', createdAt: 1, updatedAt: expiredAt, deletedAt: expiredAt },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [], lists: [], folders: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v2"' }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.success).toBe(true);
+      expect(result.tasksCount).toBe(2);
+
+      const uploadedBody = JSON.parse(String((mockFetch.mock.calls[2]?.[1] as RequestInit).body));
+      expect(uploadedBody.tombstonesPrunedBefore).toBe(now - TOMBSTONE_TTL_MS);
+      expect(uploadedBody.tasks.map((t: Task) => t.id)).toEqual(['active-1', 'recent-del-task']);
+      expect(uploadedBody.lists.map((l: TaskList) => l.id)).toEqual(['inbox']);
+      expect(uploadedBody.folders).toEqual([]);
+
+      expect(Array.from(stores.tasks.keys())).toEqual(['active-1', 'recent-del-task']);
+      expect(Array.from(stores.lists.keys())).toEqual(['inbox']);
+      expect(Array.from(stores.folders.keys())).toEqual([]);
+      expect(storage.store.get('tempo_tombstones_pruned_before')).toBe(String(now - TOMBSTONE_TTL_MS));
+      expect(storage.store.get('tempo_last_synced_file_id')).toBe('drive-file-123');
+    });
+
+    it('drops stale active items on a previously synced device while keeping offline edits and honoring legacy drive file fallback', async () => {
+      const lastSyncAt = 1_795_000_000_000;
+      const pruneAt = 1_795_400_000_000;
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+
+      const storage = createMockStorage({
+        tempo_drive_backup_file_id: 'drive-file-123',
+        tempo_last_synced_at: String(lastSyncAt),
+      });
+      vi.stubGlobal('localStorage', storage);
+
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'kept-task',
+            title: 'Kept',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: 100,
+          },
+          {
+            id: 'stale-imported',
+            title: 'Old TickTick Completed',
+            listId: 'inbox',
+            completionHistory: [50],
+            completedAt: 50,
+            createdAt: 50,
+            updatedAt: lastSyncAt - 1000,
+          },
+          {
+            id: 'offline-edit',
+            title: 'Edited Offline',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: lastSyncAt + 5000,
+          },
+          {
+            id: 'old-tombstone',
+            title: '',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: pruneAt - 100,
+            deletedAt: pruneAt - 100,
+          },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () =>
+            JSON.stringify({
+              version: 4,
+              exportedAt: pruneAt,
+              tombstonesPrunedBefore: pruneAt,
+              tasks: [
+                {
+                  id: 'kept-task',
+                  title: 'Kept',
+                  listId: 'inbox',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 100,
+                },
+              ],
+              lists: [],
+              folders: [],
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v2"' }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.tasksCount).toBe(2);
+
+      const uploadedBody = JSON.parse(String((mockFetch.mock.calls[2]?.[1] as RequestInit).body));
+      expect(uploadedBody.tombstonesPrunedBefore).toBe(pruneAt);
+      expect(uploadedBody.tasks.map((t: Task) => t.id)).toEqual(['kept-task', 'offline-edit']);
+      expect(Array.from(stores.tasks.keys())).toEqual(['kept-task', 'offline-edit']);
+    });
+
+    it('waits until uploadDriveBackup succeeds before bulkDeleting pruned tombstones on 412 retry', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      vi.stubGlobal('localStorage', createMockStorage());
+
+      const expiredAt = now - TOMBSTONE_TTL_MS - 1000;
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'expired-tombstone',
+            title: '',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 1,
+            updatedAt: expiredAt,
+            deletedAt: expiredAt,
+          },
+        ],
+      });
+
+      let sawTombstoneOnRetry = false;
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [], lists: [], folders: [] }),
+        })
+        .mockImplementationOnce(async () => {
+          expect(stores.tasks.has('expired-tombstone')).toBe(true);
+          return {
+            ok: false,
+            status: 412,
+            statusText: 'Precondition Failed',
+            headers: new Headers(),
+          };
+        })
+        .mockImplementationOnce(async () => {
+          sawTombstoneOnRetry = stores.tasks.has('expired-tombstone');
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ ETag: '"v2"' }),
+            text: async () => JSON.stringify({ version: 4, exportedAt: 200, tasks: [], lists: [], folders: [] }),
+          };
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v3"' }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.success).toBe(true);
+      expect(sawTombstoneOnRetry).toBe(true);
+      expect(stores.tasks.has('expired-tombstone')).toBe(false);
     });
   });
 });

@@ -56,6 +56,13 @@ vi.mock('../../db/db', () => ({
   softDeleteTask: vi.fn(async () => undefined),
   stopRecurringTask: vi.fn(async () => null),
   clearAllData: vi.fn(async () => 0),
+  getClearAllDataPreview: vi.fn(async () => ({
+    openTasks: 0,
+    completedTasks: 0,
+    activeTasks: 0,
+    customLists: 0,
+    folders: 0,
+  })),
   clearSampleTasks: vi.fn(async () => 0),
   isSampleId: vi.fn(() => false),
   loadSampleTasks: vi.fn(async () => 0),
@@ -63,6 +70,21 @@ vi.mock('../../db/db', () => ({
     deduplicatedTasks: 0,
     mergedLists: 0,
     purgedTombstones: 0,
+  })),
+  findImportedCompletedTaskIds: vi.fn(() => []),
+  getStorageCleanupPreview: vi.fn(async () => ({
+    importedCompletedTasks: 0,
+    tombstonedTasks: 0,
+    tombstonedLists: 0,
+    tombstonedFolders: 0,
+    activeRemainingTasks: 0,
+  })),
+  cleanupImportedAndTombstones: vi.fn(async () => ({
+    removedImportedCompleted: 0,
+    purgedTasks: 0,
+    purgedLists: 0,
+    purgedFolders: 0,
+    needsSync: false,
   })),
 }));
 
@@ -415,7 +437,7 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('renders SettingsPage in 2-pane mode on split/desktop defaulting root to Account & Sync and switching categories', () => {
+  it('renders SettingsPage in 2-pane mode on split/desktop defaulting root to General and switching categories', () => {
     stubMatchMedia((q) => q === MEDIA_SPLIT || q === MEDIA_DESKTOP);
 
     const view = mount(
@@ -439,19 +461,33 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
 
     const root = view.container.querySelector('[data-testid="settings-page"]');
     expect(root?.getAttribute('data-settings-layout')).toBe('two-pane');
-    expect(root?.getAttribute('data-settings-page')).toBe('account');
-    expect(view.container.textContent).toContain('Google Drive sync');
+    expect(root?.getAttribute('data-settings-page')).toBe('general');
+
+    const labels = Array.from(view.container.querySelectorAll('label')).map((l) => l.textContent?.trim());
+    expect(labels).toEqual(
+      expect.arrayContaining(['Theme', 'New task placement', 'Week starts on', 'Time format', 'Seasons'])
+    );
+    expect(view.container.querySelectorAll('select')).toHaveLength(5);
 
     const nav = view.container.querySelector('nav[aria-label="Settings categories"]')!;
-    const appearanceBtn = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
-      b.textContent?.includes('Appearance')
+    const navButtons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).map((b) =>
+      b.textContent?.trim()
+    );
+    expect(navButtons).toEqual(['General', 'Account', 'Backup & Diagnostics']);
+    expect(nav.textContent).not.toContain('Help & Feedback');
+
+    const accountBtn = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
+      b.textContent?.trim() === 'Account'
     )!;
     act(() => {
-      appearanceBtn.click();
+      accountBtn.click();
     });
 
-    expect(root?.getAttribute('data-settings-page')).toBe('appearance');
-    expect(view.container.querySelector('[role="radiogroup"][aria-label="Theme"]')).toBeTruthy();
+    expect(root?.getAttribute('data-settings-page')).toBe('account');
+    expect(view.container.textContent).toContain('Last synced');
+    expect(view.container.textContent).not.toContain('Google Drive sync');
+    expect(view.container.textContent).not.toContain('Private Drive AppData folder');
+    expect(view.container.textContent).not.toContain('Background sync');
   });
 
   it('supports RecurringTasksView category filter pills and hides Back button when embedded', () => {

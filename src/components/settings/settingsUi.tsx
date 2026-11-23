@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react';
-import { ArrowLeft, Check, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import { sanitizePhotoUrl, type GoogleAccount } from '../../sync/googleAccount';
 
 export function Avatar({ account, size }: { account: GoogleAccount | null; size: number }) {
@@ -114,14 +114,57 @@ export function ControlRow({ icon, label, sub, children }: { icon?: ReactNode; l
   );
 }
 
-export function RadioRow({ label, checked, onSelect, sub }: { label: ReactNode; checked: boolean; onSelect: () => void; sub?: ReactNode }) {
+export function SelectRow<T extends string>({
+  icon,
+  label,
+  sub,
+  value,
+  options,
+  onChange,
+}: {
+  icon?: ReactNode;
+  label: string;
+  sub?: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  const id = useId();
+  const subId = useId();
   return (
-    <button type="button" role="radio" aria-checked={checked} onClick={onSelect} className={`${rowBase} hover:bg-tt-hover cursor-pointer`}>
-      <span className="flex-1 min-w-0">
-        <span className={`block text-[17px] desktop:text-[15px] ${checked ? 'text-tt-blue font-medium' : 'text-tt-text'}`}>{label}</span>
-        {sub && <span className="block text-[12px] text-tt-secondary">{sub}</span>}
-      </span>
-      {checked && <Check className="w-5 h-5 text-tt-blue" strokeWidth={2.4} />}
-    </button>
+    <div className={`${rowBase} gap-3 py-1.5`}>
+      {icon && <span className="w-5 h-5 shrink-0 flex items-center justify-center">{icon}</span>}
+      <div className="flex-1 min-w-0 py-1">
+        <label htmlFor={id} className="block text-[17px] desktop:text-[15px] text-tt-text cursor-pointer">
+          {label}
+        </label>
+        {sub && (
+          <span id={subId} className="block text-[12px] text-tt-secondary leading-snug mt-0.5">
+            {sub}
+          </span>
+        )}
+      </div>
+      <div className="relative shrink-0 max-w-[58%]">
+        <select
+          id={id}
+          name={id}
+          value={value}
+          aria-describedby={sub ? subId : undefined}
+          onChange={(e) => onChange(e.target.value as T)}
+          className="appearance-none w-full min-h-[44px] pl-3 pr-8 py-2 rounded-xl bg-tt-input dark:bg-tt-menu border border-tt-border text-[16px] desktop:text-[14px] text-tt-text font-medium cursor-pointer hover:bg-tt-hover focus-visible:outline-2 focus-visible:outline-tt-blue focus-visible:outline-offset-2 transition-colors"
+        >
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          className="w-4 h-4 text-tt-secondary pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2"
+          strokeWidth={2}
+          aria-hidden="true"
+        />
+      </div>
+    </div>
   );
 }

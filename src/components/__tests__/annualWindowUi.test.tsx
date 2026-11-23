@@ -269,11 +269,11 @@ describe('Annual time-of-year UI', () => {
     view.unmount();
   });
 
-  it('switches Hemisphere in SettingsPage Date & Time and updates quick season presets', () => {
+  it('switches Hemisphere in consolidated SettingsPage and updates quick season presets', () => {
     const settingsView = mount(
       <SettingsPage
         isOpen={true}
-        initialPage="datetime"
+        initialPage="general"
         onClose={vi.fn()}
         tasks={[]}
         syncStatus={{
@@ -288,15 +288,19 @@ describe('Annual time-of-year UI', () => {
       />
     );
 
-    const group = settingsView.container.querySelector('[role="radiogroup"][aria-label="Seasons"]');
-    expect(group).toBeTruthy();
-    const southernBtn = Array.from(group!.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find(
-      (b) => b.textContent?.includes('Southern hemisphere')
+    const seasonsLabel = Array.from(settingsView.container.querySelectorAll('label')).find(
+      (l) => l.textContent?.trim() === 'Seasons'
+    );
+    expect(seasonsLabel).toBeTruthy();
+    const seasonsSelect = settingsView.container.querySelector<HTMLSelectElement>(
+      `#${CSS.escape(seasonsLabel!.htmlFor)}`
     )!;
+    expect(seasonsSelect).toBeTruthy();
     act(() => {
-      southernBtn.click();
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(seasonsSelect, 'south');
+      seasonsSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(southernBtn.getAttribute('aria-checked')).toBe('true');
+    expect(seasonsSelect.value).toBe('south');
     settingsView.unmount();
 
     const quickAdd = mount(<QuickAddSheet isOpen={true} onSave={vi.fn()} onClose={vi.fn()} />);

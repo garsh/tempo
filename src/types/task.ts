@@ -119,6 +119,8 @@ export interface Folder {
 export interface SyncData {
   version: number;
   exportedAt: number;
+  /** Epoch ms watermark: soft-delete tombstones with deletedAt <= this value have been pruned. */
+  tombstonesPrunedBefore?: number;
   tasks: Task[];
   lists: TaskList[];
   folders?: Folder[];

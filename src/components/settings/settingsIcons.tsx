@@ -2,22 +2,6 @@
 const B = 'var(--tt-blue)';
 const box = { width: 20, height: 20, viewBox: '0 0 20 20', 'aria-hidden': true } as const;
 
-export function AppearanceIcon() {
-  return (
-    <svg {...box} fill={B}>
-      <path d="M2 2.5A1.5 1.5 0 0 1 3.5 1h11A1.5 1.5 0 0 1 16 2.5V5h1.2A1.8 1.8 0 0 1 19 6.8v2.4a1.8 1.8 0 0 1-1.8 1.8H11v1.6H9.3v-3.4h7.9V6.8H16v.7A1.5 1.5 0 0 1 14.5 9h-11A1.5 1.5 0 0 1 2 7.5Z" />
-      <rect x="8.4" y="12.2" width="3.4" height="7" rx="1.4" />
-    </svg>
-  );
-}
-export function DateTimeIcon() {
-  return (
-    <svg {...box}>
-      <circle cx="10" cy="10" r="9" fill={B} />
-      <path d="M10 5v5.4l3.4 2" stroke="var(--tt-elevated)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-    </svg>
-  );
-}
 export function GeneralIcon() {
   return (
     <svg {...box} fill={B}>
@@ -37,12 +21,11 @@ export function IntegrationsIcon() {
     </svg>
   );
 }
-export function HelpIcon() {
+export function AccountIcon() {
   return (
-    <svg {...box}>
-      <circle cx="10" cy="10" r="9" fill="var(--tt-icon-amber)" />
-      <path d="M7.3 7.6a2.8 2.8 0 0 1 5.5.5c0 1.9-2.8 2.1-2.8 4" stroke="#fff" strokeWidth="2" strokeLinecap="round" fill="none" />
-      <circle cx="10" cy="15" r="1.2" fill="#fff" />
+    <svg {...box} fill={B}>
+      <circle cx="10" cy="6.5" r="3.6" />
+      <path d="M3 17.5c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5v.5H3Z" />
     </svg>
   );
 }
@@ -64,14 +47,6 @@ export function ImportIcon() {
   return (
     <svg {...box} fill="none" stroke="var(--tt-icon-green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10 2v11M5.8 8.8 10 13l4.2-4.2M3 12v4.5A1.5 1.5 0 0 0 4.5 18h11a1.5 1.5 0 0 0 1.5-1.5V12" />
-    </svg>
-  );
-}
-export function CsvIcon() {
-  return (
-    <svg {...box}>
-      <rect x="2" y="1" width="16" height="18" rx="3" fill="var(--tt-icon-green)" />
-      <path d="M5.5 7h9M5.5 10.5h9M5.5 14h5.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

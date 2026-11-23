@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { useLayoutMode } from '../../hooks/useLayoutMode';
 import {
@@ -18,10 +18,16 @@ import type { Task } from '../../types/task';
 import {
   clearAllData,
   clearSampleTasks,
+  cleanupImportedAndTombstones,
   db,
+  findImportedCompletedTaskIds,
+  getClearAllDataPreview,
+  getStorageCleanupPreview,
   isSampleId,
   loadSampleTasks,
   repairAndDeduplicateDatabase,
+  type ClearAllDataPreview,
+  type StorageCleanupPreview,
 } from '../../db/db';
 import {
   clearStoredToken,
@@ -40,43 +46,44 @@ import {
   type SyncStatusSnapshot,
 } from '../../sync/autoSync';
 import { setGoogleAccount } from '../../sync/googleAccount';
+import { clearSyncWatermarkState } from '../../sync/syncWatermark';
 import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
-import { usePrefs } from '../../prefs/prefs';
+import {
+  usePrefs,
+  type Hemisphere,
+  type NewTaskPosition,
+  type ThemePref,
+  type TimeFormat,
+  type WeekStart,
+} from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
 import { summarizeAccount } from '../../sync/accountSummary';
 import { formatByteSize, MAX_SYNC_BYTES } from '../../domain/syncPayload';
-import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
-import { Avatar, Card, ControlRow, NavRow, Note, RadioRow, SectionLabel, SettingsHeader } from './settingsUi';
 import {
-  AppearanceIcon,
-  CsvIcon,
-  DateTimeIcon,
+  exportJsonBackup,
+  importJsonBackup,
+  previewJsonBackup,
+  readFileText,
+  type JsonImportPreview,
+} from './dataTransfer';
+import { Avatar, Card, ControlRow, NavRow, Note, SectionLabel, SelectRow, SettingsHeader } from './settingsUi';
+import {
+  AccountIcon,
   DriveIcon,
   ExportIcon,
   GeneralIcon,
   GoogleGIcon,
-  HelpIcon,
   ImportIcon,
   IntegrationsIcon,
 } from './settingsIcons';
 
-export type SettingsPageId =
-  | 'root'
-  | 'account'
-  | 'appearance'
-  | 'datetime'
-  | 'general'
-  | 'integrations';
-
-export const FEEDBACK_URL = 'https://github.com/garsh/tempo/issues';
+export type SettingsPageId = 'root' | 'account' | 'general' | 'data';
 
 const TITLES: Record<SettingsPageId, string> = {
   root: 'Settings',
-  account: 'Account & Sync',
-  appearance: 'Appearance',
-  datetime: 'Date & Time',
+  account: 'Account',
   general: 'General',
-  integrations: 'Integrations & Import',
+  data: 'Backup & Diagnostics',
 };
 
 interface SettingsPageProps {
@@ -117,7 +124,7 @@ export function SettingsPage(props: SettingsPageProps) {
 
   if (!isOpen) return null;
 
-  const activePage: SettingsPageId = isTwoPane && page === 'root' ? 'account' : page;
+  const activePage: SettingsPageId = isTwoPane && page === 'root' ? 'general' : page;
 
   const go = (p: SettingsPageId) => {
     setStatus(null);
@@ -133,17 +140,11 @@ export function SettingsPage(props: SettingsPageProps) {
     case 'account':
       body = <AccountPage {...props} setStatus={setStatus} suppressLastErrorBanner={status?.type === 'error'} />;
       break;
-    case 'appearance':
-      body = <AppearancePage />;
-      break;
-    case 'datetime':
-      body = <DateTimePage />;
-      break;
     case 'general':
-      body = <GeneralPage {...props} setStatus={setStatus} />;
+      body = <GeneralPage {...props} />;
       break;
-    case 'integrations':
-      body = <IntegrationsPage {...props} setStatus={setStatus} go={go} />;
+    case 'data':
+      body = <DataDiagnosticsPage {...props} setStatus={setStatus} />;
       break;
   }
 
@@ -164,12 +165,10 @@ export function SettingsPage(props: SettingsPageProps) {
   );
 
   if (isTwoPane) {
-    const summary = summarizeAccount(props.syncStatus.account, props.syncStatus, !!getStoredClientId());
     const navItems: ReadonlyArray<{ id: Exclude<SettingsPageId, 'root'>; icon: ReactNode; label: string }> = [
-      { id: 'appearance', icon: <AppearanceIcon />, label: 'Appearance' },
-      { id: 'datetime', icon: <DateTimeIcon />, label: 'Date & Time' },
       { id: 'general', icon: <GeneralIcon />, label: 'General' },
-      { id: 'integrations', icon: <IntegrationsIcon />, label: 'Integrations & Import' },
+      { id: 'account', icon: <AccountIcon />, label: 'Account' },
+      { id: 'data', icon: <IntegrationsIcon />, label: 'Backup & Diagnostics' },
     ];
 
     return (
@@ -204,28 +203,6 @@ export function SettingsPage(props: SettingsPageProps) {
               aria-label="Settings categories"
               className="w-[220px] compact-landscape:w-[190px] shrink-0 border-r border-tt-border bg-tt-sidebar overflow-y-auto p-2.5 space-y-1"
             >
-              <button
-                type="button"
-                onClick={() => go('account')}
-                aria-current={activePage === 'account' ? 'page' : undefined}
-                className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-colors cursor-pointer ${
-                  activePage === 'account'
-                    ? 'bg-tt-blue-soft text-tt-blue font-semibold'
-                    : 'text-tt-text hover:bg-tt-hover'
-                }`}
-              >
-                <Avatar account={props.syncStatus.account} size={34} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-semibold truncate">{summary.title}</span>
-                  <span className="flex items-center gap-1 text-[11px] text-tt-secondary truncate">
-                    <DriveIcon />
-                    <span className="truncate">{summary.subtitle}</span>
-                  </span>
-                </span>
-              </button>
-
-              <div className="my-1.5 h-px bg-tt-border/70" role="separator" />
-
               {navItems.map((item) => {
                 const selected = activePage === item.id;
                 return (
@@ -245,21 +222,6 @@ export function SettingsPage(props: SettingsPageProps) {
                   </button>
                 );
               })}
-
-              <div className="my-1.5 h-px bg-tt-border/70" role="separator" />
-
-              <a
-                href={FEEDBACK_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[14px] font-medium text-tt-text hover:bg-tt-hover transition-colors"
-              >
-                <span className="w-5 h-5 shrink-0 flex items-center justify-center">
-                  <HelpIcon />
-                </span>
-                <span className="flex-1 truncate">Help &amp; Feedback</span>
-                <ExternalLink className="w-3.5 h-3.5 text-tt-muted shrink-0" />
-              </a>
             </nav>
 
             <div
@@ -303,45 +265,20 @@ export function SettingsPage(props: SettingsPageProps) {
 
 /* ───────────────────────────── Root ───────────────────────────── */
 
-function RootPage({ syncStatus, go }: SettingsPageProps & { go: (p: SettingsPageId) => void }) {
-  const summary = summarizeAccount(syncStatus.account, syncStatus, !!getStoredClientId());
+function RootPage({ onShowShortcuts, go }: SettingsPageProps & { go: (p: SettingsPageId) => void }) {
   return (
     <>
-      <button
-        type="button"
-        onClick={() => go('account')}
-        className="w-full flex items-center gap-[17px] pl-4 pr-[18px] mb-5 text-left"
-        aria-label={`Account: ${summary.title}`}
-      >
-        <Avatar account={syncStatus.account} size={74} />
-        <span className="flex-1 min-w-0">
-          <span className="block text-[19px] font-bold text-tt-text truncate">{summary.title}</span>
-          <span className={`flex items-center gap-1.5 mt-1 text-[13px] ${summary.warn ? 'text-tt-icon-amber' : 'text-tt-secondary'}`}>
-            <DriveIcon />
-            <span className="truncate">{summary.subtitle}</span>
-          </span>
-        </span>
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="text-tt-chevron shrink-0">
-          <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-
+      <PreferencesSections />
       <Card>
-        <NavRow icon={<AppearanceIcon />} label="Appearance" onClick={() => go('appearance')} />
-        <NavRow icon={<DateTimeIcon />} label="Date & Time" onClick={() => go('datetime')} />
-        <NavRow icon={<GeneralIcon />} label="General" onClick={() => go('general')} />
-      </Card>
-      <Card>
-        <NavRow icon={<IntegrationsIcon />} label="Integrations & Import" onClick={() => go('integrations')} />
-      </Card>
-      <Card>
-        <NavRow icon={<HelpIcon />} label="Help & Feedback" href={FEEDBACK_URL} />
+        <NavRow icon={<AccountIcon />} label="Account" onClick={() => go('account')} />
+        <NavRow icon={<IntegrationsIcon />} label="Backup & Diagnostics" onClick={() => go('data')} />
+        <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={onShowShortcuts} />
       </Card>
     </>
   );
 }
 
-/* ───────────────────────── Account & Drive sync ───────────────────────── */
+/* ───────────────────────────── Account ───────────────────────────── */
 
 function AccountPage({
   syncStatus,
@@ -351,7 +288,7 @@ function AccountPage({
 }: SettingsPageProps & { setStatus: (s: Status) => void; suppressLastErrorBanner?: boolean }) {
   const [customClientId, setCustomClientId] = useState(() => getCustomClientId());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const activeClientId = getStoredClientId();
   const defaultClientId = getDefaultClientId();
   const hasCustomClientId = Boolean(getCustomClientId());
@@ -401,18 +338,6 @@ function AccountPage({
     onSyncStatusChange();
   };
 
-  const handleToggleAutoSync = (next: boolean) => {
-    setAutoSyncEnabled(next);
-    setAutoSync(next);
-    setStatus({
-      type: 'success',
-      message: next
-        ? 'Background sync on — Tempo will sync on startup and every ~10 minutes while open.'
-        : 'Background sync off. Manual sync still available.',
-    });
-    onSyncStatusChange();
-  };
-
   const handleGoogleSync = async () => {
     const targetClientId = getStoredClientId();
     if (!targetClientId) {
@@ -434,7 +359,7 @@ function AccountPage({
       if (result?.success) {
         setStatus({
           type: 'success',
-          message: `Synced ${result.tasksCount} tasks, ${result.listsCount} lists, ${result.foldersCount} folders!`,
+          message: `Synced ${result.tasksCount} task${result.tasksCount === 1 ? '' : 's'}!`,
         });
       }
     } catch (err: unknown) {
@@ -447,6 +372,7 @@ function AccountPage({
   const handleSignOut = () => {
     void signOutGoogleSession();
     setGoogleAccount(null);
+    clearSyncWatermarkState();
     clearSyncError();
     setStatus({ type: 'success', message: 'Signed out on this device. Local tasks are kept.' });
     onSyncStatusChange();
@@ -486,13 +412,9 @@ function AccountPage({
         </div>
       )}
 
-      <SectionLabel>Google Drive sync</SectionLabel>
       <Card>
-        <ControlRow icon={<DriveIcon />} label="Last synced" sub="Private Drive AppData folder">
+        <ControlRow icon={<DriveIcon />} label="Last synced">
           <span className="text-[14px] text-tt-secondary">{lastSynced}</span>
-        </ControlRow>
-        <ControlRow label="Background sync" sub="Startup, every ~10 min and on return">
-          <Switch checked={autoSync} onChange={handleToggleAutoSync} label="Background sync" />
         </ControlRow>
         <div className="px-4 pb-4 pt-1">
           <button
@@ -504,12 +426,12 @@ function AccountPage({
             {isSyncing ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>{isSignedIn ? 'Syncing with Google Drive…' : 'Connecting to Google…'}</span>
+                <span>{isSignedIn ? 'Syncing…' : 'Connecting to Google…'}</span>
               </>
             ) : isSignedIn ? (
               <>
                 <RefreshCw className="w-4 h-4" />
-                <span>Sync with Google Drive Now</span>
+                <span>Sync Now</span>
               </>
             ) : (
               <>
@@ -523,14 +445,43 @@ function AccountPage({
         </div>
       </Card>
       <Note>
-        Syncs privately to your Google Drive AppData folder. Your tasks and routines stay on your device and your personal Google account.
+        Your tasks and routines sync privately with your personal Google account.
       </Note>
 
       {(syncStatus.account || syncStatus.lastSyncedAt) && (
         <Card>
-          <NavRow icon={<LogOut className="w-5 h-5 text-tt-overdue" />} label="Sign out on this device" onClick={handleSignOut} chevron={false} danger />
+          <NavRow icon={<LogOut className="w-5 h-5 text-tt-overdue" />} label="Sign out on this device" onClick={() => setConfirmSignOut(true)} chevron={false} danger />
         </Card>
       )}
+
+      <ConfirmDialog
+        open={confirmSignOut}
+        title="Sign out on this device?"
+        confirmLabel="Sign out"
+        tone="danger"
+        onCancel={() => setConfirmSignOut(false)}
+        onConfirm={() => {
+          setConfirmSignOut(false);
+          handleSignOut();
+        }}
+        message={
+          <>
+            <p>
+              <strong>Your tasks stay on this device:</strong> Signing out does not delete any tasks from this device
+              or from Google Drive.
+            </p>
+            <p>
+              <strong>Syncing stops on this device:</strong> Future changes you make here will remain local only and will
+              not sync to Google Drive or your other devices (and updates from other devices will not appear here).
+            </p>
+            <p>
+              <strong>Signing back in later:</strong> Reconnecting the same Google account will merge your local tasks
+              back with Google Drive. If you sign into a different Google account later without clearing data first,
+              tasks on this device will merge into that account.
+            </p>
+          </>
+        }
+      />
 
       <details className="mt-4 text-[13px] text-tt-secondary group">
         <summary className="cursor-pointer font-medium flex items-center justify-between p-2 rounded-lg hover:bg-tt-hover text-tt-secondary hover:text-tt-text transition-colors">
@@ -613,127 +564,83 @@ function AccountPage({
   );
 }
 
-/* ──────────────────────────── Appearance ──────────────────────────── */
+/* ─────────────────────────── Preferences ─────────────────────────── */
 
-function AppearancePage() {
+const THEME_OPTIONS: ReadonlyArray<{ value: ThemePref; label: string }> = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
+const NEW_TASK_POSITION_OPTIONS: ReadonlyArray<{ value: NewTaskPosition; label: string }> = [
+  { value: 'bottom', label: 'Bottom of list' },
+  { value: 'top', label: 'Top of list' },
+];
+
+const WEEK_START_OPTIONS: ReadonlyArray<{ value: `${WeekStart}`; label: string }> = [
+  { value: '0', label: 'Sunday' },
+  { value: '1', label: 'Monday' },
+  { value: '6', label: 'Saturday' },
+];
+
+const TIME_FORMAT_OPTIONS: ReadonlyArray<{ value: TimeFormat; label: string }> = [
+  { value: '12h', label: '12-hour (5:30 PM)' },
+  { value: '24h', label: '24-hour (17:30)' },
+];
+
+const HEMISPHERE_OPTIONS: ReadonlyArray<{ value: Hemisphere; label: string }> = [
+  { value: 'north', label: 'Northern hemisphere' },
+  { value: 'south', label: 'Southern hemisphere' },
+];
+
+function PreferencesSections() {
   const [prefs, update] = usePrefs();
   return (
     <>
-      <SectionLabel>Theme</SectionLabel>
-      <Card>
-        <div role="radiogroup" aria-label="Theme">
-          <RadioRow label="System" sub="Follow the device light / dark setting" checked={prefs.theme === 'system'} onSelect={() => update({ theme: 'system' })} />
-          <RadioRow label="Light" checked={prefs.theme === 'light'} onSelect={() => update({ theme: 'light' })} />
-          <RadioRow label="Dark" checked={prefs.theme === 'dark'} onSelect={() => update({ theme: 'dark' })} />
-        </div>
+      <SectionLabel>Preferences</SectionLabel>
+      <Card className="divide-y divide-tt-border/50">
+        <SelectRow
+          label="Theme"
+          sub="Overrides device light / dark mode"
+          value={prefs.theme}
+          options={THEME_OPTIONS}
+          onChange={(theme) => update({ theme })}
+        />
+        <SelectRow
+          label="New task placement"
+          sub="Where newly added tasks appear"
+          value={prefs.newTaskPosition}
+          options={NEW_TASK_POSITION_OPTIONS}
+          onChange={(newTaskPosition) => update({ newTaskPosition })}
+        />
+        <SelectRow
+          label="Week starts on"
+          value={String(prefs.weekStart) as `${WeekStart}`}
+          options={WEEK_START_OPTIONS}
+          onChange={(v) => update({ weekStart: Number(v) as WeekStart })}
+        />
+        <SelectRow
+          label="Time format"
+          value={prefs.timeFormat}
+          options={TIME_FORMAT_OPTIONS}
+          onChange={(timeFormat) => update({ timeFormat })}
+        />
+        <SelectRow
+          label="Seasons"
+          sub="Used for seasonal repeat presets"
+          value={prefs.hemisphere}
+          options={HEMISPHERE_OPTIONS}
+          onChange={(hemisphere) => update({ hemisphere })}
+        />
       </Card>
-      <Note>Light or Dark overrides the device setting on this device only.</Note>
     </>
   );
 }
 
-/* ──────────────────────────── Date & Time ──────────────────────────── */
-
-function DateTimePage() {
-  const [prefs, update] = usePrefs();
+function GeneralPage({ onShowShortcuts }: SettingsPageProps) {
   return (
     <>
-      <SectionLabel>Week starts on</SectionLabel>
-      <Card>
-        <div role="radiogroup" aria-label="Week starts on">
-          {([
-            [0, 'Sunday'],
-            [1, 'Monday'],
-            [6, 'Saturday'],
-          ] as const).map(([v, label]) => (
-            <RadioRow key={v} label={label} checked={prefs.weekStart === v} onSelect={() => update({ weekStart: v })} />
-          ))}
-        </div>
-      </Card>
-      <SectionLabel>Time format</SectionLabel>
-      <Card>
-        <div role="radiogroup" aria-label="Time format">
-          <RadioRow label="12-hour" sub="5:30 PM" checked={prefs.timeFormat === '12h'} onSelect={() => update({ timeFormat: '12h' })} />
-          <RadioRow label="24-hour" sub="17:30" checked={prefs.timeFormat === '24h'} onSelect={() => update({ timeFormat: '24h' })} />
-        </div>
-      </Card>
-      <SectionLabel>Seasons</SectionLabel>
-      <Card>
-        <div role="radiogroup" aria-label="Seasons">
-          <RadioRow
-            label="Northern hemisphere"
-            sub="Spring starts in March"
-            checked={prefs.hemisphere === 'north'}
-            onSelect={() => update({ hemisphere: 'north' })}
-          />
-          <RadioRow
-            label="Southern hemisphere"
-            sub="Spring starts in September"
-            checked={prefs.hemisphere === 'south'}
-            onSelect={() => update({ hemisphere: 'south' })}
-          />
-        </div>
-      </Card>
-    </>
-  );
-}
-
-/* ───────────────────────────── General ───────────────────────────── */
-
-function GeneralPage({
-  tasks,
-  onShowShortcuts,
-  setStatus,
-}: SettingsPageProps & { setStatus: (s: Status) => void }) {
-  const [prefs, update] = usePrefs();
-  const hasSampleTasks = tasks.some((t) => isSampleId(t.id) && !t.deletedAt);
-
-  return (
-    <>
-      <SectionLabel>New task placement</SectionLabel>
-      <Card>
-        <div role="radiogroup" aria-label="New task placement">
-          <RadioRow
-            label="Bottom of list"
-            sub="Add newly created tasks after existing ones"
-            checked={prefs.newTaskPosition === 'bottom'}
-            onSelect={() => update({ newTaskPosition: 'bottom' })}
-          />
-          <RadioRow
-            label="Top of list"
-            sub="Add newly created tasks above existing ones"
-            checked={prefs.newTaskPosition === 'top'}
-            onSelect={() => update({ newTaskPosition: 'top' })}
-          />
-        </div>
-      </Card>
-      <Note>Applies when adding new tasks on this device. Existing task order is unchanged.</Note>
-
-      <SectionLabel>Sample tasks</SectionLabel>
-      <Card>
-        <div data-tempo-sample-tasks="1">
-          <NavRow
-            icon={<Sparkles className="w-5 h-5 text-tt-blue" />}
-            label="Load sample tasks"
-            chevron={false}
-            onClick={() =>
-              void loadSampleTasks().then((n) => setStatus({ type: 'success', message: `Loaded ${n} sample tasks.` }))
-            }
-          />
-          <NavRow
-            icon={<Trash2 className={`w-5 h-5 ${hasSampleTasks ? 'text-tt-overdue' : 'text-tt-muted'}`} />}
-            label={<span className={hasSampleTasks ? '' : 'text-tt-muted'}>Clear sample tasks</span>}
-            chevron={false}
-            onClick={() =>
-              void clearSampleTasks().then((n) =>
-                setStatus({ type: 'success', message: n ? `Removed ${n} sample tasks.` : 'No sample tasks to remove.' })
-              )
-            }
-          />
-        </div>
-      </Card>
-      <Note>New installs start empty. Sample lists and tasks help you explore; clearing removes only sample items.</Note>
-
+      <PreferencesSections />
       <Card>
         <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={onShowShortcuts} />
       </Card>
@@ -741,7 +648,7 @@ function GeneralPage({
   );
 }
 
-/* ─────────────────────── Integrations & Import ─────────────────────── */
+/* ────────────────────── Backup & Diagnostics ────────────────────── */
 
 function FileRow({
   icon,
@@ -780,16 +687,38 @@ function FileRow({
   );
 }
 
-function IntegrationsPage({
+function DataDiagnosticsPage({
   tasks,
   syncStatus,
+  onSyncStatusChange,
   diagnosticsContext,
   setStatus,
-  go,
-}: SettingsPageProps & { setStatus: (s: Status) => void; go: (p: SettingsPageId) => void }) {
-  const [confirmClear, setConfirmClear] = useState(false);
+}: SettingsPageProps & { setStatus: (s: Status) => void }) {
+  const [clearPreview, setClearPreview] = useState<ClearAllDataPreview | null>(null);
+  const [cleanupPreview, setCleanupPreview] = useState<StorageCleanupPreview | null>(null);
+  const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
+  const [pendingImport, setPendingImport] = useState<{
+    fileName: string;
+    fileSize: number;
+    content: string;
+    preview: JsonImportPreview;
+  } | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const diag = buildDiagnosticsSummary(tasks, [], diagnosticsContext);
+  const importedCompletedCount = useMemo(() => findImportedCompletedTaskIds(tasks).length, [tasks]);
+  const hasSampleTasks = useMemo(() => tasks.some((t) => isSampleId(t.id) && !t.deletedAt), [tasks]);
+
+  const handleToggleAutoSync = (next: boolean) => {
+    setAutoSyncEnabled(next);
+    setAutoSync(next);
+    setStatus({
+      type: 'success',
+      message: next
+        ? 'Background sync on — Tempo will sync on startup and every ~10 minutes while open.'
+        : 'Background sync off. Manual sync still available.',
+    });
+    onSyncStatusChange();
+  };
 
   const run = async (label: string, fn: () => Promise<string>, failPrefix: string) => {
     if (busyLabel) return;
@@ -850,6 +779,249 @@ function IntegrationsPage({
     });
   };
 
+  const handleSelectBackupFile = async (f: File) => {
+    if (busyLabel) return;
+    if (f.size > MAX_SYNC_BYTES) {
+      setStatus({
+        type: 'error',
+        message: `Import failed: Backup is too large (${formatByteSize(f.size)}, max ${formatByteSize(MAX_SYNC_BYTES)}).`,
+      });
+      return;
+    }
+    setStatus(null);
+    setBusyLabel('Reading JSON backup…');
+    try {
+      await new Promise((r) => setTimeout(r, 16));
+      const content = await readFileText(f);
+      const preview = await previewJsonBackup(content);
+      setPendingImport({ fileName: f.name, fileSize: f.size, content, preview });
+    } catch (err: unknown) {
+      setStatus({
+        type: 'error',
+        message: `Import failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setBusyLabel(null);
+    }
+  };
+
+  const handleConfirmImport = () => {
+    const target = pendingImport;
+    if (!target) return;
+    setPendingImport(null);
+    void run('Restoring JSON backup…', () => importJsonBackup(target.content), 'Import failed');
+  };
+
+  const handleOpenClear = async () => {
+    if (busyLabel) return;
+    setStatus(null);
+    setBusyLabel('Scanning current data…');
+    try {
+      const preview = await getClearAllDataPreview();
+      setClearPreview(preview);
+    } catch (err: unknown) {
+      setStatus({
+        type: 'error',
+        message: `Could not inspect current data: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setBusyLabel(null);
+    }
+  };
+
+  const handleConfirmClear = () => {
+    setClearPreview(null);
+    void run(
+      'Clearing current data…',
+      () =>
+        clearAllData().then((n) =>
+          n > 0 ? `Cleared ${n} task${n === 1 ? '' : 's'}.` : 'Cleared all current data.'
+        ),
+      'Clear failed',
+    );
+  };
+
+  const handleOpenCleanup = async () => {
+    if (busyLabel) return;
+    setStatus(null);
+    setBusyLabel('Scanning storage…');
+    try {
+      const preview = await getStorageCleanupPreview();
+      const totalToClean =
+        preview.importedCompletedTasks +
+        preview.tombstonedTasks +
+        preview.tombstonedLists +
+        preview.tombstonedFolders;
+      if (totalToClean === 0) {
+        setStatus({
+          type: 'success',
+          message: 'Storage is already clean — no deleted tombstones or imported completed tasks found.',
+        });
+        return;
+      }
+      setCleanupPreview(preview);
+    } catch (err: unknown) {
+      setStatus({
+        type: 'error',
+        message: `Storage scan failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setBusyLabel(null);
+    }
+  };
+
+  const handleConfirmCleanup = () => {
+    setCleanupPreview(null);
+    void run(
+      'Cleaning up storage…',
+      async () => {
+        const r = await cleanupImportedAndTombstones();
+        const parts: string[] = [];
+        if (r.removedImportedCompleted > 0) {
+          parts.push(`${r.removedImportedCompleted.toLocaleString()} imported completed task(s)`);
+        }
+        if (r.purgedTasks > 0) parts.push(`${r.purgedTasks.toLocaleString()} deleted task(s)`);
+        if (r.purgedLists > 0) parts.push(`${r.purgedLists.toLocaleString()} deleted list(s)`);
+        if (r.purgedFolders > 0) parts.push(`${r.purgedFolders.toLocaleString()} deleted folder(s)`);
+        const summary = parts.length > 0 ? parts.join(', ') : 'no stale records';
+
+        if (!r.needsSync) {
+          return `Cleaned up ${summary}.`;
+        }
+
+        try {
+          const syncRes = await runDriveSync({ allowInteractive: true, force: true });
+          onSyncStatusChange();
+          if (syncRes?.success) {
+            return `Cleaned up ${summary} and synced (${syncRes.tasksCount.toLocaleString()} task(s) remaining).`;
+          }
+          return `Staged cleanup of ${summary}. It will finish purging on your next Google Drive sync.`;
+        } catch (syncErr: unknown) {
+          onSyncStatusChange();
+          const reason = syncErr instanceof Error ? syncErr.message : String(syncErr);
+          return `Staged cleanup of ${summary}; Drive sync failed (${reason}). Tombstones will finish purging on your next successful Drive sync.`;
+        }
+      },
+      'Cleanup failed',
+    );
+  };
+
+  const importDialogMessage = useMemo(() => {
+    if (!pendingImport) return null;
+    const { fileName, fileSize, preview } = pendingImport;
+    const exportedText = preview.exportedAt ? new Date(preview.exportedAt).toLocaleString() : null;
+    return (
+      <>
+        <p>
+          File: <strong className="text-tt-text">{fileName}</strong> ({formatByteSize(fileSize)}
+          {exportedText ? `, exported ${exportedText}` : ''}).
+        </p>
+        <ul className="list-disc pl-4 space-y-1">
+          <li>
+            <strong>In backup:</strong> {preview.incomingActiveTasks.toLocaleString()} active task(s) (
+            {preview.incomingOpenTasks.toLocaleString()} open, {preview.incomingCompletedTasks.toLocaleString()}{' '}
+            completed
+            {preview.incomingRecurringTasks > 0
+              ? `, ${preview.incomingRecurringTasks.toLocaleString()} recurring`
+              : ''}
+            ).
+          </li>
+          <li>
+            <strong>Merge impact:</strong> {preview.newTasksToAdd.toLocaleString()} new task(s) added,{' '}
+            {preview.existingTasksToUpdate.toLocaleString()} existing task(s) updated, and{' '}
+            {preview.existingLocalTasksKept.toLocaleString()} local task(s) not in this file kept.
+          </li>
+          {preview.incomingTombstonedTasks > 0 && (
+            <li>
+              <strong>Deleted markers in file:</strong> {preview.incomingTombstonedTasks.toLocaleString()} deleted task
+              tombstone(s)
+              {preview.skippedPrunedTombstones > 0
+                ? ` (${preview.skippedPrunedTombstones.toLocaleString()} already pruned and skipped; any remaining may delete older matching local tasks)`
+                : ' (may delete older matching local tasks)'}
+              .
+            </li>
+          )}
+        </ul>
+        <p>
+          Tempo merges backups using newest-edit-wins and combines completion history rather than wiping unrelated
+          tasks.
+          {syncStatus.account
+            ? ` Merged changes will also sync to Google Drive (${syncStatus.account.email}) on the next sync.`
+            : ''}
+        </p>
+      </>
+    );
+  }, [pendingImport, syncStatus.account]);
+
+  const clearDialogMessage = useMemo(() => {
+    if (!clearPreview) return null;
+    return (
+      <>
+        <p>This will clear the following active tasks from Tempo:</p>
+        <ul className="list-disc pl-4 space-y-1">
+          <li>
+            <strong>{clearPreview.activeTasks.toLocaleString()}</strong> active task(s) (
+            {clearPreview.openTasks.toLocaleString()} open, {clearPreview.completedTasks.toLocaleString()} completed)
+          </li>
+        </ul>
+        <p>
+          <strong>What happens locally:</strong> Every item is marked as deleted (soft-deleted tombstones) so it
+          disappears from Tempo immediately. Export a JSON backup first if you might need this data back.
+        </p>
+        <p>
+          <strong>Google Drive sync:</strong>{' '}
+          {syncStatus.account
+            ? `You are signed in as ${syncStatus.account.email}. This does not upload immediately, but on your next automatic or manual sync those deletions will sync to Google Drive and clear data on your other synced devices. Deleted markers stay stored for 30 days or until you run Clean Up Storage.`
+            : 'Google Drive sync is currently signed out, so this only clears data on this device. (If you sign back into a previously synced Google account later without clearing browser storage, these deletions could still apply to older matching items in Drive.)'}
+        </p>
+      </>
+    );
+  }, [clearPreview, syncStatus.account]);
+
+  const cleanupDialogMessage = useMemo(() => {
+    if (!cleanupPreview) return null;
+    const tombstoneParts: string[] = [];
+    if (cleanupPreview.tombstonedTasks > 0) {
+      tombstoneParts.push(`${cleanupPreview.tombstonedTasks.toLocaleString()} task(s)`);
+    }
+    if (cleanupPreview.tombstonedLists > 0) {
+      tombstoneParts.push(`${cleanupPreview.tombstonedLists.toLocaleString()} list(s)`);
+    }
+    if (cleanupPreview.tombstonedFolders > 0) {
+      tombstoneParts.push(`${cleanupPreview.tombstonedFolders.toLocaleString()} folder(s)`);
+    }
+    const totalTombstones =
+      cleanupPreview.tombstonedTasks + cleanupPreview.tombstonedLists + cleanupPreview.tombstonedFolders;
+
+    return (
+      <>
+        <p>This will permanently reclaim storage by removing:</p>
+        <ul className="list-disc pl-4 space-y-1">
+          {cleanupPreview.importedCompletedTasks > 0 && (
+            <li>
+              <strong>{cleanupPreview.importedCompletedTasks.toLocaleString()}</strong> bulk-imported historical
+              completed task(s) (tasks created or completed directly in Tempo are kept)
+            </li>
+          )}
+          {totalTombstones > 0 && (
+            <li>
+              <strong>{totalTombstones.toLocaleString()}</strong> deleted tombstone record(s) (
+              {tombstoneParts.join(', ')}) — hidden deletion markers left behind after deleting or clearing items
+            </li>
+          )}
+          <li>
+            <strong>Kept:</strong> {cleanupPreview.activeRemainingTasks.toLocaleString()} active task(s)
+          </li>
+        </ul>
+        <p>
+          {syncStatus.account
+            ? `Because Google Drive sync is connected (${syncStatus.account.email}), Tempo will stage these removals, immediately sync to purge them from Google Drive, and then permanently delete them from this device. Make sure Tempo is updated on your other synced devices before they sync next.`
+            : 'These records will be permanently deleted from this device immediately and cannot be undone.'}
+        </p>
+      </>
+    );
+  }, [cleanupPreview, syncStatus.account]);
+
   return (
     <>
       {busyLabel && (
@@ -861,62 +1033,7 @@ function IntegrationsPage({
           <span className="flex-1">{busyLabel}</span>
         </div>
       )}
-      <SectionLabel>Sync</SectionLabel>
-      <Card>
-        <NavRow
-          icon={<DriveIcon />}
-          label="Google Drive sync"
-          value={
-            syncStatus.phase === 'error' || Boolean(syncStatus.lastError)
-              ? 'Failed'
-              : syncStatus.lastSyncedAt
-                ? syncStatus.autoSyncEnabled
-                  ? 'On'
-                  : 'Manual'
-                : 'Off'
-          }
-          onClick={() => go('account')}
-        />
-      </Card>
-      <SectionLabel>Import</SectionLabel>
-      <Card>
-        <FileRow
-          icon={<CsvIcon />}
-          label="Import TickTick / CSV"
-          accept=".csv,text/csv"
-          disabled={!!busyLabel}
-          onFile={(f) =>
-            void run('Importing TickTick / CSV…', () => readFileText(f).then(importCsv), 'CSV import failed')
-          }
-        />
-        <FileRow
-          icon={<ImportIcon />}
-          label="Restore JSON backup"
-          accept=".json,application/json"
-          disabled={!!busyLabel}
-          onFile={(f) => {
-            if (f.size > MAX_SYNC_BYTES) {
-              setStatus({
-                type: 'error',
-                message: `Import failed: Backup is too large (${formatByteSize(f.size)}, max ${formatByteSize(MAX_SYNC_BYTES)}).`,
-              });
-              return;
-            }
-            void run('Restoring JSON backup…', () => readFileText(f).then(importJsonBackup), 'Import failed');
-          }}
-        />
-        <NavRow
-          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
-          label={<span className="text-tt-overdue">Clear all current data</span>}
-          chevron={false}
-          onClick={() => !busyLabel && setConfirmClear(true)}
-        />
-      </Card>
-      <Note>
-        One-shot import from a TickTick CSV export, or a simple CSV with title, list, due, priority, tags, notes, status.
-        JSON restores merge with existing tasks.
-      </Note>
-      <SectionLabel>Export</SectionLabel>
+      <SectionLabel>JSON Backup</SectionLabel>
       <Card>
         <NavRow
           icon={<ExportIcon />}
@@ -924,7 +1041,17 @@ function IntegrationsPage({
           chevron={false}
           onClick={() => void run('Exporting JSON backup…', exportJsonBackup, 'Export failed')}
         />
+        <FileRow
+          icon={<ImportIcon />}
+          label="Restore JSON backup"
+          accept=".json,application/json"
+          disabled={!!busyLabel}
+          onFile={(f) => void handleSelectBackupFile(f)}
+        />
       </Card>
+      <Note>
+        Exports your active tasks. Restoring a JSON backup merges with your current tasks after confirmation.
+      </Note>
       <SectionLabel>Diagnostics &amp; Repair</SectionLabel>
       <Card>
         <div className="px-4 py-3 text-[13px] text-tt-secondary space-y-1">
@@ -932,8 +1059,12 @@ function IntegrationsPage({
           <div>
             {diag.counts.openTasks} open ({diag.counts.recurringTasks} recurring) · {diag.counts.completedTasks}{' '}
             completed · {diag.counts.tombstonedTasks} tombstones · {diag.counts.duplicateOpenExtraCount} duplicate open
+            {importedCompletedCount > 0 ? ` · ${importedCompletedCount.toLocaleString()} imported completed` : ''}
           </div>
         </div>
+        <ControlRow label="Background sync" sub="Startup, every ~10 min and on return">
+          <Switch checked={autoSync} onChange={handleToggleAutoSync} label="Background sync" />
+        </ControlRow>
         <NavRow
           icon={
             <RefreshCw
@@ -955,29 +1086,78 @@ function IntegrationsPage({
           }
         />
         <NavRow
+          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
+          label={<span className="text-tt-overdue">Clean Up Storage</span>}
+          chevron={false}
+          onClick={() => void handleOpenCleanup()}
+        />
+        <div data-tempo-sample-tasks="1">
+          <NavRow
+            icon={<Sparkles className="w-5 h-5 text-tt-blue" />}
+            label="Load sample tasks"
+            chevron={false}
+            onClick={() =>
+              !busyLabel &&
+              void run('Loading sample tasks…', () => loadSampleTasks().then((n) => `Loaded ${n} sample tasks.`), 'Load failed')
+            }
+          />
+          <NavRow
+            icon={<Trash2 className={`w-5 h-5 ${hasSampleTasks ? 'text-tt-overdue' : 'text-tt-muted'}`} />}
+            label={<span className={hasSampleTasks ? '' : 'text-tt-muted'}>Clear sample tasks</span>}
+            chevron={false}
+            onClick={() =>
+              !busyLabel &&
+              void run(
+                'Clearing sample tasks…',
+                () =>
+                  clearSampleTasks().then((n) =>
+                    n ? `Removed ${n} sample tasks.` : 'No sample tasks to remove.'
+                  ),
+                'Clear failed',
+              )
+            }
+          />
+        </div>
+        <NavRow
+          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
+          label={<span className="text-tt-overdue">Clear all current data</span>}
+          chevron={false}
+          onClick={() => void handleOpenClear()}
+        />
+        <NavRow
           icon={<Copy className="w-[18px] h-[18px] text-tt-secondary" strokeWidth={1.8} />}
           label="Copy Diagnostics Report"
           chevron={false}
           onClick={() => !busyLabel && void handleCopyDiagnostics()}
         />
       </Card>
+      <Note>Sample tasks help you explore; clearing sample tasks removes only demo items.</Note>
       <ConfirmDialog
-        open={confirmClear}
+        open={pendingImport !== null}
+        title="Restore JSON backup?"
+        message={importDialogMessage}
+        confirmLabel="Restore Backup"
+        tone="primary"
+        onCancel={() => setPendingImport(null)}
+        onConfirm={handleConfirmImport}
+      />
+      <ConfirmDialog
+        open={clearPreview !== null}
         title="Clear all current data?"
-        message="This will remove all tasks, lists, and folders from Tempo (keeping Inbox). If Google Drive sync is enabled, this removal will also sync to Drive."
+        message={clearDialogMessage}
         confirmLabel="Clear all data"
-        onCancel={() => setConfirmClear(false)}
-        onConfirm={() => {
-          setConfirmClear(false);
-          void run(
-            'Clearing current data…',
-            () =>
-              clearAllData().then((n) =>
-                n > 0 ? `Cleared ${n} task${n === 1 ? '' : 's'} and all custom lists.` : 'Cleared all current data.'
-              ),
-            'Clear failed',
-          );
-        }}
+        tone="danger"
+        onCancel={() => setClearPreview(null)}
+        onConfirm={handleConfirmClear}
+      />
+      <ConfirmDialog
+        open={cleanupPreview !== null}
+        title="Clean up storage?"
+        message={cleanupDialogMessage}
+        confirmLabel="Clean Up Storage"
+        tone="danger"
+        onCancel={() => setCleanupPreview(null)}
+        onConfirm={handleConfirmCleanup}
       />
     </>
   );

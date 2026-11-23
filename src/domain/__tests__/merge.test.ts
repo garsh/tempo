@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { mergeFolders, mergeLists, mergeTasks, resolveListConflict, resolveTaskConflict } from '../merge';
+import {
+  hasExpiredTombstones,
+  mergeFolders,
+  mergeLists,
+  mergeTasks,
+  resolveListConflict,
+  resolveTaskConflict,
+  TOMBSTONE_TTL_MS,
+} from '../merge';
 import type { Folder, Task, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
@@ -264,5 +272,88 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(merged[0].startDate).toBe('2026-11-22');
     expect(merged[0].rescheduledDates).toEqual({ '2026-11-29': '2026-11-30' });
     expect(merged[0].scheduleHistory).toHaveLength(1);
+  });
+
+  it('prunes tombstones with deletedAt <= prunedBefore across tasks, lists, and folders', () => {
+    const cutoff = 5000;
+    const localTasks: Task[] = [
+      { ...baseTask, id: 'old-del', deletedAt: 4000, updatedAt: 4000 },
+      { ...baseTask, id: 'exact-del', deletedAt: 5000, updatedAt: 5000 },
+      { ...baseTask, id: 'fresh-del', deletedAt: 5001, updatedAt: 5001 },
+      { ...baseTask, id: 'active-task', updatedAt: 3000 },
+    ];
+    const remoteTasks: Task[] = [
+      { ...baseTask, id: 'remote-old-del', deletedAt: 2000, updatedAt: 2000 },
+      { ...baseTask, id: 'active-task', updatedAt: 3000 },
+    ];
+    const mergedTasks = mergeTasks(localTasks, remoteTasks, { prunedBefore: cutoff });
+    expect(mergedTasks.map((t) => t.id)).toEqual(['fresh-del', 'active-task']);
+
+    const mergedLists = mergeLists(
+      [
+        { id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1, updatedAt: 1 },
+        { id: 'l-old', name: '', createdAt: 1, updatedAt: 1000, deletedAt: 1000 },
+        { id: 'l-new', name: '', createdAt: 1, updatedAt: 6000, deletedAt: 6000 },
+      ],
+      [],
+      { prunedBefore: cutoff }
+    );
+    expect(mergedLists.map((l) => l.id)).toEqual([INBOX_LIST_ID, 'l-new']);
+
+    const mergedFolders = mergeFolders(
+      [{ id: 'f-old', name: '', createdAt: 1, updatedAt: 2000, deletedAt: 2000 }],
+      [{ id: 'f-new', name: '', createdAt: 1, updatedAt: 7000, deletedAt: 7000 }],
+      { prunedBefore: cutoff }
+    );
+    expect(mergedFolders.map((f) => f.id)).toEqual(['f-new']);
+  });
+
+  it('drops stale active local items removed and pruned remotely while preserving offline edits, inbox, and unsynced devices', () => {
+    const prunedBefore = 5000;
+    const localSyncedBefore = 4000;
+    const localTasks: Task[] = [
+      { ...baseTask, id: 'stale-active', updatedAt: 3000 },
+      { ...baseTask, id: 'edited-offline', updatedAt: 4500 },
+      { ...baseTask, id: 'kept-remote', updatedAt: 1000 },
+    ];
+    const remoteTasks: Task[] = [{ ...baseTask, id: 'kept-remote', updatedAt: 1000 }];
+
+    const syncedMerge = mergeTasks(localTasks, remoteTasks, {
+      prunedBefore,
+      localSyncedBefore,
+      hasRemote: true,
+    });
+    expect(syncedMerge.map((t) => t.id)).toEqual(['edited-offline', 'kept-remote']);
+
+    // Fresh device (localSyncedBefore == null) keeps local active tasks instead of dropping them
+    const freshDeviceMerge = mergeTasks(localTasks, remoteTasks, {
+      prunedBefore,
+      localSyncedBefore: null,
+      hasRemote: true,
+    });
+    expect(freshDeviceMerge.map((t) => t.id)).toEqual([
+      'stale-active',
+      'edited-offline',
+      'kept-remote',
+    ]);
+
+    // Inbox is always protected even if missing from remote
+    const mergedLists = mergeLists(
+      [
+        { id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1, updatedAt: 100 },
+        { id: 'stale-list', name: 'Old', createdAt: 1, updatedAt: 100 },
+      ],
+      [],
+      { prunedBefore, localSyncedBefore, hasRemote: true }
+    );
+    expect(mergedLists.map((l) => l.id)).toEqual([INBOX_LIST_ID]);
+  });
+
+  it('detects expired tombstones using TOMBSTONE_TTL_MS', () => {
+    const now = 1_795_461_688_588;
+    const cutoff = now - TOMBSTONE_TTL_MS;
+    expect(hasExpiredTombstones([{ deletedAt: cutoff + 1 }], cutoff)).toBe(false);
+    expect(hasExpiredTombstones([{ deletedAt: cutoff }], cutoff)).toBe(true);
+    expect(hasExpiredTombstones([{ deletedAt: null }], cutoff)).toBe(false);
   });
 });

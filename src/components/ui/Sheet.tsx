@@ -86,43 +86,56 @@ export function Switch({
   );
 }
 
-/** Small confirm dialog (destructive actions). */
+/** Confirm dialog with optional multi-section details (destructive or primary confirmation). */
 export function ConfirmDialog({
   open,
   title,
   message,
   confirmLabel,
+  tone = 'danger',
   onConfirm,
   onCancel,
 }: {
   open: boolean;
   title: string;
-  message?: string;
+  message?: ReactNode;
   confirmLabel: string;
+  tone?: 'danger' | 'primary';
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   useEscapeKey(open, onCancel, { capture: true, stopPropagation: true });
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-8 bg-tt-scrim" onClick={onCancel}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-tt-scrim" onClick={onCancel}>
       <div
         role="alertdialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[320px] rounded-2xl bg-tt-elevated text-tt-text p-5 shadow-2xl"
+        className="w-full max-w-[400px] max-h-[85dvh] overflow-y-auto rounded-2xl bg-tt-elevated text-tt-text p-5 shadow-2xl"
       >
         <h2 className="text-[17px] font-bold">{title}</h2>
-        {message && <p className="mt-2 text-[14px] text-tt-secondary">{message}</p>}
+        {message &&
+          (typeof message === 'string' ? (
+            <p className="mt-2 text-[14px] text-tt-secondary leading-relaxed">{message}</p>
+          ) : (
+            <div className="mt-2.5 text-[13.5px] text-tt-secondary leading-relaxed space-y-2.5">{message}</div>
+          ))}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg text-[14px] font-medium text-tt-secondary hover:bg-tt-hover">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-lg text-[14px] font-medium text-tt-secondary hover:bg-tt-hover cursor-pointer"
+          >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="px-4 py-2 rounded-lg text-[14px] font-semibold text-white bg-tt-overdue"
+            className={`px-4 py-2 rounded-lg text-[14px] font-semibold text-white cursor-pointer ${
+              tone === 'primary' ? 'bg-tt-blue hover:bg-tt-blue-hover' : 'bg-tt-overdue hover:opacity-95'
+            }`}
           >
             {confirmLabel}
           </button>
