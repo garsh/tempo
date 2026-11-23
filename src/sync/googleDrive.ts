@@ -1,7 +1,14 @@
 import { db, ensureInboxList } from '../db/db';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { mergeFolders, mergeLists, mergeTasks } from '../domain/merge';
-import { parseSyncPayload, readResponseTextCapped, SyncPayloadError, MAX_SYNC_BYTES } from '../domain/syncPayload';
+import {
+  compactSyncData,
+  MAX_SYNC_BYTES,
+  parseSyncPayload,
+  readResponseTextCapped,
+  SyncPayloadError,
+  utf8ByteLength,
+} from '../domain/syncPayload';
 import type { Folder, SyncData, Task, TaskList } from '../types/task';
 
 const BACKUP_FILENAME = 'tempo_backup.json';
@@ -9,6 +16,9 @@ const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 const DRIVE_FILE_ID_KEY = 'tempo_drive_backup_file_id';
 const DRIVE_FILE_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/** Use Google Drive's resumable upload protocol above 4 MB (simple media upload limit is 5 MB). */
+export const SIMPLE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Sync payload version: Task + lists + folders + filters. */
 export const SYNC_VERSION = 4;
@@ -136,7 +146,15 @@ export async function downloadDriveBackup(
     throw new Error(`Failed to download backup: ${res.statusText}`);
   }
 
-  const text = await readResponseTextCapped(res, MAX_SYNC_BYTES);
+  let text: string;
+  try {
+    text = await readResponseTextCapped(res, MAX_SYNC_BYTES);
+  } catch (err) {
+    if (err instanceof SyncPayloadError) {
+      recordDiagEvent('drive_download_rejected', err.message);
+    }
+    throw err;
+  }
   if (!text || text.trim() === '') {
     return { data: null, etag: res.headers.get('ETag') };
   }
@@ -153,8 +171,33 @@ export async function downloadDriveBackup(
     return { data, etag: res.headers.get('ETag') };
   } catch (err) {
     // Do not replace a rejected backup with a local upload.
-    if (err instanceof SyncPayloadError) throw err;
+    if (err instanceof SyncPayloadError) {
+      recordDiagEvent('drive_download_rejected', err.message);
+      throw err;
+    }
     return { data: null, etag: res.headers.get('ETag') };
+  }
+}
+
+function isSafeDriveUploadUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === 'www.googleapis.com' &&
+      url.pathname.startsWith('/upload/drive/v3/')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function checkUploadResponse(res: Response): void {
+  if (res.status === 412) {
+    throw new DriveConflictError();
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to upload to Drive: ${res.status} ${res.statusText}`);
   }
 }
 
@@ -164,30 +207,61 @@ export async function uploadDriveBackup(
   data: SyncData,
   etag?: string | null
 ): Promise<string | null> {
-  const headers: Record<string, string> = {
+  const bodyText = JSON.stringify(compactSyncData(data));
+  const byteLen = utf8ByteLength(bodyText);
+  const filePath = driveFileResourcePath(fileId);
+
+  if (byteLen <= SIMPLE_UPLOAD_MAX_BYTES) {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    };
+    if (etag) {
+      headers['If-Match'] = etag;
+    }
+
+    const res = await fetch(`${UPLOAD_API_URL}${filePath}?uploadType=media`, {
+      method: 'PATCH',
+      headers,
+      body: bodyText,
+    });
+    checkUploadResponse(res);
+    recordDiagEvent('drive_upload', `bytes=${byteLen} mode=media`);
+    return res.headers.get('ETag');
+  }
+
+  const initHeaders: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Upload-Content-Type': 'application/json',
+    'X-Upload-Content-Length': String(byteLen),
   };
-
   if (etag) {
-    headers['If-Match'] = etag;
+    initHeaders['If-Match'] = etag;
   }
 
-  const res = await fetch(`${UPLOAD_API_URL}${driveFileResourcePath(fileId)}?uploadType=media`, {
+  const initRes = await fetch(`${UPLOAD_API_URL}${filePath}?uploadType=resumable`, {
     method: 'PATCH',
-    headers,
-    body: JSON.stringify(data, null, 2),
+    headers: initHeaders,
+    body: '{}',
   });
+  checkUploadResponse(initRes);
 
-  if (res.status === 412) {
-    throw new DriveConflictError();
+  const uploadUrl = initRes.headers.get('Location');
+  if (!uploadUrl || !isSafeDriveUploadUrl(uploadUrl)) {
+    throw new Error('Failed to upload to Drive: invalid resumable upload URL');
   }
 
-  if (!res.ok) {
-    throw new Error(`Failed to upload to Drive: ${res.status} ${res.statusText}`);
-  }
-
-  return res.headers.get('ETag');
+  const putRes = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: bodyText,
+  });
+  checkUploadResponse(putRes);
+  recordDiagEvent('drive_upload', `bytes=${byteLen} mode=resumable`);
+  return putRes.headers.get('ETag');
 }
 
 function getChangedEntities<T extends { id: string }>(local: T[], merged: T[]): T[] {

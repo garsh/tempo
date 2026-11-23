@@ -4,6 +4,7 @@ import type {
   RecurrenceRule,
   RecurrenceScheduleSegment,
   Subtask,
+  SyncData,
   Task,
   TaskList,
   TaskPriority,
@@ -11,8 +12,8 @@ import type {
 } from '../types/task';
 
 /** Refuse backup bodies larger than this before they are parsed. */
-export const MAX_SYNC_BYTES = 5 * 1024 * 1024;
-export const MAX_SYNC_RECORDS = 5_000;
+export const MAX_SYNC_BYTES = 50 * 1024 * 1024;
+export const MAX_SYNC_RECORDS = 100_000;
 export const MAX_ID_LENGTH = 128;
 export const MAX_TITLE_LENGTH = 2_000;
 export const MAX_NOTES_LENGTH = 10_000;
@@ -42,12 +43,45 @@ export interface ParsedSyncPayload {
 
 export interface ParseSyncOptions {
   maxBytes?: number;
+  maxRecords?: number;
   /** Clock used for the future-timestamp clamp. Defaults to Date.now(). */
   now?: number;
 }
 
-function byteLength(text: string): number {
-  return new TextEncoder().encode(text).byteLength;
+/** Compute UTF-8 byte length without allocating a full encoded buffer. */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = i + 1 < text.length ? text.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function exceedsMaxBytes(text: string, maxBytes: number): boolean {
+  if (text.length > maxBytes) return true;
+  if (text.length * 3 <= maxBytes) return false;
+  return utf8ByteLength(text) > maxBytes;
+}
+
+export function formatByteSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
 }
 
 function isId(value: unknown): value is string {
@@ -309,6 +343,18 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   const title = asText(record.title, MAX_TITLE_LENGTH);
   if (title === undefined) return null;
   const listId = isId(record.listId) ? record.listId.trim() : 'inbox';
+  const deletedAt = asOptionalStamp(record.deletedAt, now);
+  if (deletedAt) {
+    return {
+      id: record.id.trim(),
+      title: '',
+      listId,
+      completionHistory: [],
+      createdAt: asStamp(record.createdAt, now, 0),
+      updatedAt: asStamp(record.updatedAt, now, 0),
+      deletedAt,
+    };
+  }
   const task: Task = {
     id: record.id.trim(),
     title,
@@ -344,7 +390,6 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (removedCompletions.length > 0) task.removedCompletions = removedCompletions;
   const completedAt = asOptionalStamp(record.completedAt, now);
   if (completedAt !== undefined) task.completedAt = completedAt;
-  const deletedAt = asOptionalStamp(record.deletedAt, now);
   if (deletedAt !== undefined) task.deletedAt = deletedAt;
   const skipped = asDateList(record.skippedDates);
   if (skipped && skipped.length > 0) task.skippedDates = skipped;
@@ -379,8 +424,11 @@ function sanitizeNamed(
     createdAt: asStamp(record.createdAt, now, 0),
     updatedAt: asStamp(record.updatedAt, now, 0),
   };
-  const sortOrder = asFinite(record.sortOrder);
   const deletedAt = asOptionalStamp(record.deletedAt, now);
+  if (deletedAt) {
+    return { ...base, name: '', deletedAt };
+  }
+  const sortOrder = asFinite(record.sortOrder);
   if (kind === 'folder') {
     const folder: Folder = { ...base };
     if (sortOrder !== undefined) folder.sortOrder = sortOrder;
@@ -395,9 +443,15 @@ function sanitizeNamed(
   return list;
 }
 
-function takeRecords(value: unknown): unknown[] {
+function requireBoundedRecords(value: unknown, maxRecords: number): unknown[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, MAX_SYNC_RECORDS);
+  if (value.length > maxRecords) {
+    throw new SyncPayloadError(
+      `Backup has too many records (${value.length.toLocaleString()}, max ${maxRecords.toLocaleString()}).`,
+      'too_large'
+    );
+  }
+  return value;
 }
 
 /**
@@ -406,8 +460,12 @@ function takeRecords(value: unknown): unknown[] {
  */
 export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): ParsedSyncPayload {
   const maxBytes = opts.maxBytes ?? MAX_SYNC_BYTES;
-  if (byteLength(text) > maxBytes) {
-    throw new SyncPayloadError('Backup is too large.', 'too_large');
+  const maxRecords = opts.maxRecords ?? MAX_SYNC_RECORDS;
+  if (exceedsMaxBytes(text, maxBytes)) {
+    throw new SyncPayloadError(
+      `Backup is too large (${formatByteSize(utf8ByteLength(text))}, max ${formatByteSize(maxBytes)}).`,
+      'too_large'
+    );
   }
   const parsed: unknown = JSON.parse(text);
   const now = opts.now ?? Date.now();
@@ -418,15 +476,15 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
   let exportedAt: number | undefined;
 
   if (Array.isArray(parsed)) {
-    taskRows = parsed.slice(0, MAX_SYNC_RECORDS);
+    taskRows = requireBoundedRecords(parsed, maxRecords);
   } else if (parsed && typeof parsed === 'object') {
     const record = parsed as Record<string, unknown>;
     if ('tasks' in record && !Array.isArray(record.tasks)) {
       throw new SyncPayloadError('Invalid format: tasks array missing.', 'tasks_not_array');
     }
-    taskRows = takeRecords(record.tasks);
-    listRows = takeRecords(record.lists);
-    folderRows = takeRecords(record.folders);
+    taskRows = requireBoundedRecords(record.tasks, maxRecords);
+    listRows = requireBoundedRecords(record.lists, maxRecords);
+    folderRows = requireBoundedRecords(record.folders, maxRecords);
     const stamped = asFinite(record.exportedAt);
     if (stamped !== undefined) exportedAt = clampTimestamp(stamped, now);
   } else {
@@ -446,12 +504,22 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
 /** Read a response body, stopping once `maxBytes` is exceeded. */
 export async function readResponseTextCapped(res: Response, maxBytes: number): Promise<string> {
   const declared = Number(res.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new SyncPayloadError('Backup is too large.', 'too_large');
+  if (declared > maxBytes) {
+    throw new SyncPayloadError(
+      `Backup is too large (${formatByteSize(declared)}, max ${formatByteSize(maxBytes)}).`,
+      'too_large'
+    );
+  }
 
   const body = res.body;
   if (!body || typeof body.getReader !== 'function') {
     const text = await res.text();
-    if (byteLength(text) > maxBytes) throw new SyncPayloadError('Backup is too large.', 'too_large');
+    if (exceedsMaxBytes(text, maxBytes)) {
+      throw new SyncPayloadError(
+        `Backup is too large (${formatByteSize(utf8ByteLength(text))}, max ${formatByteSize(maxBytes)}).`,
+        'too_large'
+      );
+    }
     return text;
   }
 
@@ -469,10 +537,111 @@ export async function readResponseTextCapped(res: Response, maxBytes: number): P
       } catch {
         /* already consumed */
       }
-      throw new SyncPayloadError('Backup is too large.', 'too_large');
+      throw new SyncPayloadError(
+        `Backup is too large (exceeds ${formatByteSize(maxBytes)} limit).`,
+        'too_large'
+      );
     }
     text += decoder.decode(value, { stream: true });
   }
   text += decoder.decode();
   return text;
+}
+
+function compactTaskForSync(task: Task): Task {
+  if (task.deletedAt) {
+    return {
+      id: task.id,
+      title: '',
+      listId: task.listId || 'inbox',
+      completionHistory: [],
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      deletedAt: task.deletedAt,
+    };
+  }
+  const compact: Task = {
+    id: task.id,
+    title: task.title,
+    listId: task.listId,
+    completionHistory: task.completionHistory ?? [],
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+  if (task.notes) compact.notes = task.notes;
+  if (task.dueAt) compact.dueAt = task.dueAt;
+  if (task.startDate) compact.startDate = task.startDate;
+  if (task.priority && task.priority !== 'none') compact.priority = task.priority;
+  if (task.pinned === true) compact.pinned = true;
+  if (task.tags && task.tags.length > 0) compact.tags = task.tags;
+  if (task.subtasks && task.subtasks.length > 0) compact.subtasks = task.subtasks;
+  if (task.recurrence != null) compact.recurrence = task.recurrence;
+  if (task.completedAt != null) compact.completedAt = task.completedAt;
+  if (task.removedCompletions && task.removedCompletions.length > 0) {
+    compact.removedCompletions = task.removedCompletions;
+  }
+  if (task.skippedDates && task.skippedDates.length > 0) compact.skippedDates = task.skippedDates;
+  if (task.removedSkippedDates && task.removedSkippedDates.length > 0) {
+    compact.removedSkippedDates = task.removedSkippedDates;
+  }
+  if (task.rescheduledDates && Object.keys(task.rescheduledDates).length > 0) {
+    compact.rescheduledDates = task.rescheduledDates;
+  }
+  if (task.scheduleHistory && task.scheduleHistory.length > 0) {
+    compact.scheduleHistory = task.scheduleHistory;
+  }
+  if (task.sortOrder !== undefined) compact.sortOrder = task.sortOrder;
+  return compact;
+}
+
+function compactListForSync(list: TaskList): TaskList {
+  if (list.deletedAt) {
+    return {
+      id: list.id,
+      name: '',
+      createdAt: list.createdAt,
+      updatedAt: list.updatedAt,
+      deletedAt: list.deletedAt,
+    };
+  }
+  const compact: TaskList = {
+    id: list.id,
+    name: list.name,
+    createdAt: list.createdAt,
+    updatedAt: list.updatedAt,
+  };
+  if (list.folderId) compact.folderId = list.folderId;
+  if (list.sortOrder !== undefined) compact.sortOrder = list.sortOrder;
+  return compact;
+}
+
+function compactFolderForSync(folder: Folder): Folder {
+  if (folder.deletedAt) {
+    return {
+      id: folder.id,
+      name: '',
+      createdAt: folder.createdAt,
+      updatedAt: folder.updatedAt,
+      deletedAt: folder.deletedAt,
+    };
+  }
+  const compact: Folder = {
+    id: folder.id,
+    name: folder.name,
+    createdAt: folder.createdAt,
+    updatedAt: folder.updatedAt,
+  };
+  if (folder.sortOrder !== undefined) compact.sortOrder = folder.sortOrder;
+  return compact;
+}
+
+/** Strip redundant whitespace/default fields and tombstone payloads before uploading to Drive. */
+export function compactSyncData(data: SyncData): SyncData {
+  return {
+    version: data.version,
+    exportedAt: data.exportedAt,
+    tasks: data.tasks.map(compactTaskForSync),
+    lists: data.lists.map(compactListForSync),
+    folders: (data.folders ?? []).map(compactFolderForSync),
+  };
 }

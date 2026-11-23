@@ -43,7 +43,7 @@ import { BUILD_ID, buildDiagnosticsSummary } from '../../domain/diagnostics';
 import { usePrefs } from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
 import { summarizeAccount } from '../../sync/accountSummary';
-import { MAX_SYNC_BYTES } from '../../domain/syncPayload';
+import { formatByteSize, MAX_SYNC_BYTES } from '../../domain/syncPayload';
 import { exportJsonBackup, importCsv, importJsonBackup, readFileText } from './dataTransfer';
 import { Avatar, Card, ControlRow, NavRow, Note, RadioRow, SectionLabel, SettingsHeader } from './settingsUi';
 import {
@@ -875,7 +875,10 @@ function IntegrationsPage({
           disabled={!!busyLabel}
           onFile={(f) => {
             if (f.size > MAX_SYNC_BYTES) {
-              setStatus({ type: 'error', message: 'Import failed: Backup is too large.' });
+              setStatus({
+                type: 'error',
+                message: `Import failed: Backup is too large (${formatByteSize(f.size)}, max ${formatByteSize(MAX_SYNC_BYTES)}).`,
+              });
               return;
             }
             void run('Restoring JSON backup…', () => readFileText(f).then(importJsonBackup), 'Import failed');
