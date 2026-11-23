@@ -1392,7 +1392,7 @@ export function App() {
                       {renderDesktopSelectedDayPane('border-r border-tt-border')}
                       <section
                         aria-label="Off-calendar tasks"
-                        className="flex-1 min-w-0 max-w-[440px] 2xl:max-w-[500px] flex flex-col min-h-0 bg-tt-bg/50 dark:bg-tt-bg/60"
+                        className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg/50 dark:bg-tt-bg/60"
                       >
                         <div className="shrink-0 h-14 px-4 border-b border-tt-border flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">

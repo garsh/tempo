@@ -568,8 +568,18 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
     const wideView = mount(<App />);
     mounted.push(wideView.unmount);
 
+    const threePane = wideView.container.querySelector('[data-testid="calendar-three-pane"]');
     expect(wideView.container.querySelector('[data-testid="desktop-sidebar"]')).toBeTruthy();
-    expect(wideView.container.querySelector('[data-testid="calendar-three-pane"]')).toBeTruthy();
+    expect(threePane).toBeTruthy();
+    const todayPane = threePane!.querySelector('section[aria-label="Selected day tasks"]');
+    const tasksPane = threePane!.querySelector('section[aria-label="Off-calendar tasks"]');
+    expect(todayPane).toBeTruthy();
+    expect(tasksPane).toBeTruthy();
+    for (const pane of [todayPane!, tasksPane!]) {
+      expect(pane.className).toContain('flex-1');
+      expect(pane.className).toContain('min-w-0');
+      expect(pane.className).not.toContain('max-w-');
+    }
     expect(wideView.container.textContent).toContain('Today task');
     expect(wideView.container.textContent).toContain('Undated task');
     // Portrait preference remains 'week' (false)
