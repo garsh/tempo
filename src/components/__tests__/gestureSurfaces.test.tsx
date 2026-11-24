@@ -22,11 +22,9 @@ import {
 } from '../../domain/calendarUi';
 import { resetPrefsCache } from '../../prefs/prefs';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 function task(partial: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: 1,
     updatedAt: 1,
     completionHistory: [],

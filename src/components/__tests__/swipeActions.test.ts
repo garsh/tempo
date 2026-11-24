@@ -7,13 +7,11 @@ import {
   addDays,
 } from '../../domain/recurrence';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 describe('Swipe Actions & Dialogs logic', () => {
   const baseTask: Task = {
     id: 'test-1',
     title: 'Blood Pressure',
-    listId: INBOX_LIST_ID,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     dueAt: '2026-11-16T08:30',

@@ -7,11 +7,9 @@ import {
 } from '../recurrence';
 import { buildMonthGrid } from '../calendar';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 function makeTask(partial: Partial<Task> & Pick<Task, 'id' | 'title' | 'dueAt'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: 1000,
     updatedAt: 1000,
     subtasks: [],

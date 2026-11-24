@@ -1,5 +1,4 @@
-import type { Folder, Task, TaskList } from '../types/task';
-import { INBOX_LIST_ID } from '../types/task';
+import type { Task } from '../types/task';
 import { isWindowPeriodic } from './recurrence';
 
 /** Match the CSV import cap so a hostile history cannot grow without bound. */
@@ -14,14 +13,12 @@ export interface MergePruneOptions {
   /**
    * Timestamp of this device's last successful sync against the same Drive file.
    * When `hasRemote` is true and `prunedBefore > 0`, a local-only active item with
-   * `updatedAt <= localSyncedBefore && updatedAt <= prunedBefore` (and not in protectedIds)
+   * `updatedAt <= localSyncedBefore && updatedAt <= prunedBefore`
    * was already synced before the prune and deleted+pruned remotely, so drop it.
    */
   localSyncedBefore?: number | null;
   /** True when remote data came from an actual Drive backup (not null/empty). */
   hasRemote?: boolean;
-  /** Entity IDs that must never be dropped as stale active items (e.g., INBOX_LIST_ID). */
-  protectedIds?: ReadonlySet<string>;
 }
 
 export function hasExpiredTombstones(
@@ -62,7 +59,6 @@ function mergeEntities<T extends Mergeable>(
       options.localSyncedBefore > 0
   );
   const syncedBefore = canDropStaleActive ? options!.localSyncedBefore! : 0;
-  const protectedIds = options?.protectedIds;
   const shouldPruneTombstone = (item: Mergeable): boolean =>
     Boolean(item.deletedAt && prunedBefore > 0 && item.deletedAt <= prunedBefore);
 
@@ -83,7 +79,6 @@ function mergeEntities<T extends Mergeable>(
         if (shouldPruneTombstone(local)) continue;
       } else if (
         canDropStaleActive &&
-        !protectedIds?.has(local.id) &&
         local.updatedAt <= syncedBefore &&
         local.updatedAt <= prunedBefore
       ) {
@@ -246,25 +241,4 @@ export function mergeTasks(
     },
     options
   );
-}
-
-export function mergeLists(
-  localLists: TaskList[],
-  remoteLists: TaskList[],
-  options?: MergePruneOptions
-): TaskList[] {
-  const protectedIds = new Set(options?.protectedIds);
-  protectedIds.add(INBOX_LIST_ID);
-  return mergeEntities(localLists, remoteLists, undefined, {
-    ...options,
-    protectedIds,
-  });
-}
-
-export function mergeFolders(
-  localFolders: Folder[],
-  remoteFolders: Folder[],
-  options?: MergePruneOptions
-): Folder[] {
-  return mergeEntities(localFolders, remoteFolders, undefined, options);
 }

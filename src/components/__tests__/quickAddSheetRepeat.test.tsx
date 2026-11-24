@@ -3,7 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickAddSheet } from '../QuickAddSheet';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 
 function mount(ui: ReactElement) {
   const container = document.createElement('div');
@@ -160,7 +160,6 @@ describe('QuickAddSheet recurrence UI', () => {
     const existingFixedTask: Task = {
       id: 'rec-fixed-1',
       title: 'Water plants',
-      listId: INBOX_LIST_ID,
       dueAt: '2026-05-20',
       startDate: '2026-05-01',
       recurrence: {
@@ -367,7 +366,6 @@ describe('QuickAddSheet recurrence UI', () => {
       id: 'approx-1',
       title: 'Water plants',
       notes: 'Original note',
-      listId: INBOX_LIST_ID,
       createdAt: 1000,
       updatedAt: 1000,
       dueAt: null,
@@ -510,7 +508,6 @@ describe('QuickAddSheet recurrence UI', () => {
     const existing: Task = {
       id: 'edit-mobile-1',
       title: 'Water ferns',
-      listId: INBOX_LIST_ID,
       dueAt: '2026-11-23',
       recurrence: null,
       completionHistory: [],
@@ -556,7 +553,6 @@ describe('QuickAddSheet recurrence UI', () => {
     const monthly: Task = {
       id: 'monthly-1',
       title: 'Pay rent',
-      listId: INBOX_LIST_ID,
       dueAt: '2026-11-15',
       recurrence: {
         type: 'fixed_interval',
@@ -635,7 +631,6 @@ describe('QuickAddSheet recurrence UI', () => {
       const weekly: Task = {
         id: 'weekly-skip-1',
         title: 'Trash day',
-        listId: INBOX_LIST_ID,
         dueAt: '2026-11-28',
         recurrence: {
           type: 'fixed_interval',

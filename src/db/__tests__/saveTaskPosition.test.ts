@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import { db, findMidpointReorderUpdate, saveTask } from '../db';
 import { sortTasksForDailyView, sortUndatedOneTimeTasks } from '../../domain/sorting';
 
@@ -8,7 +7,6 @@ function makeStoredTask(id: string, overrides: Partial<Task> = {}): Task {
   return {
     id,
     title: `Task ${id}`,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { RecurrenceRule, Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import { completedTasksOnDate, tasksDueOnDate } from '../calendar';
 import {
   analyzeRecurringDateMove,
@@ -22,7 +21,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 't1',
     title: 'Take out recycling',
-    listId: INBOX_LIST_ID,
     dueAt: '2026-11-21',
     startDate: '2026-11-07',
     recurrence: {

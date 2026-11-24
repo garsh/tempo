@@ -117,7 +117,6 @@ interface PendingRecurringMove {
   toDate: string;
   title: string;
   notes?: string;
-  listId: string;
   textChanged: boolean;
 }
 
@@ -574,7 +573,6 @@ export function App() {
             toDate,
             title: taskData.title,
             notes: taskData.notes,
-            listId: taskData.listId ?? existing.listId,
             textChanged:
               existing.title !== taskData.title ||
               (existing.notes || undefined) !== taskData.notes,
@@ -587,7 +585,6 @@ export function App() {
           toDate,
           title: taskData.title,
           notes: taskData.notes,
-          listId: taskData.listId ?? existing.listId,
           explicitRecurrence: taskData.recurrence,
         });
         setEditingTask(null);
@@ -636,7 +633,6 @@ export function App() {
         toDate,
         title: existing.title,
         notes: existing.notes,
-        listId: existing.listId,
         textChanged: false,
       });
       return;
@@ -646,7 +642,6 @@ export function App() {
       id: existing.id,
       title: existing.title,
       notes: existing.notes,
-      listId: existing.listId,
       dueAt: newDueAt,
       recurrence: existing.recurrence,
     });
@@ -662,7 +657,6 @@ export function App() {
       toDate: move.toDate,
       title: move.title,
       notes: move.notes,
-      listId: move.listId,
     });
     setPendingMove(null);
     if (move.source === 'sheet') {
@@ -686,7 +680,6 @@ export function App() {
       toDate: move.toDate,
       title: move.title,
       notes: move.notes,
-      listId: move.listId,
     });
     setPendingMove(null);
     if (move.source === 'sheet') {

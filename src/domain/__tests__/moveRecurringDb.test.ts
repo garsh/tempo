@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import {
   completeTask,
   db,
@@ -25,7 +24,6 @@ function makeSeriesTask(overrides: Partial<Task> = {}): Task {
     id: 'rec-1',
     title: 'Take out trash',
     notes: 'Curbside before 8am',
-    listId: INBOX_LIST_ID,
     dueAt: '2026-11-21T08:00',
     startDate: '2026-11-07',
     recurrence: {
@@ -314,7 +312,6 @@ describe('db recurring task move operations', () => {
     const oneOff: Task = {
       id: 'oneoff-overdue',
       title: 'Mail package',
-      listId: INBOX_LIST_ID,
       dueAt: '2026-11-20',
       completedAt: todayTs,
       completionHistory: [pastTs, todayTs],

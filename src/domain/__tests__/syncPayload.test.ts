@@ -18,7 +18,6 @@ function task(updatedAt: number, extra: Record<string, unknown> = {}) {
   return {
     id: 'task-1',
     title: 'Water fern',
-    listId: 'inbox',
     createdAt: 10,
     updatedAt,
     completionHistory: [],
@@ -43,7 +42,7 @@ describe('parseSyncPayload', () => {
   it('keeps a good row and drops a row with no id', () => {
     const parsed = parseSyncPayload(
       JSON.stringify({
-        tasks: [task(10), { title: 'no id', updatedAt: 10 }, { id: 'ok-2', title: 'Second', listId: 'inbox', createdAt: 1, updatedAt: 1 }],
+        tasks: [task(10), { title: 'no id', updatedAt: 10 }, { id: 'ok-2', title: 'Second', createdAt: 1, updatedAt: 1 }],
       }),
       { now }
     );
@@ -187,25 +186,18 @@ describe('parseSyncPayload', () => {
       expect((err as SyncPayloadError).message).toMatch(/too many records/i);
     }
 
-    const tooManyLists = JSON.stringify({
-      tasks: [],
+    const legacyListsAndFolders = JSON.stringify({
+      tasks: [task(10)],
       lists: [
         { id: 'l1', name: 'A', createdAt: 1, updatedAt: 1 },
         { id: 'l2', name: 'B', createdAt: 1, updatedAt: 1 },
-        { id: 'l3', name: 'C', createdAt: 1, updatedAt: 1 },
       ],
+      folders: [{ id: 'f1', name: 'A', createdAt: 1, updatedAt: 1 }],
     });
-    expect(() => parseSyncPayload(tooManyLists, { maxRecords: 2, now })).toThrow(/too many records/i);
-
-    const tooManyFolders = JSON.stringify({
-      tasks: [],
-      folders: [
-        { id: 'f1', name: 'A', createdAt: 1, updatedAt: 1 },
-        { id: 'f2', name: 'B', createdAt: 1, updatedAt: 1 },
-        { id: 'f3', name: 'C', createdAt: 1, updatedAt: 1 },
-      ],
-    });
-    expect(() => parseSyncPayload(tooManyFolders, { maxRecords: 2, now })).toThrow(/too many records/i);
+    const ignored = parseSyncPayload(legacyListsAndFolders, { maxRecords: 2, now });
+    expect(ignored.tasks).toHaveLength(1);
+    expect(ignored).not.toHaveProperty('lists');
+    expect(ignored).not.toHaveProperty('folders');
 
     const tooManyBare = JSON.stringify([task(10), task(11, { id: 't2' }), task(12, { id: 't3' })]);
     expect(() => parseSyncPayload(tooManyBare, { maxRecords: 2, now })).toThrow(/too many records/i);
@@ -225,7 +217,6 @@ describe('parseSyncPayload', () => {
         tasks: [
           task(10, {
             id: 'del-task',
-            listId: 'work',
             title: 'Long deleted title',
             notes: 'Long deleted notes',
             completionHistory: [1, 2, 3],
@@ -260,26 +251,13 @@ describe('parseSyncPayload', () => {
     expect(parsed.tasks[0]).toEqual({
       id: 'del-task',
       title: '',
-      listId: 'work',
       completionHistory: [],
       createdAt: 10,
       updatedAt: 10,
       deletedAt: now,
     });
-    expect(parsed.lists[0]).toEqual({
-      id: 'del-list',
-      name: '',
-      createdAt: 5,
-      updatedAt: 9,
-      deletedAt: 50,
-    });
-    expect(parsed.folders[0]).toEqual({
-      id: 'del-folder',
-      name: '',
-      createdAt: 5,
-      updatedAt: 9,
-      deletedAt: 60,
-    });
+    expect(parsed).not.toHaveProperty('lists');
+    expect(parsed).not.toHaveProperty('folders');
   });
 
   it('retains the newest 365 unique completions regardless of input order or > 1,460 entries', () => {
@@ -386,7 +364,6 @@ describe('compactSyncData', () => {
           id: 'active-empty',
           title: 'Active minimal',
           notes: '',
-          listId: 'inbox',
           dueAt: null,
           startDate: null,
           priority: 'none',
@@ -409,7 +386,6 @@ describe('compactSyncData', () => {
           id: 'active-rich',
           title: 'Active rich',
           notes: 'Keep me',
-          listId: 'home',
           dueAt: '2026-11-25',
           startDate: '2026-11-01',
           priority: 'high',
@@ -439,7 +415,6 @@ describe('compactSyncData', () => {
           id: 'deleted-task',
           title: 'Secret notes and huge history',
           notes: 'x'.repeat(500),
-          listId: 'home',
           subtasks: [{ id: 's1', title: 'Sub', completed: true }],
           completionHistory: [1, 2, 3],
           deletedAt: 999,
@@ -447,21 +422,12 @@ describe('compactSyncData', () => {
           updatedAt: 999,
         },
       ],
-      lists: [
-        { id: 'inbox', name: 'Inbox', folderId: null, sortOrder: 0, createdAt: 1, updatedAt: 2, deletedAt: null },
-        { id: 'l-del', name: 'Old List', folderId: 'f1', sortOrder: 10, createdAt: 1, updatedAt: 50, deletedAt: 50 },
-      ],
-      folders: [
-        { id: 'f1', name: 'Work', sortOrder: 1, createdAt: 1, updatedAt: 2, deletedAt: null },
-        { id: 'f-del', name: 'Old Folder', sortOrder: 5, createdAt: 1, updatedAt: 60, deletedAt: 60 },
-      ],
     };
 
     const compacted = compactSyncData(input);
     expect(compacted.tasks[0]).toEqual({
       id: 'active-empty',
       title: 'Active minimal',
-      listId: 'inbox',
       completionHistory: [],
       createdAt: 1,
       updatedAt: 2,
@@ -470,7 +436,6 @@ describe('compactSyncData', () => {
       id: 'active-rich',
       title: 'Active rich',
       notes: 'Keep me',
-      listId: 'home',
       dueAt: '2026-11-25',
       startDate: '2026-11-01',
       priority: 'high',
@@ -498,20 +463,13 @@ describe('compactSyncData', () => {
     expect(compacted.tasks[2]).toEqual({
       id: 'deleted-task',
       title: '',
-      listId: 'home',
       completionHistory: [],
       createdAt: 1,
       updatedAt: 999,
       deletedAt: 999,
     });
-    expect(compacted.lists).toEqual([
-      { id: 'inbox', name: 'Inbox', sortOrder: 0, createdAt: 1, updatedAt: 2 },
-      { id: 'l-del', name: '', createdAt: 1, updatedAt: 50, deletedAt: 50 },
-    ]);
-    expect(compacted.folders).toEqual([
-      { id: 'f1', name: 'Work', sortOrder: 1, createdAt: 1, updatedAt: 2 },
-      { id: 'f-del', name: '', createdAt: 1, updatedAt: 60, deletedAt: 60 },
-    ]);
+    expect(compacted).not.toHaveProperty('lists');
+    expect(compacted).not.toHaveProperty('folders');
     expect(compacted).not.toHaveProperty('tombstonesPrunedBefore');
 
     const withWatermark = compactSyncData({ ...input, tombstonesPrunedBefore: 987654 });
@@ -543,8 +501,6 @@ describe('compactSyncData', () => {
       version: 4,
       exportedAt: now,
       tasks: parsed.tasks,
-      lists: [],
-      folders: [],
     });
     expect(compacted.tasks[0]?.skippedDateUpdatedAt).toEqual({
       '2026-11-20': 1000,

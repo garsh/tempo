@@ -1,4 +1,4 @@
-import type { Task, TaskList } from '../types/task';
+import type { Task } from '../types/task';
 import { isCompleted, isRecurring, isUndatedOneTime, isWindowPeriodic } from './recurrence';
 
 export const BUILD_ID = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev';
@@ -23,7 +23,6 @@ export interface DiagnosticsSummary {
     undatedOneTimeTasks: number;
     completedTasks: number;
     tombstonedTasks: number;
-    activeLists: number;
     duplicateOpenGroups: number;
     duplicateOpenExtraCount: number;
   };
@@ -184,7 +183,7 @@ export function countDuplicateOpenTasks(tasks: Task[]): {
   const counts = new Map<string, number>();
   for (const t of tasks) {
     if (t.deletedAt || isCompleted(t)) continue;
-    const key = `${t.listId}::${t.title.trim().toLowerCase()}`;
+    const key = t.title.trim().toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   let groups = 0;
@@ -200,7 +199,6 @@ export function countDuplicateOpenTasks(tasks: Task[]): {
 
 export function buildDiagnosticsSummary(
   tasks: Task[],
-  lists: TaskList[] = [],
   extra?: Record<string, unknown>
 ): DiagnosticsSummary {
   let activeTasks = 0;
@@ -238,7 +236,6 @@ export function buildDiagnosticsSummary(
       undatedOneTimeTasks,
       completedTasks,
       tombstonedTasks,
-      activeLists: lists.filter((l) => !l.deletedAt).length,
       duplicateOpenGroups: dup.groups,
       duplicateOpenExtraCount: dup.extraCount,
     },

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskCard } from '../TaskCard';
 import { RecurringTasksView } from '../RecurringTasksView';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,7 +28,6 @@ function makeTask(id: string, title: string, overrides: Partial<Task> = {}): Tas
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],

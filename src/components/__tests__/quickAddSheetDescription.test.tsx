@@ -41,7 +41,6 @@ function taskWithNotes(notes: string): Task {
   return {
     id: 't1',
     title: 'Existing routine',
-    listId: 'inbox',
     notes,
     completionHistory: [],
     createdAt: 1,

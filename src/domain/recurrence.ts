@@ -441,7 +441,6 @@ export function isRecurrenceFinished(
     const synthetic: Task = {
       id: '',
       title: '',
-      listId: 'inbox',
       createdAt: task.createdAt ?? 0,
       updatedAt: 0,
       completionHistory: task.completionHistory ?? [],

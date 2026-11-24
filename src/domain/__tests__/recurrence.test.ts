@@ -26,7 +26,6 @@ import {
   taskOccursOnDate,
 } from '../recurrence';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 describe('Recurrence Engine', () => {
   it('formats and parses date correctly', () => {
@@ -202,7 +201,6 @@ describe('12/24h time format', () => {
 
 function recurringTask(partial: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: new Date(2026, 9, 1, 8, 0).getTime(),
     updatedAt: new Date(2026, 9, 1, 8, 0).getTime(),
     completionHistory: [],
@@ -331,7 +329,6 @@ describe('Per-day recurrence occurrences & completion', () => {
       const oneoff: Task = {
         id: 'oneoff',
         title: 'Single Task',
-        listId: INBOX_LIST_ID,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         dueAt: '2026-11-16',

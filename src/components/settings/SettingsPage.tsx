@@ -751,7 +751,7 @@ function DataDiagnosticsPage({
     onChildDialogChange?.(anyDialogOpen);
     return () => onChildDialogChange?.(false);
   }, [anyDialogOpen, onChildDialogChange]);
-  const diag = buildDiagnosticsSummary(tasks, [], diagnosticsContext);
+  const diag = buildDiagnosticsSummary(tasks, diagnosticsContext);
   const importedCompletedCount = useMemo(() => findImportedCompletedTaskIds(tasks).length, [tasks]);
   const hasSampleTasks = useMemo(() => tasks.some((t) => isSampleId(t.id) && !t.deletedAt), [tasks]);
 
@@ -786,23 +786,13 @@ function DataDiagnosticsPage({
   };
 
   const handleCopyDiagnostics = async () => {
-    const [idbTasks, idbLists, idbFolders] = await Promise.all([
-      db.tasks.toArray().catch(() => []),
-      db.lists.toArray().catch(() => []),
-      db.folders.toArray().catch(() => []),
-    ]);
+    const idbTasks = await db.tasks.toArray().catch(() => []);
     const reportTasks = idbTasks.length > 0 && tasks.length === 0 ? idbTasks : tasks;
-    const report = buildDiagnosticsSummary(reportTasks, idbLists, {
+    const report = buildDiagnosticsSummary(reportTasks, {
       ...diagnosticsContext,
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       liveQueryTaskCount: tasks.length,
       idbTaskCount: idbTasks.length,
-      idbLists: idbLists.map((l) => ({
-        id: l.id,
-        name: l.name,
-        deletedAt: l.deletedAt ?? null,
-      })),
-      idbFolderCount: idbFolders.length,
       sync: {
         hasClientId: Boolean(getStoredClientId()),
         autoSyncEnabled: syncStatus.autoSyncEnabled,
@@ -894,11 +884,7 @@ function DataDiagnosticsPage({
     setBusyLabel('Scanning storage…');
     try {
       const preview = await getStorageCleanupPreview();
-      const totalToClean =
-        preview.importedCompletedTasks +
-        preview.tombstonedTasks +
-        preview.tombstonedLists +
-        preview.tombstonedFolders;
+      const totalToClean = preview.importedCompletedTasks + preview.tombstonedTasks;
       if (totalToClean === 0) {
         setStatus({
           type: 'success',
@@ -928,8 +914,6 @@ function DataDiagnosticsPage({
           parts.push(`${r.removedImportedCompleted.toLocaleString()} imported completed task(s)`);
         }
         if (r.purgedTasks > 0) parts.push(`${r.purgedTasks.toLocaleString()} deleted task(s)`);
-        if (r.purgedLists > 0) parts.push(`${r.purgedLists.toLocaleString()} deleted list(s)`);
-        if (r.purgedFolders > 0) parts.push(`${r.purgedFolders.toLocaleString()} deleted folder(s)`);
         const summary = parts.length > 0 ? parts.join(', ') : 'no stale records';
 
         if (!r.needsSync) {
@@ -1027,18 +1011,6 @@ function DataDiagnosticsPage({
 
   const cleanupDialogMessage = useMemo(() => {
     if (!cleanupPreview) return null;
-    const tombstoneParts: string[] = [];
-    if (cleanupPreview.tombstonedTasks > 0) {
-      tombstoneParts.push(`${cleanupPreview.tombstonedTasks.toLocaleString()} task(s)`);
-    }
-    if (cleanupPreview.tombstonedLists > 0) {
-      tombstoneParts.push(`${cleanupPreview.tombstonedLists.toLocaleString()} list(s)`);
-    }
-    if (cleanupPreview.tombstonedFolders > 0) {
-      tombstoneParts.push(`${cleanupPreview.tombstonedFolders.toLocaleString()} folder(s)`);
-    }
-    const totalTombstones =
-      cleanupPreview.tombstonedTasks + cleanupPreview.tombstonedLists + cleanupPreview.tombstonedFolders;
 
     return (
       <>
@@ -1050,10 +1022,10 @@ function DataDiagnosticsPage({
               completed task(s) (tasks created or completed directly in Tempo are kept)
             </li>
           )}
-          {totalTombstones > 0 && (
+          {cleanupPreview.tombstonedTasks > 0 && (
             <li>
-              <strong>{totalTombstones.toLocaleString()}</strong> deleted tombstone record(s) (
-              {tombstoneParts.join(', ')}) — hidden deletion markers left behind after deleting or clearing items
+              <strong>{cleanupPreview.tombstonedTasks.toLocaleString()}</strong> deleted tombstone record(s) — hidden
+              deletion markers left behind after deleting or clearing items
             </li>
           )}
           <li>
@@ -1128,7 +1100,7 @@ function DataDiagnosticsPage({
               'Repairing & deduplicating tasks…',
               async () => {
                 const r = await repairAndDeduplicateDatabase();
-                return `Repaired database: deduplicated ${r.deduplicatedTasks} task(s), merged ${r.mergedLists} list(s), purged ${r.purgedTombstones} tombstone(s).`;
+                return `Repaired database: deduplicated ${r.deduplicatedTasks} task(s), purged ${r.purgedTombstones} tombstone(s).`;
               },
               'Repair failed',
             )

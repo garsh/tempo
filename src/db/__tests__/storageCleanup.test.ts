@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Folder, Task, TaskList } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
+import type { Task } from '../../types/task';
 import {
   cleanupImportedAndTombstones,
   db,
@@ -17,7 +16,6 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
   return {
     id,
     title: `Task ${id}`,
-    listId: INBOX_LIST_ID,
     completionHistory: [],
     createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
@@ -27,8 +25,6 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
 
 describe('storage cleanup & database repair', () => {
   let taskStore: Map<string, Task>;
-  let listStore: Map<string, TaskList>;
-  let folderStore: Map<string, Folder>;
 
   const wireStore = <T extends { id: string }>(table: unknown, map: Map<string, T>) => {
     const t = table as {
@@ -50,12 +46,8 @@ describe('storage cleanup & database repair', () => {
   beforeEach(() => {
     localStorage.clear();
     taskStore = new Map();
-    listStore = new Map([[INBOX_LIST_ID, { id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1, updatedAt: 1 }]]);
-    folderStore = new Map();
 
     wireStore(db.tasks, taskStore);
-    wireStore(db.lists, listStore);
-    wireStore(db.folders, folderStore);
     vi.spyOn(db, 'transaction').mockImplementation((async (...args: unknown[]) => {
       const cb = args[args.length - 1] as () => Promise<unknown>;
       return cb();
@@ -97,15 +89,11 @@ describe('storage cleanup & database repair', () => {
     taskStore.set('keep-open', makeTask('keep-open', { dueAt: '2026-11-23', updatedAt: now - 1000 }));
     taskStore.set('keep-comp', makeTask('keep-comp', { dueAt: '2026-11-20', completedAt: now - 5000, updatedAt: now - 5000 }));
     taskStore.set('del-task', makeTask('del-task', { title: '', deletedAt: importTs, updatedAt: importTs }));
-    listStore.set('del-list', { id: 'del-list', name: '', createdAt: 1, updatedAt: importTs, deletedAt: importTs });
-    folderStore.set('del-folder', { id: 'del-folder', name: '', createdAt: 1, updatedAt: importTs, deletedAt: importTs });
 
     const preview = await getStorageCleanupPreview();
     expect(preview).toEqual({
       importedCompletedTasks: 2,
       tombstonedTasks: 1,
-      tombstonedLists: 1,
-      tombstonedFolders: 1,
       activeRemainingTasks: 2,
     });
 
@@ -113,14 +101,10 @@ describe('storage cleanup & database repair', () => {
     expect(res).toEqual({
       removedImportedCompleted: 2,
       purgedTasks: 1,
-      purgedLists: 1,
-      purgedFolders: 1,
       needsSync: false,
     });
 
     expect(Array.from(taskStore.keys())).toEqual(['keep-open', 'keep-comp']);
-    expect(Array.from(listStore.keys())).toEqual([INBOX_LIST_ID]);
-    expect(Array.from(folderStore.keys())).toEqual([]);
     expect(getTombstonesPrunedBefore()).toBe(now);
   });
 
@@ -135,14 +119,11 @@ describe('storage cleanup & database repair', () => {
     taskStore.set('imp-2', makeTask('imp-2', { completedAt: 1_710_000_000_000, updatedAt: importTs }));
     taskStore.set('keep-open', makeTask('keep-open', { dueAt: '2026-11-23', updatedAt: now - 1000 }));
     taskStore.set('del-task', makeTask('del-task', { title: '', deletedAt: importTs, updatedAt: importTs }));
-    listStore.set('del-list', { id: 'del-list', name: '', createdAt: 1, updatedAt: importTs, deletedAt: importTs });
 
     const res = await cleanupImportedAndTombstones();
     expect(res).toEqual({
       removedImportedCompleted: 2,
       purgedTasks: 1,
-      purgedLists: 1,
-      purgedFolders: 0,
       needsSync: true,
     });
 
@@ -150,7 +131,6 @@ describe('storage cleanup & database repair', () => {
     expect(taskStore.get('imp-1')?.deletedAt).toBe(now);
     expect(taskStore.get('imp-2')?.deletedAt).toBe(now);
     expect(taskStore.get('del-task')?.deletedAt).toBe(importTs);
-    expect(listStore.get('del-list')?.deletedAt).toBe(importTs);
     expect(getTombstonesPrunedBefore()).toBe(now);
 
     // Running repair before sync completes must NOT wipe recent staged tombstones
@@ -168,14 +148,10 @@ describe('storage cleanup & database repair', () => {
     vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue(null);
     taskStore.set('active', makeTask('active'));
     taskStore.set('recent-del', makeTask('recent-del', { deletedAt: now - 1000, updatedAt: now - 1000 }));
-    listStore.set('del-list', { id: 'del-list', name: '', createdAt: 1, updatedAt: now - 1000, deletedAt: now - 1000 });
-    folderStore.set('del-folder', { id: 'del-folder', name: '', createdAt: 1, updatedAt: now - 1000, deletedAt: now - 1000 });
 
     const signedOutRepair = await repairAndDeduplicateDatabase();
-    expect(signedOutRepair.purgedTombstones).toBe(3);
+    expect(signedOutRepair.purgedTombstones).toBe(1);
     expect(Array.from(taskStore.keys())).toEqual(['active']);
-    expect(Array.from(listStore.keys())).toEqual([INBOX_LIST_ID]);
-    expect(Array.from(folderStore.keys())).toEqual([]);
 
     // Signed in: stages >30d expired tombstones and advances watermark so Drive sync deletes remotely first
     vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'donna@example.com' });

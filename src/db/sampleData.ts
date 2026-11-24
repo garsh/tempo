@@ -1,8 +1,7 @@
-import type { Folder, Task, TaskList } from '../types/task';
-import { INBOX_LIST_ID } from '../types/task';
+import type { Task } from '../types/task';
 import { formatDate } from '../domain/recurrence';
 
-/** Prefix shared by every sample task / list / folder id. */
+/** Prefix shared by every sample task id. */
 export const SAMPLE_ID_PREFIX = 'demo-';
 
 export function isSampleId(id: string): boolean {
@@ -10,53 +9,20 @@ export function isSampleId(id: string): boolean {
 }
 
 /**
- * Demo folder / lists / tasks, dated relative to `nowDate`.
+ * Demo tasks, dated relative to `nowDate`.
  * Loaded on demand from Settings → "Load sample tasks".
  */
-export function buildSampleData(nowDate: Date = new Date()): {
-  folders: Folder[];
-  lists: TaskList[];
-  tasks: Task[];
-} {
+export function buildSampleData(nowDate: Date = new Date()): Task[] {
   const now = nowDate.getTime();
   const today = formatDate(nowDate);
   const tomorrow = formatDate(new Date(now + 86400000));
   const inThree = formatDate(new Date(now + 86400000 * 3));
 
-  const personalFolder: Folder = {
-    id: 'demo-folder-personal',
-    name: 'Personal',
-    sortOrder: 1,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-
-  const homeList: TaskList = {
-    id: 'demo-list-home',
-    name: 'Home',
-    folderId: personalFolder.id,
-    sortOrder: 1,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  const workList: TaskList = {
-    id: 'demo-list-work',
-    name: 'Work',
-    folderId: null,
-    sortOrder: 2,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-
-  const sampleTasks: Task[] = [
+  return [
     {
       id: 'demo-1',
       title: 'Water indoor plants',
       notes: 'Check soil moisture for the ferns and monstera',
-      listId: homeList.id,
       dueAt: null,
       recurrence: {
         type: 'after_completion',
@@ -72,7 +38,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       id: 'demo-2',
       title: 'Back up laptop to external drive',
       notes: 'Run Time Machine / backup script',
-      listId: INBOX_LIST_ID,
       dueAt: today,
       recurrence: {
         type: 'fixed_interval',
@@ -87,7 +52,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       id: 'demo-3',
       title: 'Buy groceries for the week',
       notes: 'Milk, eggs, greens',
-      listId: INBOX_LIST_ID,
       dueAt: today,
       recurrence: null,
       createdAt: now,
@@ -98,7 +62,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       id: 'demo-4',
       title: 'Deep clean coffee machine',
       notes: 'Run vinegar or descaler cycle',
-      listId: homeList.id,
       dueAt: null,
       recurrence: {
         type: 'after_completion',
@@ -113,7 +76,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
     {
       id: 'demo-5',
       title: 'Call dentist to schedule checkup',
-      listId: INBOX_LIST_ID,
       dueAt: null,
       recurrence: null,
       createdAt: now,
@@ -124,7 +86,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
       id: 'demo-6',
       title: 'Team standup notes',
       notes: 'Prep talking points',
-      listId: workList.id,
       dueAt: tomorrow,
       recurrence: null,
       createdAt: now,
@@ -134,7 +95,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
     {
       id: 'demo-7',
       title: 'Pay rent',
-      listId: INBOX_LIST_ID,
       dueAt: inThree,
       recurrence: {
         type: 'fixed_interval',
@@ -149,7 +109,6 @@ export function buildSampleData(nowDate: Date = new Date()): {
     {
       id: 'demo-8',
       title: 'Morning stretch',
-      listId: homeList.id,
       dueAt: today,
       recurrence: {
         type: 'fixed_interval',
@@ -162,6 +121,4 @@ export function buildSampleData(nowDate: Date = new Date()): {
       completionHistory: [],
     },
   ];
-
-  return { folders: [personalFolder], lists: [homeList, workList], tasks: sampleTasks };
 }

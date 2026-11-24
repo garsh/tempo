@@ -29,7 +29,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 't1',
     title: 'Sample Task',
-    listId: 'inbox',
     dueAt: '2026-11-18',
     completionHistory: [],
     createdAt: 1,

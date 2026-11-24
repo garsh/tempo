@@ -85,6 +85,7 @@ The following table provides an overview of all candidate features to remove, ra
   2. Remove `DrawerSheets.tsx`, `drawerBits.tsx`, and `listColors.ts`.
   3. Remove `lists` and `folders` tables from `db.ts` (or maintain a dummy schema for backward compatibility if desired), and remove list/folder resolution in `merge.ts`.
   4. Remove list badges from task cards and list pickers from modal forms.
+* **Schema follow-through (done):** Dexie v7 drops the `lists` and `folders` stores and deletes `task.listId`. Sync version 5 writes tasks only. Old backup files that still contain those keys still import their tasks.
 
 ---
 

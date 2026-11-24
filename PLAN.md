@@ -1,12 +1,12 @@
 # Tempo: TickTick-style Task Manager (PLAN.md)
 
-A cross-platform (Desktop + Mobile PWA) task manager aimed at a credible **TickTick replacement** for personal use: local-first, zero-backend, syncing to Google Drive AppData. Recurring routines remain a first-class strength; one-off tasks, lists, smart lists, and calendar are in scope. **Out of scope for now:** collaboration/shared lists, home-screen widgets, habits module, Pomodoro/focus.
+A cross-platform (Desktop + Mobile PWA) task manager aimed at a credible **TickTick replacement** for personal use: local-first, zero-backend, syncing to Google Drive AppData. Recurring routines remain a first-class strength; one-off tasks and the calendar are in scope. **Out of scope for now:** collaboration, home-screen widgets, habits module, Pomodoro/focus. Organizational lists and folders are not part of Tempo.
 
 ---
 
 ## Product decisions (2026-10)
 
-- App is **not in production use** — data model may break freely; no migration compatibility required.
+- Existing Drive backups must keep their tasks. Unknown backup fields are ignored. Dexie upgrades stay append-only.
 - **No** collaboration, widgets, habits, or Pomodoro.
 - Keep Google Drive AppData + IndexedDB local-first architecture.
 - Recurrence stays optional and strong (including `after_completion`); it is no longer required on every task.
@@ -42,7 +42,6 @@ export interface Task {
   id: string;                  // UUID v4
   title: string;
   notes?: string;
-  listId: string;              // Inbox or user list
   dueAt?: string | null;       // ISO date or datetime; optional
   priority?: 'high' | 'medium' | 'low' | 'none';
   pinned?: boolean;
@@ -55,19 +54,9 @@ export interface Task {
   updatedAt: number;
   deletedAt?: number | null;
 }
-
-export interface TaskList {
-  id: string;
-  name: string;
-  folderId?: string | null;
-  sortOrder?: number;
-  createdAt: number;
-  updatedAt: number;
-  deletedAt?: number | null;
-}
 ```
 
-Merge rules stay item-level LWW + completion-history union; extend the same pattern to lists/folders.
+Merge rules stay item-level LWW + completion-history union on tasks.
 
 ---
 
@@ -87,17 +76,15 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 ### Phase 0 — Model reset (foundation)
 
 - [x] Replace `PeriodicTask` (required recurrence) with general **Task** + optional `recurrence`
-- [x] **Lists** model: built-in **Inbox** + user-created lists
 - [x] Update Dexie schema, repositories, seed data, merge/sync payload shape
-- [x] CRUD UI: create one-off *or* recurring tasks; assign to Inbox or a list
-- [x] No backward-compat migration required (app not in use)
+- [x] CRUD UI: create one-off *or* recurring tasks
 
 *Done when:* one-off and recurring tasks both work; nothing forces recurrence.
 
 ### Phase 1 — Daily driver core
 
 - [x] Due **date/time** (not date-only only)
-- [x] Smart lists: **Today**, **Tomorrow**, **Next 7 Days**, **Inbox**
+- [x] Calendar day, agenda, and month views
 - [x] Reminders / Web Notifications for due tasks (closes former Phase 5 notifications gap)
 - [x] Priorities + pin
 - [x] Keep/improve search + tag filter pills
@@ -108,7 +95,6 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 ### Phase 2 — Structure & depth
 
 - [x] Subtasks / check items
-- [x] Folders (group lists)
 - [x] Richer recurrence: weekdays, monthly-by-date, end on date/count; keep `after_completion`
 - [x] Sections inside a list — optional if subtasks cover enough *(skipped: subtasks cover multi-step projects)*
 
@@ -116,7 +102,7 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ### Phase 3 — Shell & calendar
 
-- [x] Layout: sidebar (smart lists + folders/lists) → main task list → detail pane
+- [x] Layout: calendar month and agenda, with the day task list
 - [x] Calendar views: **month** + **agenda**
 - [x] Keyboard shortcuts for capture and navigation
 - [x] Responsive desktop + mobile; retire single-column “routines feed” as the only shell
@@ -145,7 +131,7 @@ Merge rules stay item-level LWW + completion-history union; extend the same patt
 
 ## 5. Explicitly out of scope (for now)
 
-- Collaboration / shared lists
+- Collaboration
 - Home-screen widgets
 - Habits module (routines/recurrence cover maintenance-style needs)
 - Pomodoro / focus timer
@@ -162,8 +148,8 @@ Revisit only if product direction changes.
 
 **0 → 1 → 2 → 3 → 4 → 5**
 
-- **0 before 1:** daily smart lists need optional due dates and non-forced recurrence.
-- **2 before 3:** new shell should show real structure (lists/folders/subtasks), not empty chrome.
+- **0 before 1:** the daily calendar needs optional due dates and non-forced recurrence.
+- **2 before 3:** new shell should show real structure (tasks and subtasks), not empty chrome.
 - **4 after 3:** board/filters belong on the list+detail shell, not the old single feed.
 - **5 last:** don’t polish sync/notifications around a moving schema.
 

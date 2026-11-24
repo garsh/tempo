@@ -1,11 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import type { Folder, Task, TaskList } from '../../../types/task';
+import type { Task } from '../../../types/task';
 
 // Mock DB module
 const mockTasks: Task[] = [];
-const mockLists: TaskList[] = [];
-const mockFolders: Folder[] = [];
 
 function upsertItems<T extends { id: string }>(arr: T[], items: T[]) {
   const map = new Map(arr.map((x) => [x.id, x]));
@@ -28,19 +26,11 @@ vi.mock('../../../db/db', () => ({
       bulkPut: vi.fn(async (items: Task[]) => upsertItems(mockTasks, items)),
       bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockTasks, ids)),
     },
-    lists: {
-      toArray: vi.fn(async () => [...mockLists]),
-      bulkPut: vi.fn(async (items: TaskList[]) => upsertItems(mockLists, items)),
-      bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockLists, ids)),
-    },
-    folders: {
-      toArray: vi.fn(async () => [...mockFolders]),
-      bulkPut: vi.fn(async (items: Folder[]) => upsertItems(mockFolders, items)),
-      bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockFolders, ids)),
-    },
-    transaction: vi.fn(async (_mode, _t1, _t2, _t3, cb) => cb()),
+    transaction: vi.fn(async (...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }),
   },
-  ensureInboxList: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { exportJsonBackup, importJsonBackup, previewJsonBackup } from '../dataTransfer';
@@ -49,8 +39,6 @@ import { setTombstonesPrunedBefore } from '../../../sync/syncWatermark';
 describe('dataTransfer', () => {
   beforeEach(() => {
     mockTasks.length = 0;
-    mockLists.length = 0;
-    mockFolders.length = 0;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -67,13 +55,13 @@ describe('dataTransfer', () => {
   });
 
   describe('importJsonBackup', () => {
-    it('imports full SyncData backup payload with tasks, lists, and folders', async () => {
+    it('imports a SyncData backup and ignores legacy lists and folders', async () => {
       const backupPayload = {
         version: 4,
         exportedAt: 1700000000000,
         tasks: [
-          { id: 't1', title: 'Task 1', listId: 'inbox', createdAt: 100, updatedAt: 100 },
-          { id: 't2', title: 'Task 2', listId: 'inbox', createdAt: 110, updatedAt: 110 },
+          { id: 't1', title: 'Task 1', createdAt: 100, updatedAt: 100 },
+          { id: 't2', title: 'Task 2', createdAt: 110, updatedAt: 110 },
         ],
         lists: [{ id: 'l1', name: 'Work', createdAt: 100, updatedAt: 100 }],
         folders: [{ id: 'f1', name: 'Projects', createdAt: 100, updatedAt: 100 }],
@@ -83,13 +71,11 @@ describe('dataTransfer', () => {
       expect(resultMsg).toBe('Imported 2 tasks!');
 
       expect(mockTasks.map((t) => t.id)).toEqual(['t1', 't2']);
-      expect(mockLists.map((l) => l.id)).toEqual(['l1']);
-      expect(mockFolders.map((f) => f.id)).toEqual(['f1']);
     });
 
     it('imports legacy backup format consisting of a raw Task[] array', async () => {
       const legacyPayload: Task[] = [
-        { id: 'legacy-1', title: 'Legacy Chore', listId: 'inbox', completionHistory: [], createdAt: 100, updatedAt: 100 },
+        { id: 'legacy-1', title: 'Legacy Chore', completionHistory: [], createdAt: 100, updatedAt: 100 },
       ];
 
       const resultMsg = await importJsonBackup(JSON.stringify(legacyPayload));
@@ -101,7 +87,6 @@ describe('dataTransfer', () => {
       mockTasks.push({
         id: 'shared-task',
         title: 'Old Title',
-        listId: 'inbox',
         completionHistory: [],
         createdAt: 100,
         updatedAt: 100,
@@ -114,7 +99,6 @@ describe('dataTransfer', () => {
           {
             id: 'shared-task',
             title: 'Newer Title',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 100,
             updatedAt: 200,
@@ -139,7 +123,6 @@ describe('dataTransfer', () => {
             {
               id: 'future-task',
               title: 'Remote',
-              listId: 'inbox',
               completionHistory: [],
               createdAt: 1,
               updatedAt: future,
@@ -159,7 +142,6 @@ describe('dataTransfer', () => {
             {
               id: 'future-task',
               title: 'Remote again',
-              listId: 'inbox',
               completionHistory: [],
               createdAt: 1,
               updatedAt: future,
@@ -190,23 +172,14 @@ describe('dataTransfer', () => {
           version: 4,
           exportedAt: 1000,
           tasks: [
-            { id: 'old-del', title: '', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 400, deletedAt: 400 },
-            { id: 'new-del', title: '', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 600, deletedAt: 600 },
-            { id: 'restored-active', title: 'Restored', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 300 },
-          ],
-          lists: [
-            { id: 'old-list-del', name: '', createdAt: 1, updatedAt: 400, deletedAt: 400 },
-            { id: 'active-list', name: 'Home', createdAt: 1, updatedAt: 200 },
-          ],
-          folders: [
-            { id: 'old-folder-del', name: '', createdAt: 1, updatedAt: 400, deletedAt: 400 },
+            { id: 'old-del', title: '', completionHistory: [], createdAt: 1, updatedAt: 400, deletedAt: 400 },
+            { id: 'new-del', title: '', completionHistory: [], createdAt: 1, updatedAt: 600, deletedAt: 600 },
+            { id: 'restored-active', title: 'Restored', completionHistory: [], createdAt: 1, updatedAt: 300 },
           ],
         })
       );
 
       expect(mockTasks.map((t) => t.id)).toEqual(['new-del', 'restored-active']);
-      expect(mockLists.map((l) => l.id)).toEqual(['active-list']);
-      expect(mockFolders).toEqual([]);
       expect(localStorage.getItem('tempo_last_synced_file_id')).toBe('');
     });
 
@@ -215,7 +188,6 @@ describe('dataTransfer', () => {
       mockTasks.push({
         id: 'local-old-del',
         title: '',
-        listId: 'inbox',
         completionHistory: [],
         createdAt: 1,
         updatedAt: 300,
@@ -227,8 +199,8 @@ describe('dataTransfer', () => {
           version: 4,
           exportedAt: 1000,
           tasks: [
-            { id: 't-active', title: 'Active', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 600 },
-            { id: 't-del', title: '', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 600, deletedAt: 600 },
+            { id: 't-active', title: 'Active', completionHistory: [], createdAt: 1, updatedAt: 600 },
+            { id: 't-del', title: '', completionHistory: [], createdAt: 1, updatedAt: 600, deletedAt: 600 },
           ],
         })
       );
@@ -245,7 +217,6 @@ describe('dataTransfer', () => {
         {
           id: 'shared-update',
           title: 'Older local',
-          listId: 'inbox',
           completionHistory: [],
           createdAt: 1,
           updatedAt: 100,
@@ -253,7 +224,6 @@ describe('dataTransfer', () => {
         {
           id: 'local-only',
           title: 'Local only',
-          listId: 'inbox',
           completionHistory: [],
           createdAt: 1,
           updatedAt: 100,
@@ -268,7 +238,6 @@ describe('dataTransfer', () => {
             {
               id: 'shared-update',
               title: 'Newer backup',
-              listId: 'inbox',
               completionHistory: [],
               createdAt: 1,
               updatedAt: 200,
@@ -276,7 +245,6 @@ describe('dataTransfer', () => {
             {
               id: 'new-open-rec',
               title: 'Daily Walk',
-              listId: 'inbox',
               dueAt: '2026-11-23',
               recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
               completionHistory: [],
@@ -286,7 +254,6 @@ describe('dataTransfer', () => {
             {
               id: 'new-done',
               title: 'Done One-Off',
-              listId: 'inbox',
               dueAt: '2026-11-20',
               completedAt: 300,
               completionHistory: [300],
@@ -296,7 +263,6 @@ describe('dataTransfer', () => {
             {
               id: 'pruned-del',
               title: '',
-              listId: 'inbox',
               completionHistory: [],
               createdAt: 1,
               updatedAt: 400,
@@ -305,18 +271,12 @@ describe('dataTransfer', () => {
             {
               id: 'recent-del',
               title: '',
-              listId: 'inbox',
               completionHistory: [],
               createdAt: 1,
               updatedAt: 600,
               deletedAt: 600,
             },
           ],
-          lists: [
-            { id: 'l1', name: 'Home', createdAt: 1, updatedAt: 1 },
-            { id: 'l-pruned', name: '', createdAt: 1, updatedAt: 400, deletedAt: 400 },
-          ],
-          folders: [{ id: 'f1', name: 'Area', createdAt: 1, updatedAt: 1 }],
         })
       );
 
@@ -327,7 +287,7 @@ describe('dataTransfer', () => {
         incomingCompletedTasks: 1,
         incomingRecurringTasks: 1,
         incomingTombstonedTasks: 2,
-        skippedPrunedTombstones: 2,
+        skippedPrunedTombstones: 1,
         newTasksToAdd: 2,
         existingTasksToUpdate: 1,
         existingLocalTasksKept: 1,
@@ -345,18 +305,10 @@ describe('dataTransfer', () => {
   });
 
   describe('exportJsonBackup', () => {
-    it('generates a backup JSON, omits tombstones across tasks, lists, and folders, and triggers browser download', async () => {
+    it('generates a backup JSON, omits task tombstones, and triggers browser download', async () => {
       mockTasks.push(
-        { id: 'task-a', title: 'Task A', listId: 'inbox', completionHistory: [], notes: '', createdAt: 1, updatedAt: 1, deletedAt: null },
-        { id: 'task-del', title: 'Deleted', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 2, deletedAt: 2 }
-      );
-      mockLists.push(
-        { id: 'list-a', name: 'List A', folderId: null, createdAt: 1, updatedAt: 1, deletedAt: null },
-        { id: 'list-del', name: 'Deleted List', createdAt: 1, updatedAt: 2, deletedAt: 2 }
-      );
-      mockFolders.push(
-        { id: 'folder-a', name: 'Folder A', createdAt: 1, updatedAt: 1, deletedAt: null },
-        { id: 'folder-del', name: 'Deleted Folder', createdAt: 1, updatedAt: 2, deletedAt: 2 }
+        { id: 'task-a', title: 'Task A', completionHistory: [], notes: '', createdAt: 1, updatedAt: 1, deletedAt: null },
+        { id: 'task-del', title: 'Deleted', completionHistory: [], createdAt: 1, updatedAt: 2, deletedAt: 2 }
       );
 
       let capturedBlob: Blob | null = null;
@@ -389,14 +341,14 @@ describe('dataTransfer', () => {
 
       const exported = JSON.parse(await capturedBlob!.text()) as {
         tasks: Task[];
-        lists: TaskList[];
-        folders: Folder[];
+        lists?: unknown;
+        folders?: unknown;
       };
       expect(exported.tasks).toEqual([
-        { id: 'task-a', title: 'Task A', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 1 },
+        { id: 'task-a', title: 'Task A', completionHistory: [], createdAt: 1, updatedAt: 1 },
       ]);
-      expect(exported.lists).toEqual([{ id: 'list-a', name: 'List A', createdAt: 1, updatedAt: 1 }]);
-      expect(exported.folders).toEqual([{ id: 'folder-a', name: 'Folder A', createdAt: 1, updatedAt: 1 }]);
+      expect(exported.lists).toBeUndefined();
+      expect(exported.folders).toBeUndefined();
     });
   });
 });

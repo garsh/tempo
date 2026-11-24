@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import {
   isCompletedOnDate,
   isCompleted,
@@ -84,7 +83,6 @@ describe('Task Completion, Uncompletion & Tombstone Interaction Lifecycle', () =
   const baseTask: Task = {
     id: 'chore-1',
     title: 'Clean Kitchen Counters',
-    listId: INBOX_LIST_ID,
     createdAt: 1000,
     updatedAt: 1000,
     dueAt: '2026-11-17',
@@ -232,7 +230,6 @@ describe('Task Completion, Uncompletion & Tombstone Interaction Lifecycle', () =
       const daily: Task = {
         id: 'ab-ex',
         title: 'Ab Exercises',
-        listId: INBOX_LIST_ID,
         startDate: '2026-11-16',
         dueAt: '2026-11-18', // Master is due today Nov 18
         recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
@@ -257,7 +254,6 @@ describe('Task Completion, Uncompletion & Tombstone Interaction Lifecycle', () =
       const daily: Task = {
         id: 'ab-ex',
         title: 'Ab Exercises',
-        listId: INBOX_LIST_ID,
         startDate: '2026-11-16',
         dueAt: '2026-11-18',
         recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },

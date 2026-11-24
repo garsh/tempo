@@ -2,7 +2,7 @@
 import { act, memo, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 import indexHtml from '../../../index.html?raw';
 import { CalendarMonthView } from '../CalendarMonthView';
 import { DesktopSidebar } from '../shell/DesktopSidebar';
@@ -44,7 +44,6 @@ function makeTask(id: string, title: string, overrides: Partial<Task> = {}): Tas
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],

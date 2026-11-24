@@ -16,7 +16,6 @@ import type {
   TaskInput,
   Weekday,
 } from '../types/task';
-import { INBOX_LIST_ID } from '../types/task';
 import {
   addDays,
   addInterval,
@@ -526,7 +525,6 @@ export function QuickAddSheet({
         id: initialTask?.id,
         title: title.trim(),
         notes: notes.trim() || undefined,
-        listId: initialTask?.listId || INBOX_LIST_ID,
         dueAt: submittedDueAt,
         recurrence,
         ...(seededHistory ? { completionHistory: seededHistory } : {}),

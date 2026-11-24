@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import { SwipeCoordinator } from '../../domain/swipeCoordinator';
 
 /**
@@ -181,7 +180,6 @@ describe('TaskCard Gesture & Interaction State Machine', () => {
   const sampleTask: Task = {
     id: 'task-101',
     title: 'Daily Habit',
-    listId: INBOX_LIST_ID,
     createdAt: 1000,
     updatedAt: 1000,
     dueAt: '2026-11-17',

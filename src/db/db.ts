@@ -1,12 +1,9 @@
 import Dexie, { type Table } from 'dexie';
 import type {
-  Folder,
   RecurrenceRule,
   Task,
   TaskInput,
-  TaskList,
 } from '../types/task';
-import { INBOX_LIST_ID } from '../types/task';
 import {
   addDays,
   combineDueAt,
@@ -48,8 +45,6 @@ export { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from './sampleData';
 
 export class TempoDatabase extends Dexie {
   tasks!: Table<Task, string>;
-  lists!: Table<TaskList, string>;
-  folders!: Table<Folder, string>;
 
   constructor() {
     super('TempoDatabase');
@@ -106,62 +101,48 @@ export class TempoDatabase extends Dexie {
             }
           });
       });
+
+    // v7: Drop unused lists/folders and the legacy task listId field.
+    this.version(7)
+      .stores({
+        tasks: 'id, dueAt, updatedAt, deletedAt, completedAt',
+        lists: null,
+        folders: null,
+      })
+      .upgrade(async (tx) => {
+        await tx.table('tasks').toCollection().modify((task: Record<string, unknown>) => {
+          delete task.listId;
+        });
+      });
   }
 }
 
 export const db = new TempoDatabase();
 
-export async function ensureInboxList(): Promise<TaskList> {
-  const existing = await db.lists.get(INBOX_LIST_ID);
-  if (existing && !existing.deletedAt) return existing;
-
-  const now = Date.now();
-  const inbox: TaskList = {
-    id: INBOX_LIST_ID,
-    name: 'Inbox',
-    sortOrder: 0,
-    folderId: null,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    deletedAt: null,
-  };
-  await db.lists.put(inbox);
-  return inbox;
-}
-
-/** Make sure the built-in Inbox list exists. Never seeds tasks. */
+/** Open the local database. Never seeds tasks. */
 export async function initDatabase(): Promise<void> {
-  await ensureInboxList();
+  await db.open();
 }
 
 /** Settings → "Load sample tasks": (re)insert the demo data with fresh dates. */
 export async function loadSampleTasks(nowDate: Date = new Date()): Promise<number> {
-  await ensureInboxList();
-  const { folders, lists, tasks } = buildSampleData(nowDate);
-  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
-    await db.folders.bulkPut(folders);
-    await db.lists.bulkPut(lists);
-    await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: null })));
-  });
+  const tasks = buildSampleData(nowDate);
+  await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: null })));
   recordDiagEvent('load_sample', `tasks=${tasks.length}`);
   return tasks.length;
 }
 
 /**
- * Settings → "Clear sample tasks": soft-delete (tombstone) every demo task, list and
- * folder so the removal also propagates through Drive sync.
+ * Settings → "Clear sample tasks": soft-delete (tombstone) every demo task so the
+ * removal also propagates through Drive sync.
  */
 export async function clearSampleTasks(): Promise<number> {
   const now = Date.now();
   let removed = 0;
-  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
+  await db.transaction('rw', db.tasks, async () => {
     const tasks = (await db.tasks.toArray()).filter((t) => isSampleId(t.id) && !t.deletedAt);
     removed = tasks.length;
     await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: now, updatedAt: now })));
-    const lists = (await db.lists.toArray()).filter((l) => isSampleId(l.id) && !l.deletedAt);
-    await db.lists.bulkPut(lists.map((l) => ({ ...l, deletedAt: now, updatedAt: now })));
-    const folders = (await db.folders.toArray()).filter((f) => isSampleId(f.id) && !f.deletedAt);
-    await db.folders.bulkPut(folders.map((f) => ({ ...f, deletedAt: now, updatedAt: now })));
   });
   recordDiagEvent('clear_sample', `removed=${removed}`);
   return removed;
@@ -191,8 +172,7 @@ export async function getClearAllDataPreview(): Promise<ClearAllDataPreview> {
 
 /**
  * Settings › Integrations & Import › Diagnostics & Repair → "Clear all current data":
- * soft-delete (tombstone) all tasks, custom lists, and folders so the removal also
- * propagates through Drive sync, keeping the built-in Inbox list.
+ * soft-delete (tombstone) all tasks so the removal also propagates through Drive sync.
  */
 export async function clearAllData(): Promise<number> {
   const now = Date.now();
@@ -200,18 +180,11 @@ export async function clearAllData(): Promise<number> {
     items.filter((x) => !x.deletedAt).map((x) => ({ ...x, deletedAt: now, updatedAt: now }));
 
   let removedTasks = 0;
-  await db.transaction('rw', db.folders, db.lists, db.tasks, async () => {
+  await db.transaction('rw', db.tasks, async () => {
     const tasks = markDeleted(await db.tasks.toArray());
     removedTasks = tasks.length;
     if (tasks.length) await db.tasks.bulkPut(tasks);
-
-    const lists = markDeleted((await db.lists.toArray()).filter((l) => l.id !== INBOX_LIST_ID));
-    if (lists.length) await db.lists.bulkPut(lists);
-
-    const folders = markDeleted(await db.folders.toArray());
-    if (folders.length) await db.folders.bulkPut(folders);
   });
-  await ensureInboxList();
   recordDiagEvent('clear_all_data', `removedTasks=${removedTasks}`);
   return removedTasks;
 }
@@ -319,7 +292,6 @@ export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Prom
         ...(existing || {}),
         ...task,
         id: taskId,
-        listId: task.listId || existing?.listId || INBOX_LIST_ID,
         dueAt: nextDue,
         startDate: nextStartDate,
         sortOrder:
@@ -367,7 +339,6 @@ export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Prom
   const fullTask: Task = {
     title: task.title,
     notes: task.notes,
-    listId: task.listId || INBOX_LIST_ID,
     dueAt: isWindow ? null : task.dueAt ?? null,
     startDate: initialStartDate,
     priority: task.priority,
@@ -886,7 +857,6 @@ export async function moveRecurringOccurrenceOnly(params: {
   toDate: string;
   title?: string;
   notes?: string;
-  listId?: string;
   today?: Date;
 }): Promise<MoveRecurringResult | null> {
   return db.transaction('rw', db.tasks, async () => {
@@ -899,7 +869,6 @@ export async function moveRecurringOccurrenceOnly(params: {
     const now = Date.now();
     const nextTitle = params.title !== undefined ? params.title : task.title;
     const nextNotes = params.notes !== undefined ? params.notes : task.notes;
-    const nextListId = params.listId !== undefined ? params.listId : task.listId;
     const origDate = findRescheduledOrigin(task, params.fromDate) ?? params.fromDate;
     const startDate = task.startDate || getRecurrenceAnchor(task);
 
@@ -979,7 +948,6 @@ export async function moveRecurringOccurrenceOnly(params: {
         ...task,
         title: nextTitle,
         notes: nextNotes,
-        listId: nextListId,
         startDate,
         completionHistory: nextHistory,
         ...(nextRemovedCompletions && nextRemovedCompletions.length > 0
@@ -1038,7 +1006,6 @@ export async function moveRecurringOccurrenceOnly(params: {
       ...task,
       title: nextTitle,
       notes: nextNotes,
-      listId: nextListId,
       startDate,
       skippedDates: nextSkipped,
       ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
@@ -1070,7 +1037,6 @@ export async function moveRecurringSeries(params: {
   toDate: string;
   title?: string;
   notes?: string;
-  listId?: string;
   explicitRecurrence?: RecurrenceRule;
 }): Promise<MoveRecurringResult | null> {
   return db.transaction('rw', db.tasks, async () => {
@@ -1083,7 +1049,6 @@ export async function moveRecurringSeries(params: {
     const now = Date.now();
     const nextTitle = params.title !== undefined ? params.title : task.title;
     const nextNotes = params.notes !== undefined ? params.notes : task.notes;
-    const nextListId = params.listId !== undefined ? params.listId : task.listId;
 
     const origFromDate = findRescheduledOrigin(task, params.fromDate) ?? params.fromDate;
     const cutoffDate = params.toDate < origFromDate ? params.toDate : origFromDate;
@@ -1136,7 +1101,6 @@ export async function moveRecurringSeries(params: {
       ...task,
       title: nextTitle,
       notes: nextNotes,
-      listId: nextListId,
       startDate: params.toDate,
       dueAt: nextDueAt,
       recurrence: rawNextRule,
@@ -1544,11 +1508,10 @@ function mergeTaskGroup(group: Task[], now: number): { keeper: Task; dropped: Ta
 }
 
 /**
- * Merges duplicate lists/tasks left behind by earlier TickTick imports and purges
+ * Merges duplicate tasks left behind by earlier imports and purges
  * soft-delete tombstones (all when signed out, or expired >30d tombstones when Drive sync is active).
  */
 export async function repairAndDeduplicateDatabase(): Promise<{
-  mergedLists: number;
   deduplicatedTasks: number;
   purgedTombstones: number;
 }> {
@@ -1556,173 +1519,90 @@ export async function repairAndDeduplicateDatabase(): Promise<{
   const now = Date.now();
   const expiredCutoff = now - TOMBSTONE_TTL_MS;
 
-  const result = await db.transaction(
-    'rw',
-    [db.tasks, db.lists, db.folders],
-    async () => {
-      const [allLists, allTasks, allFolders] = await Promise.all([
-        db.lists.toArray(),
-        db.tasks.toArray(),
-        db.folders.toArray(),
-      ]);
+  const result = await db.transaction('rw', db.tasks, async () => {
+    const allTasks = await db.tasks.toArray();
+    const taskMap = new Map(allTasks.map((t) => [t.id, { ...t }]));
+    const dirtyTaskIds = new Set<string>();
 
-      // 1. Merge duplicate active lists sharing the same case-insensitive name.
-      const listById = new Map(allLists.map((l) => [l.id, { ...l }]));
-      const listIdRemap = new Map<string, string>();
-      const listsByName = new Map<string, typeof allLists>();
-      for (const l of allLists) {
-        if (l.deletedAt) continue;
-        const key = l.name.trim().toLowerCase();
-        const bucket = listsByName.get(key) ?? [];
-        bucket.push(l);
-        listsByName.set(key, bucket);
+    // Deduplicate active tasks sharing (titleLower, createdAt).
+    const byExactKey = new Map<string, Task[]>();
+    for (const task of taskMap.values()) {
+      if (task.deletedAt) continue;
+      const key = `${task.title.trim().toLowerCase()}\0${task.createdAt}`;
+      const bucket = byExactKey.get(key) ?? [];
+      bucket.push(task);
+      byExactKey.set(key, bucket);
+    }
+
+    let deduplicatedTasks = 0;
+    const collapseBucket = (bucket: Task[]) => {
+      const { keeper, dropped } = mergeTaskGroup(bucket, now);
+      taskMap.set(keeper.id, keeper);
+      dirtyTaskIds.add(keeper.id);
+      for (const dup of dropped) {
+        taskMap.set(dup.id, { ...dup, deletedAt: now, updatedAt: now });
+        dirtyTaskIds.add(dup.id);
+        deduplicatedTasks++;
       }
+    };
 
-      let mergedLists = 0;
-      const dirtyListIds = new Set<string>();
-      for (const bucket of listsByName.values()) {
-        if (bucket.length <= 1) continue;
-        bucket.sort((a, b) => {
-          if (a.id === 'inbox') return -1;
-          if (b.id === 'inbox') return 1;
-          return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
-        });
-        const keep = bucket[0];
-        for (let i = 1; i < bucket.length; i++) {
-          const dup = bucket[i];
-          listIdRemap.set(dup.id, keep.id);
-          const target = listById.get(dup.id);
-          if (target) {
-            target.deletedAt = now;
-            target.updatedAt = now;
-            dirtyListIds.add(dup.id);
-            mergedLists++;
-          }
-        }
-      }
+    for (const bucket of byExactKey.values()) {
+      if (bucket.length <= 1) continue;
+      collapseBucket(bucket);
+    }
 
-      const taskMap = new Map(allTasks.map((t) => [t.id, { ...t }]));
-      const dirtyTaskIds = new Set<string>();
-      for (const task of taskMap.values()) {
-        const mappedListId = listIdRemap.get(task.listId);
-        if (mappedListId && mappedListId !== task.listId) {
-          task.listId = mappedListId;
-          task.updatedAt = now;
-          dirtyTaskIds.add(task.id);
-        }
-      }
+    // Collapse duplicate open tasks sharing a title when any is recurring.
+    const openByTitleKey = new Map<string, Task[]>();
+    for (const task of taskMap.values()) {
+      if (task.deletedAt || isCompleted(task)) continue;
+      const key = task.title.trim().toLowerCase();
+      const bucket = openByTitleKey.get(key) ?? [];
+      bucket.push(task);
+      openByTitleKey.set(key, bucket);
+    }
 
-      // 2a. Deduplicate active tasks sharing (listId, titleLower, createdAt).
-      const byExactKey = new Map<string, Task[]>();
-      for (const task of taskMap.values()) {
-        if (task.deletedAt) continue;
-        const key = `${task.listId}\0${task.title.trim().toLowerCase()}\0${task.createdAt}`;
-        const bucket = byExactKey.get(key) ?? [];
-        bucket.push(task);
-        byExactKey.set(key, bucket);
-      }
+    for (const bucket of openByTitleKey.values()) {
+      if (bucket.length <= 1 || !bucket.some(hasActiveRecurrence)) continue;
+      collapseBucket(bucket);
+    }
 
-      let deduplicatedTasks = 0;
-      const collapseBucket = (bucket: Task[]) => {
-        const { keeper, dropped } = mergeTaskGroup(bucket, now);
-        taskMap.set(keeper.id, keeper);
-        dirtyTaskIds.add(keeper.id);
-        for (const dup of dropped) {
-          taskMap.set(dup.id, { ...dup, deletedAt: now, updatedAt: now });
-          dirtyTaskIds.add(dup.id);
-          deduplicatedTasks++;
-        }
-      };
+    let purgedTombstones = 0;
+    const hasAnyActiveTask = Array.from(taskMap.values()).some((t) => !t.deletedAt);
+    if (hasAnyActiveTask) {
+      if (syncActive) {
+        const isExpired = (item: { deletedAt?: number | null }) =>
+          Boolean(item.deletedAt) && item.deletedAt! <= expiredCutoff;
+        purgedTombstones = Array.from(taskMap.values()).filter(isExpired).length;
 
-      for (const bucket of byExactKey.values()) {
-        if (bucket.length <= 1) continue;
-        collapseBucket(bucket);
-      }
-
-      // 2b. Collapse duplicate open tasks sharing (listId, titleLower) when any is recurring.
-      const openByTitleKey = new Map<string, Task[]>();
-      for (const task of taskMap.values()) {
-        if (task.deletedAt || isCompleted(task)) continue;
-        const key = `${task.listId}\0${task.title.trim().toLowerCase()}`;
-        const bucket = openByTitleKey.get(key) ?? [];
-        bucket.push(task);
-        openByTitleKey.set(key, bucket);
-      }
-
-      for (const bucket of openByTitleKey.values()) {
-        if (bucket.length <= 1 || !bucket.some(hasActiveRecurrence)) continue;
-        collapseBucket(bucket);
-      }
-
-      let purgedTombstones = 0;
-      const hasAnyActiveTask = Array.from(taskMap.values()).some((t) => !t.deletedAt);
-      if (hasAnyActiveTask) {
-        if (syncActive) {
-          const isExpired = (item: { deletedAt?: number | null }) =>
-            Boolean(item.deletedAt) && item.deletedAt! <= expiredCutoff;
-          purgedTombstones =
-            Array.from(taskMap.values()).filter(isExpired).length +
-            Array.from(listById.values()).filter((l) => l.id !== INBOX_LIST_ID && isExpired(l)).length +
-            allFolders.filter(isExpired).length;
-
-          const tasksToPut = Array.from(dirtyTaskIds)
-            .map((id) => taskMap.get(id)!)
-            .filter(Boolean);
-          const listsToPut = Array.from(dirtyListIds)
-            .map((id) => listById.get(id)!)
-            .filter(Boolean);
-          if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
-          if (listsToPut.length) await db.lists.bulkPut(listsToPut);
-        } else {
-          const shouldPurgeTombstone = (item: { deletedAt?: number | null }) =>
-            Boolean(item.deletedAt);
-
-          const deletedTaskIds = Array.from(taskMap.values())
-            .filter(shouldPurgeTombstone)
-            .map((t) => t.id);
-          const deletedListIds = Array.from(listById.values())
-            .filter((l) => l.id !== INBOX_LIST_ID && shouldPurgeTombstone(l))
-            .map((l) => l.id);
-          const deletedFolderIds = allFolders
-            .filter(shouldPurgeTombstone)
-            .map((f) => f.id);
-
-          const deletedTaskIdSet = new Set(deletedTaskIds);
-          const deletedListIdSet = new Set(deletedListIds);
-          const tasksToPut = Array.from(dirtyTaskIds)
-            .filter((id) => !deletedTaskIdSet.has(id))
-            .map((id) => taskMap.get(id)!)
-            .filter(Boolean);
-          const listsToPut = Array.from(dirtyListIds)
-            .filter((id) => !deletedListIdSet.has(id))
-            .map((id) => listById.get(id)!)
-            .filter(Boolean);
-
-          if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
-          if (listsToPut.length) await db.lists.bulkPut(listsToPut);
-          if (deletedTaskIds.length) await db.tasks.bulkDelete(deletedTaskIds);
-          if (deletedListIds.length) await db.lists.bulkDelete(deletedListIds);
-          if (deletedFolderIds.length) await db.folders.bulkDelete(deletedFolderIds);
-
-          purgedTombstones =
-            deletedTaskIds.length +
-            deletedListIds.length +
-            deletedFolderIds.length;
-        }
-      } else {
         const tasksToPut = Array.from(dirtyTaskIds)
           .map((id) => taskMap.get(id)!)
           .filter(Boolean);
-        const listsToPut = Array.from(dirtyListIds)
-          .map((id) => listById.get(id)!)
-          .filter(Boolean);
         if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
-        if (listsToPut.length) await db.lists.bulkPut(listsToPut);
-      }
+      } else {
+        const shouldPurgeTombstone = (item: { deletedAt?: number | null }) => Boolean(item.deletedAt);
 
-      return { mergedLists, deduplicatedTasks, purgedTombstones };
-    },
-  );
+        const deletedTaskIds = Array.from(taskMap.values())
+          .filter(shouldPurgeTombstone)
+          .map((t) => t.id);
+        const deletedTaskIdSet = new Set(deletedTaskIds);
+        const tasksToPut = Array.from(dirtyTaskIds)
+          .filter((id) => !deletedTaskIdSet.has(id))
+          .map((id) => taskMap.get(id)!)
+          .filter(Boolean);
+
+        if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
+        if (deletedTaskIds.length) await db.tasks.bulkDelete(deletedTaskIds);
+        purgedTombstones = deletedTaskIds.length;
+      }
+    } else {
+      const tasksToPut = Array.from(dirtyTaskIds)
+        .map((id) => taskMap.get(id)!)
+        .filter(Boolean);
+      if (tasksToPut.length) await db.tasks.bulkPut(tasksToPut);
+    }
+
+    return { deduplicatedTasks, purgedTombstones };
+  });
 
   if (syncActive && result.purgedTombstones > 0) {
     setTombstonesPrunedBefore(expiredCutoff);
@@ -1730,7 +1610,7 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 
   recordDiagEvent(
     'db_repair',
-    `mergedLists=${result.mergedLists} deduplicatedTasks=${result.deduplicatedTasks} purgedTombstones=${result.purgedTombstones} sync=${syncActive}`,
+    `deduplicatedTasks=${result.deduplicatedTasks} purgedTombstones=${result.purgedTombstones} sync=${syncActive}`,
   );
   return result;
 }
@@ -1738,25 +1618,17 @@ export async function repairAndDeduplicateDatabase(): Promise<{
 export interface StorageCleanupPreview {
   importedCompletedTasks: number;
   tombstonedTasks: number;
-  tombstonedLists: number;
-  tombstonedFolders: number;
   activeRemainingTasks: number;
 }
 
 export interface StorageCleanupResult {
   removedImportedCompleted: number;
   purgedTasks: number;
-  purgedLists: number;
-  purgedFolders: number;
   needsSync: boolean;
 }
 
 export async function getStorageCleanupPreview(): Promise<StorageCleanupPreview> {
-  const [allTasks, allLists, allFolders] = await Promise.all([
-    db.tasks.toArray(),
-    db.lists.toArray(),
-    db.folders.toArray(),
-  ]);
+  const allTasks = await db.tasks.toArray();
   const importedIds = findImportedCompletedTaskIds(allTasks);
   let activeTasks = 0;
   let tombstonedTasks = 0;
@@ -1767,14 +1639,12 @@ export async function getStorageCleanupPreview(): Promise<StorageCleanupPreview>
   return {
     importedCompletedTasks: importedIds.length,
     tombstonedTasks,
-    tombstonedLists: allLists.filter((l) => l.id !== INBOX_LIST_ID && Boolean(l.deletedAt)).length,
-    tombstonedFolders: allFolders.filter((f) => Boolean(f.deletedAt)).length,
     activeRemainingTasks: Math.max(0, activeTasks - importedIds.length),
   };
 }
 
 /**
- * Remove TickTick-imported completed tasks and all deleted tombstones across tasks, lists, and folders.
+ * Remove TickTick-imported completed tasks and deleted task tombstones.
  * When signed in to Google Drive, stages tombstones and advances the prune watermark so the next
  * Drive sync deletes them remotely before removing them locally.
  */
@@ -1782,32 +1652,18 @@ export async function cleanupImportedAndTombstones(): Promise<StorageCleanupResu
   const syncActive = isGoogleSyncActive();
   const now = Date.now();
 
-  const result = await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
-    const [allTasks, allLists, allFolders] = await Promise.all([
-      db.tasks.toArray(),
-      db.lists.toArray(),
-      db.folders.toArray(),
-    ]);
+  const result = await db.transaction('rw', db.tasks, async () => {
+    const allTasks = await db.tasks.toArray();
 
     const importedIdList = findImportedCompletedTaskIds(allTasks);
     const importedIdSet = new Set(importedIdList);
     const tombstonedTaskIds = allTasks.filter((t) => Boolean(t.deletedAt)).map((t) => t.id);
-    const tombstonedListIds = allLists
-      .filter((l) => l.id !== INBOX_LIST_ID && Boolean(l.deletedAt))
-      .map((l) => l.id);
-    const tombstonedFolderIds = allFolders.filter((f) => Boolean(f.deletedAt)).map((f) => f.id);
 
-    const total =
-      importedIdList.length +
-      tombstonedTaskIds.length +
-      tombstonedListIds.length +
-      tombstonedFolderIds.length;
+    const total = importedIdList.length + tombstonedTaskIds.length;
     if (total === 0) {
       return {
         removedImportedCompleted: 0,
         purgedTasks: 0,
-        purgedLists: 0,
-        purgedFolders: 0,
         needsSync: false,
       };
     }
@@ -1815,13 +1671,9 @@ export async function cleanupImportedAndTombstones(): Promise<StorageCleanupResu
     if (!syncActive) {
       const taskIdsToDelete = [...importedIdList, ...tombstonedTaskIds];
       if (taskIdsToDelete.length) await db.tasks.bulkDelete(taskIdsToDelete);
-      if (tombstonedListIds.length) await db.lists.bulkDelete(tombstonedListIds);
-      if (tombstonedFolderIds.length) await db.folders.bulkDelete(tombstonedFolderIds);
       return {
         removedImportedCompleted: importedIdList.length,
         purgedTasks: tombstonedTaskIds.length,
-        purgedLists: tombstonedListIds.length,
-        purgedFolders: tombstonedFolderIds.length,
         needsSync: false,
       };
     }
@@ -1836,24 +1688,17 @@ export async function cleanupImportedAndTombstones(): Promise<StorageCleanupResu
     return {
       removedImportedCompleted: softDeletedImported.length,
       purgedTasks: tombstonedTaskIds.length,
-      purgedLists: tombstonedListIds.length,
-      purgedFolders: tombstonedFolderIds.length,
       needsSync: true,
     };
   });
 
-  if (
-    result.removedImportedCompleted > 0 ||
-    result.purgedTasks > 0 ||
-    result.purgedLists > 0 ||
-    result.purgedFolders > 0
-  ) {
+  if (result.removedImportedCompleted > 0 || result.purgedTasks > 0) {
     setTombstonesPrunedBefore(now);
   }
 
   recordDiagEvent(
     'storage_cleanup',
-    `imported=${result.removedImportedCompleted} tasks=${result.purgedTasks} lists=${result.purgedLists} folders=${result.purgedFolders} needsSync=${result.needsSync}`,
+    `imported=${result.removedImportedCompleted} tasks=${result.purgedTasks} needsSync=${result.needsSync}`,
   );
   return result;
 }

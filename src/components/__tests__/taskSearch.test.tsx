@@ -2,7 +2,7 @@
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 import { formatDate } from '../../domain/recurrence';
 
 const mockDbState = vi.hoisted(() => ({
@@ -103,7 +103,6 @@ function mount(ui: ReactElement) {
 
 function makeTask(overrides: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     dueAt: null,
     completionHistory: [],
     createdAt: 1000,

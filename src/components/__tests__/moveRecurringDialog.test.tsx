@@ -3,7 +3,6 @@ import { act, createRef, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 import { MoveRecurringDialog } from '../dialogs/MoveRecurringDialog';
 import { ChangeDatePicker, type ChangeDatePickerHandle } from '../dialogs/ChangeDatePicker';
 import { QuickAddSheet } from '../QuickAddSheet';
@@ -44,7 +43,6 @@ function makeRecurringTask(overrides: Partial<Task> = {}): Task {
   return {
     id: 'rec-1',
     title: 'Take out recycling',
-    listId: INBOX_LIST_ID,
     dueAt: '2026-11-21',
     startDate: '2026-11-07',
     recurrence: {

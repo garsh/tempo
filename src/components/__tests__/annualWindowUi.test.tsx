@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickAddSheet } from '../QuickAddSheet';
 import { RecurringTasksView } from '../RecurringTasksView';
 import { SettingsPage } from '../settings/SettingsPage';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 import { PREFS_STORAGE_KEY, resetPrefsCache } from '../../prefs/prefs';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -178,7 +178,6 @@ describe('Annual time-of-year UI', () => {
     const existing: Task = {
       id: 'ann-edit',
       title: 'File taxes',
-      listId: INBOX_LIST_ID,
       dueAt: null,
       startDate: null,
       recurrence: {
@@ -217,7 +216,6 @@ describe('Annual time-of-year UI', () => {
     const activeAnnual: Task = {
       id: 'ann-1',
       title: 'Winterize faucets',
-      listId: INBOX_LIST_ID,
       dueAt: null,
       startDate: null,
       recurrence: {
@@ -234,7 +232,6 @@ describe('Annual time-of-year UI', () => {
     const stoppedAnnual: Task = {
       id: 'ann-2',
       title: 'Retired spring routine',
-      listId: INBOX_LIST_ID,
       dueAt: null,
       startDate: null,
       recurrence: {

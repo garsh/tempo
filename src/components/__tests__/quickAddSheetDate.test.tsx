@@ -39,7 +39,6 @@ function undatedTask(): Task {
   return {
     id: 't1',
     title: 'Loose end',
-    listId: 'inbox',
     dueAt: null,
     completionHistory: [],
     createdAt: 1,

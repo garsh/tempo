@@ -135,7 +135,7 @@ The shared string is not executed as HTML. This is a privacy and availability bu
 
 **Where:**
 
-- `downloadDriveBackup` and `mergeRemoteIntoLocal` in `src/sync/googleDrive.ts` (`JSON.parse`, then `mergeTasks` / `mergeLists` / `mergeFolders`, then `bulkPut`).
+- `downloadDriveBackup` and `mergeRemoteIntoLocal` in `src/sync/googleDrive.ts` (`JSON.parse`, then `mergeTasks`, then `bulkPut`).
 - `importJsonBackup` in `src/components/settings/dataTransfer.ts`.
 - `mergeTasks` in `src/domain/merge.ts` unions `completionHistory` and `skippedDates` with no cap. CSV import already caps history at 365 (`mergeHistories` in `dataTransfer.ts`). Drive sync does not.
 
@@ -153,9 +153,9 @@ A stolen Drive token or a JSON file from someone else is enough. The user does n
 **Fix:** One `parseSyncPayload(text, { maxBytes })` used by import and by Drive download.
 
 - Refuse the body above a fixed size before `JSON.parse` (suggest 5 MB). If `Content-Length` is missing, stop reading once the cap is hit.
-- Rebuild each task, list, and folder field by field. Do not spread the raw object.
+- Rebuild each task field by field. Do not spread the raw object.
 - Require string `id`s of a bounded length. Drop records that fail. Do not fail the whole sync for one bad record.
-- Cap `title`, `notes`, and `name`. Cap `completionHistory` and `skippedDates` (365, same as CSV import). Cap how many records a payload may contain.
+- Cap `title` and `notes`. Cap `completionHistory` and `skippedDates` (365, same as CSV import). Cap how many records a payload may contain.
 - Clamp `createdAt`, `updatedAt`, and `deletedAt` to `Date.now()` plus a few minutes of skew. Use the clamped value only when the stored value is actually out of range, so a normal sync does not rewrite every row.
 - Keep last-write-wins and completion-history union after the records are clean.
 - Show a normal error if an import file is empty, too large, or has no valid tasks.

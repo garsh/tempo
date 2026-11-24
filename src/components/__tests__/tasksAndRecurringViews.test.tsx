@@ -14,7 +14,6 @@ import { DeleteConfirmDialog } from '../dialogs/DeleteConfirmDialog';
 import { QuickAddSheet } from '../QuickAddSheet';
 import { getWindowProgress } from '../../domain/recurrence';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,7 +37,6 @@ function makeTask(id: string, title: string, overrides: Partial<Task> = {}): Tas
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],

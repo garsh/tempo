@@ -1,12 +1,10 @@
 import type {
   AnnualWindow,
-  Folder,
   RecurrenceRule,
   RecurrenceScheduleSegment,
   Subtask,
   SyncData,
   Task,
-  TaskList,
   TaskPriority,
   Weekday,
 } from '../types/task';
@@ -36,8 +34,6 @@ export class SyncPayloadError extends Error {
 
 export interface ParsedSyncPayload {
   tasks: Task[];
-  lists: TaskList[];
-  folders: Folder[];
   /** Present when the backup named an exportedAt. Clamped the same way as record timestamps. */
   exportedAt?: number;
   /** Present when the backup declared a tombstone prune watermark. */
@@ -369,13 +365,11 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (!isId(record.id)) return null;
   const title = asText(record.title, MAX_TITLE_LENGTH);
   if (title === undefined) return null;
-  const listId = isId(record.listId) ? record.listId.trim() : 'inbox';
   const deletedAt = asOptionalStamp(record.deletedAt, now);
   if (deletedAt) {
     return {
       id: record.id.trim(),
       title: '',
-      listId,
       completionHistory: [],
       createdAt: asStamp(record.createdAt, now, 0),
       updatedAt: asStamp(record.updatedAt, now, 0),
@@ -385,7 +379,6 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   const task: Task = {
     id: record.id.trim(),
     title,
-    listId,
     completionHistory: asHistory(record.completionHistory),
     createdAt: asStamp(record.createdAt, now, 0),
     updatedAt: asStamp(record.updatedAt, now, 0),
@@ -437,41 +430,6 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   return task;
 }
 
-function sanitizeNamed(
-  raw: unknown,
-  now: number,
-  kind: 'list' | 'folder'
-): (TaskList | Folder) | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const record = raw as Record<string, unknown>;
-  if (!isId(record.id)) return null;
-  const name = asText(record.name, MAX_TITLE_LENGTH);
-  if (name === undefined) return null;
-  const base = {
-    id: record.id.trim(),
-    name,
-    createdAt: asStamp(record.createdAt, now, 0),
-    updatedAt: asStamp(record.updatedAt, now, 0),
-  };
-  const deletedAt = asOptionalStamp(record.deletedAt, now);
-  if (deletedAt) {
-    return { ...base, name: '', deletedAt };
-  }
-  const sortOrder = asFinite(record.sortOrder);
-  if (kind === 'folder') {
-    const folder: Folder = { ...base };
-    if (sortOrder !== undefined) folder.sortOrder = sortOrder;
-    if (deletedAt !== undefined) folder.deletedAt = deletedAt;
-    return folder;
-  }
-  const list: TaskList = { ...base };
-  if (sortOrder !== undefined) list.sortOrder = sortOrder;
-  if (deletedAt !== undefined) list.deletedAt = deletedAt;
-  if (record.folderId === null) list.folderId = null;
-  else if (isId(record.folderId)) list.folderId = record.folderId.trim();
-  return list;
-}
-
 function requireBoundedRecords(value: unknown, maxRecords: number): unknown[] {
   if (!Array.isArray(value)) return [];
   if (value.length > maxRecords) {
@@ -505,8 +463,6 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
   const now = opts.now ?? Date.now();
 
   let taskRows: unknown[];
-  let listRows: unknown[] = [];
-  let folderRows: unknown[] = [];
   let exportedAt: number | undefined;
   let tombstonesPrunedBefore: number | undefined;
 
@@ -518,8 +474,6 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
       throw new SyncPayloadError('Invalid format: tasks array missing.', 'tasks_not_array');
     }
     taskRows = requireBoundedRecords(record.tasks, maxRecords);
-    listRows = requireBoundedRecords(record.lists, maxRecords);
-    folderRows = requireBoundedRecords(record.folders, maxRecords);
     const stamped = asFinite(record.exportedAt);
     if (stamped !== undefined) exportedAt = clampTimestamp(stamped, now);
     const pruned = asFinite(record.tombstonesPrunedBefore);
@@ -530,10 +484,6 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
 
   return {
     tasks: taskRows.map((row) => sanitizeTask(row, now)).filter((row): row is Task => row !== null),
-    lists: listRows.map((row) => sanitizeNamed(row, now, 'list')).filter((row): row is TaskList => row !== null),
-    folders: folderRows
-      .map((row) => sanitizeNamed(row, now, 'folder'))
-      .filter((row): row is Folder => row !== null),
     exportedAt,
     ...(tombstonesPrunedBefore !== undefined ? { tombstonesPrunedBefore } : {}),
   };
@@ -591,7 +541,6 @@ function compactTaskForSync(task: Task): Task {
     return {
       id: task.id,
       title: '',
-      listId: task.listId || 'inbox',
       completionHistory: [],
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
@@ -601,7 +550,6 @@ function compactTaskForSync(task: Task): Task {
   const compact: Task = {
     id: task.id,
     title: task.title,
-    listId: task.listId,
     completionHistory: task.completionHistory ?? [],
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -635,47 +583,6 @@ function compactTaskForSync(task: Task): Task {
   return compact;
 }
 
-function compactListForSync(list: TaskList): TaskList {
-  if (list.deletedAt) {
-    return {
-      id: list.id,
-      name: '',
-      createdAt: list.createdAt,
-      updatedAt: list.updatedAt,
-      deletedAt: list.deletedAt,
-    };
-  }
-  const compact: TaskList = {
-    id: list.id,
-    name: list.name,
-    createdAt: list.createdAt,
-    updatedAt: list.updatedAt,
-  };
-  if (list.folderId) compact.folderId = list.folderId;
-  if (list.sortOrder !== undefined) compact.sortOrder = list.sortOrder;
-  return compact;
-}
-
-function compactFolderForSync(folder: Folder): Folder {
-  if (folder.deletedAt) {
-    return {
-      id: folder.id,
-      name: '',
-      createdAt: folder.createdAt,
-      updatedAt: folder.updatedAt,
-      deletedAt: folder.deletedAt,
-    };
-  }
-  const compact: Folder = {
-    id: folder.id,
-    name: folder.name,
-    createdAt: folder.createdAt,
-    updatedAt: folder.updatedAt,
-  };
-  if (folder.sortOrder !== undefined) compact.sortOrder = folder.sortOrder;
-  return compact;
-}
-
 /** Strip redundant whitespace/default fields and tombstone payloads before uploading to Drive. */
 export function compactSyncData(data: SyncData): SyncData {
   return {
@@ -687,7 +594,5 @@ export function compactSyncData(data: SyncData): SyncData {
       ? { tombstonesPrunedBefore: data.tombstonesPrunedBefore }
       : {}),
     tasks: data.tasks.map(compactTaskForSync),
-    lists: data.lists.map(compactListForSync),
-    folders: (data.folders ?? []).map(compactFolderForSync),
   };
 }

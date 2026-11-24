@@ -2,7 +2,7 @@
 import { act, type ReactElement, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 import { completionTimestampForDate, type WindowProgress } from '../../domain/recurrence';
 import {
   resetBottomBannerCoordinator,
@@ -41,8 +41,6 @@ vi.mock('../../db/db', () => ({
         notifyDbListeners();
       }),
     },
-    lists: { toArray: vi.fn(async () => []) },
-    folders: { toArray: vi.fn(async () => []) },
   },
   initDatabase: vi.fn().mockResolvedValue(undefined),
   saveTask: vi.fn(async () => undefined),
@@ -71,22 +69,17 @@ vi.mock('../../db/db', () => ({
   loadSampleTasks: vi.fn(async () => 0),
   repairAndDeduplicateDatabase: vi.fn(async () => ({
     deduplicatedTasks: 0,
-    mergedLists: 0,
     purgedTombstones: 0,
   })),
   findImportedCompletedTaskIds: vi.fn(() => []),
   getStorageCleanupPreview: vi.fn(async () => ({
     importedCompletedTasks: 0,
     tombstonedTasks: 0,
-    tombstonedLists: 0,
-    tombstonedFolders: 0,
     activeRemainingTasks: 0,
   })),
   cleanupImportedAndTombstones: vi.fn(async () => ({
     removedImportedCompleted: 0,
     purgedTasks: 0,
-    purgedLists: 0,
-    purgedFolders: 0,
     needsSync: false,
   })),
 }));
@@ -163,7 +156,6 @@ function makeTask(id: string, title: string, overrides: Partial<Task> = {}): Tas
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],

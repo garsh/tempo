@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { buildMonthGrid, completedTasksOnDate, tasksDueOnDate } from '../calendar';
 import { completionTimestampForDate } from '../recurrence';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 function task(partial: Partial<Task> & Pick<Task, 'id' | 'title' | 'dueAt'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: 1,
     updatedAt: 1,
     completionHistory: [],

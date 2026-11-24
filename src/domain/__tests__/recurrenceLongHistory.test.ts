@@ -7,7 +7,6 @@ import {
   taskOccursOnDate,
 } from '../recurrence';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 /** Local calendar dates every `step` days, independent of the recurrence engine. */
 function everyNDays(start: string, step: number, count: number): string[] {
@@ -26,7 +25,6 @@ function everyNDays(start: string, step: number, count: number): string[] {
 
 function task(partial: Partial<Task> & Pick<Task, 'id' | 'title' | 'dueAt'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: new Date(2026, 0, 1).getTime(),
     updatedAt: new Date(2026, 0, 1).getTime(),
     completionHistory: [],

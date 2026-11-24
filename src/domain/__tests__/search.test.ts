@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import type { Task } from '../../types/task';
 import * as recurrence from '../recurrence';
 import {
   createNextOccurrenceCache,
@@ -12,7 +12,6 @@ import {
 
 function makeTask(partial: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
   return {
-    listId: INBOX_LIST_ID,
     createdAt: 1000,
     updatedAt: 1000,
     completionHistory: [],
@@ -85,7 +84,6 @@ describe('domain/search', () => {
       makeTask({
         id: 'hidden-fields',
         title: 'Clean garage',
-        listId: 'special-work-list',
         priority: 'high',
         pinned: true,
         tags: ['urgent-tag'],
@@ -100,7 +98,6 @@ describe('domain/search', () => {
     ];
 
     expect(searchTasks(tasks, 'plants', now).active).toEqual([]);
-    expect(searchTasks(tasks, 'special-work-list', now).active).toEqual([]);
     expect(searchTasks(tasks, 'urgent-tag', now).active).toEqual([]);
     expect(searchTasks(tasks, 'sweep', now).active).toEqual([]);
     expect(searchTasks(tasks, 'monthly', now).active).toEqual([]);

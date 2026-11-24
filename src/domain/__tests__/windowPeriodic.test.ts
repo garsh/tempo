@@ -15,7 +15,6 @@ import { searchTasks } from '../search';
 import { parseSyncPayload } from '../syncPayload';
 import { findMidpointReorderUpdate } from '../../db/db';
 import type { RecurrenceRule, Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 function makeWindowTask(
   id: string,
@@ -27,7 +26,6 @@ function makeWindowTask(
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     startDate: null,
     recurrence,
@@ -42,7 +40,6 @@ function makeUndatedOneTime(id: string, title: string, overrides: Partial<Task> 
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     recurrence: null,
     completionHistory: [],
@@ -457,7 +454,6 @@ describe('Approximate Window Periodic & Undated One-Time Domain Logic', () => {
           {
             id: 'win-sync-1',
             title: 'Smoke detector battery',
-            listId: 'inbox',
             dueAt: '2026-06-01',
             startDate: '2026-01-01',
             recurrence: {
@@ -474,7 +470,6 @@ describe('Approximate Window Periodic & Undated One-Time Domain Logic', () => {
           {
             id: 'legacy-after',
             title: 'Annual checkup',
-            listId: 'inbox',
             recurrence: {
               type: 'after_completion',
               intervalValue: 1,
@@ -485,8 +480,6 @@ describe('Approximate Window Periodic & Undated One-Time Domain Logic', () => {
             updatedAt: 200,
           },
         ],
-        lists: [],
-        folders: [],
       });
 
       const parsed = parseSyncPayload(payload, { now: 6000 });

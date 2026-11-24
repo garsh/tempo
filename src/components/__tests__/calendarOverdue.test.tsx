@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CalendarMonthView } from '../CalendarMonthView';
 import { formatDate } from '../../domain/recurrence';
-import { INBOX_LIST_ID, type Task } from '../../types/task';
+import { type Task } from '../../types/task';
 
 function mount(ui: ReactElement) {
   const container = document.createElement('div');
@@ -25,7 +25,6 @@ function mount(ui: ReactElement) {
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: `task-${Math.random().toString(36).slice(2, 7)}`,
-    listId: INBOX_LIST_ID,
     title: 'Test Task',
     dueAt: null,
     completionHistory: [],

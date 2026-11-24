@@ -9,9 +9,6 @@ export type TaskPriority = 'high' | 'medium' | 'low' | 'none';
 
 export type TaskUrgency = 'overdue' | 'due_today' | 'upcoming' | 'later' | 'none';
 
-/** Built-in Inbox list id — always present, never deleted. */
-export const INBOX_LIST_ID = 'inbox';
-
 export const WEEKDAY_LABELS: Record<Weekday, string> = {
   0: 'Sun',
   1: 'Mon',
@@ -66,7 +63,6 @@ export interface Task {
   id: string;
   title: string;
   notes?: string;
-  listId: string;
   dueAt?: string | null;
   /** Inception/start date (YYYY-MM-DD) of the recurring schedule. Preserved across occurrence completions and skips. */
   startDate?: string | null;
@@ -99,42 +95,19 @@ export interface Task {
   deletedAt?: number | null;
 }
 
-export interface TaskList {
-  id: string;
-  name: string;
-  folderId?: string | null;
-  sortOrder?: number;
-  createdAt: number;
-  updatedAt: number;
-  deletedAt?: number | null;
-}
-
-export interface Folder {
-  id: string;
-  name: string;
-  sortOrder?: number;
-  createdAt: number;
-  updatedAt: number;
-  deletedAt?: number | null;
-}
-
 export interface SyncData {
   version: number;
   exportedAt: number;
   /** Epoch ms watermark: soft-delete tombstones with deletedAt <= this value have been pruned. */
   tombstonesPrunedBefore?: number;
   tasks: Task[];
-  lists: TaskList[];
-  folders?: Folder[];
-  savedFilters?: unknown[];
 }
 
 export type TaskInput = Omit<
   Task,
-  'id' | 'createdAt' | 'updatedAt' | 'completionHistory' | 'completedAt' | 'listId'
+  'id' | 'createdAt' | 'updatedAt' | 'completionHistory' | 'completedAt'
 > & {
   id?: string;
-  listId?: string;
   completedAt?: number | null;
   completionHistory?: number[];
 };

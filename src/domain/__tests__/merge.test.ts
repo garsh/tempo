@@ -1,22 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasExpiredTombstones,
-  mergeFolders,
-  mergeLists,
   mergeTasks,
   TOMBSTONE_TTL_MS,
 } from '../merge';
-import type { Folder, Task, TaskList } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
+import type { Task } from '../../types/task';
 
 describe('Merge & Conflict Resolution Engine', () => {
   const resolveTaskConflict = (local: Task, remote: Task): Task => mergeTasks([local], [remote])[0];
-  const resolveListConflict = (local: TaskList, remote: TaskList): TaskList =>
-    mergeLists([local], [remote])[0];
   const baseTask: Task = {
     id: 'task-1',
     title: 'Water Fern',
-    listId: INBOX_LIST_ID,
     dueAt: '2026-09-25',
     recurrence: {
       type: 'fixed_interval',
@@ -26,14 +20,6 @@ describe('Merge & Conflict Resolution Engine', () => {
     createdAt: 1000,
     updatedAt: 1000,
     completionHistory: [500],
-  };
-
-  const baseList: TaskList = {
-    id: 'list-1',
-    name: 'Home',
-    sortOrder: 1,
-    createdAt: 1000,
-    updatedAt: 1000,
   };
 
   it('keeps local-only and adds remote-only tasks', () => {
@@ -144,7 +130,6 @@ describe('Merge & Conflict Resolution Engine', () => {
     const local: Task = {
       ...baseTask,
       recurrence: null,
-      listId: 'list-work',
       updatedAt: 3000,
     };
     const remote: Task = {
@@ -154,45 +139,11 @@ describe('Merge & Conflict Resolution Engine', () => {
         intervalValue: 1,
         intervalUnit: 'weeks',
       },
-      listId: INBOX_LIST_ID,
       updatedAt: 2000,
     };
 
     const resolved = resolveTaskConflict(local, remote);
     expect(resolved.recurrence).toBeNull();
-    expect(resolved.listId).toBe('list-work');
-  });
-
-  it('merges lists with LWW and soft-delete rules', () => {
-    const localOnly: TaskList = { ...baseList, id: 'local-list' };
-    const remoteOnly: TaskList = { ...baseList, id: 'remote-list', name: 'Work' };
-    const merged = mergeLists([localOnly], [remoteOnly]);
-    expect(merged.length).toBe(2);
-
-    const local: TaskList = { ...baseList, name: 'Home Renamed', updatedAt: 2000 };
-    const remote: TaskList = { ...baseList, name: 'Home Old', updatedAt: 1000 };
-    const resolved = resolveListConflict(local, remote);
-    expect(resolved.name).toBe('Home Renamed');
-  });
-
-  it('merges folders with LWW', () => {
-    const a: Folder = {
-      id: 'f1',
-      name: 'Personal',
-      sortOrder: 1,
-      createdAt: 1000,
-      updatedAt: 1000,
-    };
-    const b: Folder = {
-      id: 'f1',
-      name: 'Personal Renamed',
-      sortOrder: 1,
-      createdAt: 1000,
-      updatedAt: 2000,
-    };
-    const merged = mergeFolders([a], [b]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].name).toBe('Personal Renamed');
   });
 
   it('unions removedCompletions CRDT tombstones, subtracts deleted entries, and clears startDate on window tasks', () => {
@@ -203,7 +154,6 @@ describe('Merge & Conflict Resolution Engine', () => {
     const windowBase: Task = {
       id: 'approx-1',
       title: 'Vacuum rug',
-      listId: INBOX_LIST_ID,
       dueAt: null,
       startDate: '2026-05-01',
       recurrence: {
@@ -238,7 +188,6 @@ describe('Merge & Conflict Resolution Engine', () => {
     const local: Task = {
       id: 'rec-merge-1',
       title: 'Trash',
-      listId: INBOX_LIST_ID,
       dueAt: '2026-11-22',
       startDate: '2026-11-22',
       recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [0] },
@@ -275,7 +224,7 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(merged[0].scheduleHistory).toHaveLength(1);
   });
 
-  it('prunes tombstones with deletedAt <= prunedBefore across tasks, lists, and folders', () => {
+  it('prunes tombstones with deletedAt <= prunedBefore', () => {
     const cutoff = 5000;
     const localTasks: Task[] = [
       { ...baseTask, id: 'old-del', deletedAt: 4000, updatedAt: 4000 },
@@ -289,27 +238,9 @@ describe('Merge & Conflict Resolution Engine', () => {
     ];
     const mergedTasks = mergeTasks(localTasks, remoteTasks, { prunedBefore: cutoff });
     expect(mergedTasks.map((t) => t.id)).toEqual(['fresh-del', 'active-task']);
-
-    const mergedLists = mergeLists(
-      [
-        { id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1, updatedAt: 1 },
-        { id: 'l-old', name: '', createdAt: 1, updatedAt: 1000, deletedAt: 1000 },
-        { id: 'l-new', name: '', createdAt: 1, updatedAt: 6000, deletedAt: 6000 },
-      ],
-      [],
-      { prunedBefore: cutoff }
-    );
-    expect(mergedLists.map((l) => l.id)).toEqual([INBOX_LIST_ID, 'l-new']);
-
-    const mergedFolders = mergeFolders(
-      [{ id: 'f-old', name: '', createdAt: 1, updatedAt: 2000, deletedAt: 2000 }],
-      [{ id: 'f-new', name: '', createdAt: 1, updatedAt: 7000, deletedAt: 7000 }],
-      { prunedBefore: cutoff }
-    );
-    expect(mergedFolders.map((f) => f.id)).toEqual(['f-new']);
   });
 
-  it('drops stale active local items removed and pruned remotely while preserving offline edits, inbox, and unsynced devices', () => {
+  it('drops stale active local items removed and pruned remotely while preserving offline edits and unsynced devices', () => {
     const prunedBefore = 5000;
     const localSyncedBefore = 4000;
     const localTasks: Task[] = [
@@ -337,17 +268,6 @@ describe('Merge & Conflict Resolution Engine', () => {
       'edited-offline',
       'kept-remote',
     ]);
-
-    // Inbox is always protected even if missing from remote
-    const mergedLists = mergeLists(
-      [
-        { id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1, updatedAt: 100 },
-        { id: 'stale-list', name: 'Old', createdAt: 1, updatedAt: 100 },
-      ],
-      [],
-      { prunedBefore, localSyncedBefore, hasRemote: true }
-    );
-    expect(mergedLists.map((l) => l.id)).toEqual([INBOX_LIST_ID]);
   });
 
   it('detects expired tombstones using TOMBSTONE_TTL_MS', () => {

@@ -17,7 +17,7 @@ import { sortWindowTasks } from '../sorting';
 import { searchTasks } from '../search';
 import { parseSyncPayload } from '../syncPayload';
 import { completeTask, db, saveTask, uncompleteTask } from '../../db/db';
-import { INBOX_LIST_ID, type AnnualWindow, type RecurrenceRule, type Task } from '../../types/task';
+import type { AnnualWindow, RecurrenceRule, Task } from '../../types/task';
 
 function makeAnnualTask(
   id: string,
@@ -29,7 +29,6 @@ function makeAnnualTask(
   return {
     id,
     title,
-    listId: INBOX_LIST_ID,
     dueAt: null,
     startDate: null,
     recurrence: {
@@ -480,12 +479,10 @@ describe('Annual time-of-year recurring tasks (domain)', () => {
     const rawPayload = JSON.stringify({
       version: 1,
       exportedAt: Date.now(),
-      lists: [{ id: INBOX_LIST_ID, name: 'Inbox', createdAt: 1000, updatedAt: 1000 }],
       tasks: [
         {
           id: 'valid-annual',
           title: 'Prune trees',
-          listId: INBOX_LIST_ID,
           dueAt: '2026-12-01',
           startDate: '2026-12-01',
           recurrence: {
@@ -502,7 +499,6 @@ describe('Annual time-of-year recurring tasks (domain)', () => {
         {
           id: 'invalid-empty',
           title: 'Bad annual',
-          listId: INBOX_LIST_ID,
           recurrence: {
             type: 'annual_window',
             intervalValue: 1,
@@ -516,7 +512,6 @@ describe('Annual time-of-year recurring tasks (domain)', () => {
         {
           id: 'invalid-month',
           title: 'Bad month',
-          listId: INBOX_LIST_ID,
           recurrence: {
             type: 'annual_window',
             intervalValue: 1,

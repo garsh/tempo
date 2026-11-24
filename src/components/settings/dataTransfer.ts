@@ -1,6 +1,6 @@
-import { db, ensureInboxList } from '../../db/db';
+import { db } from '../../db/db';
 import { SYNC_VERSION } from '../../sync/googleDrive';
-import { mergeFolders, mergeLists, mergeTasks } from '../../domain/merge';
+import { mergeTasks } from '../../domain/merge';
 import { compactSyncData, parseSyncPayload, SyncPayloadError } from '../../domain/syncPayload';
 import { getTombstonesPrunedBefore, markLocalRestorePending } from '../../sync/syncWatermark';
 import { isCompleted, isRecurring } from '../../domain/recurrence';
@@ -31,25 +31,18 @@ function parseBackupContent(content: string): ReturnType<typeof parseSyncPayload
     }
     throw err;
   }
-  if (incoming.tasks.length === 0 && incoming.lists.length === 0 && incoming.folders.length === 0) {
+  if (incoming.tasks.length === 0) {
     throw new Error('Invalid format: no valid tasks found.');
   }
   return incoming;
 }
 
 export async function exportJsonBackup(): Promise<string> {
-  await ensureInboxList();
-  const [tasks, lists, folders] = await Promise.all([
-    db.tasks.toArray(),
-    db.lists.toArray(),
-    db.folders.toArray(),
-  ]);
+  const tasks = await db.tasks.toArray();
   const data = compactSyncData({
     version: SYNC_VERSION,
     exportedAt: Date.now(),
     tasks: tasks.filter((t) => !t.deletedAt),
-    lists: lists.filter((l) => !l.deletedAt),
-    folders: folders.filter((f) => !f.deletedAt),
   });
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -88,18 +81,6 @@ export async function previewJsonBackup(content: string): Promise<JsonImportPrev
     else incomingOpenTasks += 1;
   }
 
-  for (const l of incoming.lists) {
-    if (l.deletedAt && prunedBefore > 0 && l.deletedAt <= prunedBefore) {
-      skippedPrunedTombstones += 1;
-    }
-  }
-
-  for (const f of incoming.folders) {
-    if (f.deletedAt && prunedBefore > 0 && f.deletedAt <= prunedBefore) {
-      skippedPrunedTombstones += 1;
-    }
-  }
-
   const localMap = new Map(localTasks.map((t) => [t.id, t]));
   const incomingTaskIds = new Set(incoming.tasks.map((t) => t.id));
   let newTasksToAdd = 0;
@@ -135,48 +116,25 @@ export async function previewJsonBackup(content: string): Promise<JsonImportPrev
 export async function importJsonBackup(content: string): Promise<string> {
   const incoming = parseBackupContent(content);
   const incomingTasks = incoming.tasks;
-  const incomingLists = incoming.lists;
-  const incomingFolders = incoming.folders;
 
   const prunedBefore = getTombstonesPrunedBefore();
   const pruneOptions = prunedBefore > 0 ? { prunedBefore } : undefined;
   let mergedTasksCount = 0;
 
-  await db.transaction('rw', db.tasks, db.lists, db.folders, async () => {
-    const [localTasks, localLists, localFolders] = await Promise.all([
-      db.tasks.toArray(),
-      db.lists.toArray(),
-      db.folders.toArray(),
-    ]);
+  await db.transaction('rw', db.tasks, async () => {
+    const localTasks = await db.tasks.toArray();
     const mergedTasks = mergeTasks(localTasks, incomingTasks, pruneOptions);
-    const mergedLists = mergeLists(localLists, incomingLists, pruneOptions);
-    const mergedFolders = mergeFolders(localFolders, incomingFolders, pruneOptions);
     mergedTasksCount = mergedTasks.length;
 
     const mergedTaskIds = new Set(mergedTasks.map((t) => t.id));
     const prunedTaskIds = localTasks.filter((t) => !mergedTaskIds.has(t.id)).map((t) => t.id);
-    const mergedListIds = new Set(mergedLists.map((l) => l.id));
-    const prunedListIds = localLists.filter((l) => !mergedListIds.has(l.id)).map((l) => l.id);
-    const mergedFolderIds = new Set(mergedFolders.map((f) => f.id));
-    const prunedFolderIds = localFolders
-      .filter((f) => !mergedFolderIds.has(f.id))
-      .map((f) => f.id);
 
     if (mergedTasks.length > 0) await db.tasks.bulkPut(mergedTasks);
-    if (mergedLists.length > 0) await db.lists.bulkPut(mergedLists);
-    if (mergedFolders.length > 0) await db.folders.bulkPut(mergedFolders);
 
     if (prunedTaskIds.length > 0 && typeof db.tasks.bulkDelete === 'function') {
       await db.tasks.bulkDelete(prunedTaskIds);
     }
-    if (prunedListIds.length > 0 && typeof db.lists.bulkDelete === 'function') {
-      await db.lists.bulkDelete(prunedListIds);
-    }
-    if (prunedFolderIds.length > 0 && typeof db.folders.bulkDelete === 'function') {
-      await db.folders.bulkDelete(prunedFolderIds);
-    }
   });
-  await ensureInboxList();
   markLocalRestorePending();
   recordDiagEvent('json_import', `incoming=${incomingTasks.length} merged=${mergedTasksCount}`);
   const activeIncoming = incomingTasks.filter((t) => !t.deletedAt).length;

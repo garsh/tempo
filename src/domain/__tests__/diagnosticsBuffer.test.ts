@@ -7,7 +7,6 @@ import {
   type DiagEvent,
 } from '../diagnostics';
 import type { Task } from '../../types/task';
-import { INBOX_LIST_ID } from '../../types/task';
 
 /**
  * DiagnosticsBufferManager simulates the Phase 3 asynchronous batching architecture
@@ -119,7 +118,6 @@ describe('Diagnostics Logging & Event Buffering Architecture', () => {
         {
           id: '1',
           title: 'Active task',
-          listId: INBOX_LIST_ID,
           createdAt: 1000,
           updatedAt: 1000,
           dueAt: '2026-11-17',
@@ -130,7 +128,6 @@ describe('Diagnostics Logging & Event Buffering Architecture', () => {
         {
           id: '2',
           title: 'Completed task',
-          listId: INBOX_LIST_ID,
           createdAt: 1000,
           updatedAt: 1000,
           dueAt: '2026-11-17',

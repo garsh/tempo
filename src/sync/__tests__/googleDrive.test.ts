@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import type { Folder, SyncData, Task, TaskList } from '../../types/task';
+import type { SyncData, Task } from '../../types/task';
 
 vi.mock('../../db/db', () => ({
   db: {
@@ -13,20 +13,7 @@ vi.mock('../../db/db', () => ({
       bulkGet: vi.fn().mockResolvedValue([]),
       bulkDelete: vi.fn(),
     },
-    lists: {
-      toArray: vi.fn().mockResolvedValue([]),
-      bulkPut: vi.fn(),
-      bulkGet: vi.fn().mockResolvedValue([]),
-      bulkDelete: vi.fn(),
-    },
-    folders: {
-      toArray: vi.fn().mockResolvedValue([]),
-      bulkPut: vi.fn(),
-      bulkGet: vi.fn().mockResolvedValue([]),
-      bulkDelete: vi.fn(),
-    },
   },
-  ensureInboxList: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { db } from '../../db/db';
@@ -37,6 +24,7 @@ import {
   uploadDriveBackup,
   DriveConflictError,
   SIMPLE_UPLOAD_MAX_BYTES,
+  SYNC_VERSION,
   syncWithGoogleDrive,
 } from '../googleDrive';
 import { compactSyncData, SyncPayloadError, utf8ByteLength } from '../../domain/syncPayload';
@@ -54,8 +42,6 @@ function createMockStorage(initial: Record<string, string> = {}) {
 
 function wireMockDbTables(seed: {
   tasks?: Task[];
-  lists?: TaskList[];
-  folders?: Folder[];
 }) {
   const wireTable = <T extends { id: string }>(table: unknown, initial: T[]) => {
     const map = new Map<string, T>(initial.map((item) => [item.id, structuredClone(item)]));
@@ -83,8 +69,6 @@ function wireMockDbTables(seed: {
 
   return {
     tasks: wireTable(db.tasks, seed.tasks ?? []),
-    lists: wireTable(db.lists, seed.lists ?? []),
-    folders: wireTable(db.folders, seed.folders ?? []),
   };
 }
 
@@ -92,17 +76,9 @@ describe('googleDrive', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (db.tasks.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (db.lists.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (db.folders.toArray as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (db.tasks.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (db.lists.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (db.folders.bulkGet as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (db.tasks.bulkPut as ReturnType<typeof vi.fn>).mockReset();
-    (db.lists.bulkPut as ReturnType<typeof vi.fn>).mockReset();
-    (db.folders.bulkPut as ReturnType<typeof vi.fn>).mockReset();
     (db.tasks.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
-    (db.lists.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
-    (db.folders.bulkDelete as ReturnType<typeof vi.fn>).mockReset();
   });
 
   afterEach(() => {
@@ -236,9 +212,7 @@ describe('googleDrive', () => {
       const mockPayload: SyncData = {
         version: 4,
         exportedAt: 123456,
-        tasks: [{ id: 't1', title: 'Task 1', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 1 }],
-        lists: [],
-        folders: [],
+        tasks: [{ id: 't1', title: 'Task 1', completionHistory: [], createdAt: 1, updatedAt: 1 }],
       };
 
       const mockHeaders = new Headers({ ETag: '"etag-version-1"' });
@@ -251,7 +225,7 @@ describe('googleDrive', () => {
       vi.stubGlobal('fetch', mockFetch);
 
       const result = await downloadDriveBackup('file-123', 'token-abc');
-      expect(result.data).toEqual(mockPayload);
+      expect(result.data).toEqual({ ...mockPayload, version: SYNC_VERSION });
       expect(result.etag).toBe('"etag-version-1"');
       expect(mockFetch).toHaveBeenCalledWith(
         'https://www.googleapis.com/drive/v3/files/file-123?alt=media',
@@ -324,13 +298,10 @@ describe('googleDrive', () => {
           id: `t-${i}`,
           title: `Task ${i}`,
           notes: bigNote,
-          listId: 'inbox',
           completionHistory: [],
           createdAt: 1,
           updatedAt: 1,
         })),
-        lists: [],
-        folders: [],
       };
       const prettyText = JSON.stringify(mockPayload, null, 2);
       expect(utf8ByteLength(prettyText)).toBeGreaterThan(5 * 1024 * 1024);
@@ -363,8 +334,6 @@ describe('googleDrive', () => {
         version: 4,
         exportedAt: 123456,
         tasks: [],
-        lists: [],
-        folders: [],
       };
 
       const newEtag = await uploadDriveBackup('file-123', 'token-abc', payload);
@@ -399,7 +368,6 @@ describe('googleDrive', () => {
             id: 't1',
             title: 'Active',
             notes: '',
-            listId: 'inbox',
             dueAt: null,
             startDate: null,
             priority: 'none',
@@ -417,15 +385,12 @@ describe('googleDrive', () => {
             id: 't2',
             title: 'Deleted task with secret notes',
             notes: 'x'.repeat(200),
-            listId: 'work',
             completionHistory: [100, 200],
             deletedAt: 50,
             createdAt: 10,
             updatedAt: 50,
           },
         ],
-        lists: [{ id: 'inbox', name: 'Inbox', folderId: null, createdAt: 1, updatedAt: 1, deletedAt: null }],
-        folders: [],
       };
 
       await uploadDriveBackup('file-123', 'token-abc', payload);
@@ -441,7 +406,6 @@ describe('googleDrive', () => {
           {
             id: 't1',
             title: 'Active',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 20,
@@ -449,15 +413,12 @@ describe('googleDrive', () => {
           {
             id: 't2',
             title: '',
-            listId: 'work',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 50,
             deletedAt: 50,
           },
         ],
-        lists: [{ id: 'inbox', name: 'Inbox', createdAt: 1, updatedAt: 1 }],
-        folders: [],
       });
     });
 
@@ -485,13 +446,10 @@ describe('googleDrive', () => {
           id: `t-${i}`,
           title: `Task ${i}`,
           notes: bigNote,
-          listId: 'inbox',
           completionHistory: [],
           createdAt: 1,
           updatedAt: 1,
         })),
-        lists: [],
-        folders: [],
       };
       const expectedBody = JSON.stringify(compactSyncData(payload));
       expect(utf8ByteLength(expectedBody)).toBeGreaterThan(SIMPLE_UPLOAD_MAX_BYTES);
@@ -538,13 +496,10 @@ describe('googleDrive', () => {
           id: `t-${i}`,
           title: `Task ${i}`,
           notes: bigNote,
-          listId: 'inbox',
           completionHistory: [],
           createdAt: 1,
           updatedAt: 1,
         })),
-        lists: [],
-        folders: [],
       };
 
       const conflictFetch = vi.fn().mockResolvedValueOnce({
@@ -583,8 +538,6 @@ describe('googleDrive', () => {
         version: 4,
         exportedAt: 123456,
         tasks: [],
-        lists: [],
-        folders: [],
       };
 
       await uploadDriveBackup('file-123', 'token-abc', payload, '"etag-v1"');
@@ -612,8 +565,6 @@ describe('googleDrive', () => {
         version: 4,
         exportedAt: 123456,
         tasks: [],
-        lists: [],
-        folders: [],
       };
 
       await expect(
@@ -634,8 +585,6 @@ describe('googleDrive', () => {
         version: 4,
         exportedAt: 123456,
         tasks: [],
-        lists: [],
-        folders: [],
       };
 
       await expect(
@@ -651,7 +600,6 @@ describe('googleDrive', () => {
           {
             id: 'local-1',
             title: 'Local task',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 20,
@@ -675,8 +623,6 @@ describe('googleDrive', () => {
               version: 4,
               exportedAt: 100,
               tasks: [],
-              lists: [],
-              folders: [],
             }),
         })
         // 3. uploadDriveBackup
@@ -700,7 +646,6 @@ describe('googleDrive', () => {
           {
             id: 'same-1',
             title: 'Same task',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 20,
@@ -725,14 +670,11 @@ describe('googleDrive', () => {
                 {
                   id: 'same-1',
                   title: 'Same task',
-                  listId: 'inbox',
                   completionHistory: [],
                   createdAt: 10,
                   updatedAt: 20,
                 },
               ],
-              lists: [],
-              folders: [],
             }),
         });
       vi.stubGlobal('fetch', mockFetch);
@@ -749,7 +691,6 @@ describe('googleDrive', () => {
           {
             id: 'local-conflict',
             title: 'Local task',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 20,
@@ -768,7 +709,7 @@ describe('googleDrive', () => {
           ok: true,
           status: 200,
           headers: new Headers({ ETag: '"v1"' }),
-          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [], lists: [], folders: [] }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [] }),
         })
         // 3. uploadDriveBackup (1st attempt -> 412 conflict)
         .mockResolvedValueOnce({
@@ -782,7 +723,7 @@ describe('googleDrive', () => {
           ok: true,
           status: 200,
           headers: new Headers({ ETag: '"v2"' }),
-          text: async () => JSON.stringify({ version: 4, exportedAt: 200, tasks: [], lists: [], folders: [] }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 200, tasks: [] }),
         })
         // 5. uploadDriveBackup (2nd attempt retry -> succeeds)
         .mockResolvedValueOnce({
@@ -797,7 +738,7 @@ describe('googleDrive', () => {
       expect(mockFetch).toHaveBeenCalledTimes(5);
     });
 
-    it('automatically prunes tombstones older than 30 days across tasks, lists, and folders and updates local DB and watermark', async () => {
+    it('automatically prunes tombstones older than 30 days and updates local DB and watermark', async () => {
       const now = 1_795_461_688_588;
       vi.useFakeTimers();
       vi.setSystemTime(now);
@@ -811,7 +752,6 @@ describe('googleDrive', () => {
           {
             id: 'active-1',
             title: 'Active Task',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 100,
             updatedAt: now - 1000,
@@ -819,7 +759,6 @@ describe('googleDrive', () => {
           {
             id: 'old-del-task',
             title: '',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 100,
             updatedAt: expiredAt,
@@ -828,19 +767,11 @@ describe('googleDrive', () => {
           {
             id: 'recent-del-task',
             title: '',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 100,
             updatedAt: recentDelAt,
             deletedAt: recentDelAt,
           },
-        ],
-        lists: [
-          { id: 'inbox', name: 'Inbox', createdAt: 1, updatedAt: 1 },
-          { id: 'old-del-list', name: '', createdAt: 1, updatedAt: expiredAt, deletedAt: expiredAt },
-        ],
-        folders: [
-          { id: 'old-del-folder', name: '', createdAt: 1, updatedAt: expiredAt, deletedAt: expiredAt },
         ],
       });
 
@@ -854,7 +785,7 @@ describe('googleDrive', () => {
           ok: true,
           status: 200,
           headers: new Headers({ ETag: '"v1"' }),
-          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [], lists: [], folders: [] }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [] }),
         })
         .mockResolvedValueOnce({
           ok: true,
@@ -870,12 +801,10 @@ describe('googleDrive', () => {
       const uploadedBody = JSON.parse(String((mockFetch.mock.calls[2]?.[1] as RequestInit).body));
       expect(uploadedBody.tombstonesPrunedBefore).toBe(now - TOMBSTONE_TTL_MS);
       expect(uploadedBody.tasks.map((t: Task) => t.id)).toEqual(['active-1', 'recent-del-task']);
-      expect(uploadedBody.lists.map((l: TaskList) => l.id)).toEqual(['inbox']);
-      expect(uploadedBody.folders).toEqual([]);
+      expect(uploadedBody).not.toHaveProperty('lists');
+      expect(uploadedBody).not.toHaveProperty('folders');
 
       expect(Array.from(stores.tasks.keys())).toEqual(['active-1', 'recent-del-task']);
-      expect(Array.from(stores.lists.keys())).toEqual(['inbox']);
-      expect(Array.from(stores.folders.keys())).toEqual([]);
       expect(storage.store.get('tempo_tombstones_pruned_before')).toBe(String(now - TOMBSTONE_TTL_MS));
       expect(storage.store.get('tempo_last_synced_file_id')).toBe('drive-file-123');
     });
@@ -898,7 +827,6 @@ describe('googleDrive', () => {
           {
             id: 'kept-task',
             title: 'Kept',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: 100,
@@ -906,7 +834,6 @@ describe('googleDrive', () => {
           {
             id: 'stale-imported',
             title: 'Old TickTick Completed',
-            listId: 'inbox',
             completionHistory: [50],
             completedAt: 50,
             createdAt: 50,
@@ -915,7 +842,6 @@ describe('googleDrive', () => {
           {
             id: 'offline-edit',
             title: 'Edited Offline',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: lastSyncAt + 5000,
@@ -923,7 +849,6 @@ describe('googleDrive', () => {
           {
             id: 'old-tombstone',
             title: '',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 10,
             updatedAt: pruneAt - 100,
@@ -951,14 +876,11 @@ describe('googleDrive', () => {
                 {
                   id: 'kept-task',
                   title: 'Kept',
-                  listId: 'inbox',
                   completionHistory: [],
                   createdAt: 10,
                   updatedAt: 100,
                 },
               ],
-              lists: [],
-              folders: [],
             }),
         })
         .mockResolvedValueOnce({
@@ -989,7 +911,6 @@ describe('googleDrive', () => {
           {
             id: 'expired-tombstone',
             title: '',
-            listId: 'inbox',
             completionHistory: [],
             createdAt: 1,
             updatedAt: expiredAt,
@@ -1009,7 +930,7 @@ describe('googleDrive', () => {
           ok: true,
           status: 200,
           headers: new Headers({ ETag: '"v1"' }),
-          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [], lists: [], folders: [] }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [] }),
         })
         .mockImplementationOnce(async () => {
           expect(stores.tasks.has('expired-tombstone')).toBe(true);
@@ -1026,7 +947,7 @@ describe('googleDrive', () => {
             ok: true,
             status: 200,
             headers: new Headers({ ETag: '"v2"' }),
-            text: async () => JSON.stringify({ version: 4, exportedAt: 200, tasks: [], lists: [], folders: [] }),
+            text: async () => JSON.stringify({ version: 4, exportedAt: 200, tasks: [] }),
           };
         })
         .mockResolvedValueOnce({

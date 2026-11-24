@@ -12,8 +12,6 @@ const dbMocks = vi.hoisted(() => ({
   cleanupImportedAndTombstones: vi.fn(async () => ({
     removedImportedCompleted: 12,
     purgedTasks: 8,
-    purgedLists: 1,
-    purgedFolders: 0,
     needsSync: false,
   })),
   findImportedCompletedTaskIds: vi.fn(() => []),
@@ -25,21 +23,16 @@ const dbMocks = vi.hoisted(() => ({
   getStorageCleanupPreview: vi.fn(async () => ({
     importedCompletedTasks: 12,
     tombstonedTasks: 8,
-    tombstonedLists: 1,
-    tombstonedFolders: 0,
     activeRemainingTasks: 10,
   })),
   isSampleId: vi.fn(() => false),
   loadSampleTasks: vi.fn(async () => 0),
   repairAndDeduplicateDatabase: vi.fn(async () => ({
     deduplicatedTasks: 0,
-    mergedLists: 0,
     purgedTombstones: 0,
   })),
   db: {
     tasks: { toArray: vi.fn(async () => []) },
-    lists: { toArray: vi.fn(async () => []) },
-    folders: { toArray: vi.fn(async () => []) },
   },
 }));
 
@@ -288,7 +281,9 @@ describe('SettingsPage Backup & Diagnostics', () => {
     const cleanupDialog = view.container.querySelector('[role="alertdialog"]');
     expect(cleanupDialog?.getAttribute('aria-label')).toBe('Clean up storage?');
     expect(cleanupDialog?.textContent).toContain('12 bulk-imported historical completed task(s)');
-    expect(cleanupDialog?.textContent).toContain('9 deleted tombstone record(s) (8 task(s), 1 list(s))');
+    expect(cleanupDialog?.textContent).toContain('8 deleted tombstone record(s)');
+    expect(cleanupDialog?.textContent).not.toContain('list(s)');
+    expect(cleanupDialog?.textContent).not.toContain('folder(s)');
     expect(cleanupDialog?.textContent).toContain('10 active task(s)');
     expect(cleanupDialog?.textContent).toContain('donna@example.com');
     expect(dbMocks.cleanupImportedAndTombstones).not.toHaveBeenCalled();
