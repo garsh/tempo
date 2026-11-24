@@ -3,6 +3,8 @@ import {
   clampTimestamp,
   CLOCK_SKEW_MS,
   compactSyncData,
+  MAX_HISTORY,
+  MAX_SCHEDULE_HISTORY,
   MAX_SYNC_BYTES,
   MAX_SYNC_RECORDS,
   parseSyncPayload,
@@ -49,12 +51,13 @@ describe('parseSyncPayload', () => {
     expect(parsed.tasks.map((t) => t.id)).toEqual(['task-1', 'ok-2']);
   });
 
-  it('caps completion history at 365 entries', () => {
-    const history = Array.from({ length: 400 }, (_, i) => i + 1);
+  it('caps completion history at MAX_HISTORY entries', () => {
+    const count = MAX_HISTORY + 35;
+    const history = Array.from({ length: count }, (_, i) => i + 1);
     const parsed = parseSyncPayload(JSON.stringify({ tasks: [task(10, { completionHistory: history })] }), { now });
-    expect(parsed.tasks[0]?.completionHistory).toHaveLength(365);
+    expect(parsed.tasks[0]?.completionHistory).toHaveLength(MAX_HISTORY);
     expect(parsed.tasks[0]?.completionHistory[0]).toBe(36);
-    expect(parsed.tasks[0]?.completionHistory.at(-1)).toBe(400);
+    expect(parsed.tasks[0]?.completionHistory.at(-1)).toBe(count);
   });
 
   it('rejects a non-array tasks field, missing tasks property, or invalid JSON', () => {
@@ -143,6 +146,32 @@ describe('parseSyncPayload', () => {
         recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks', weekdays: [6] },
       },
     ]);
+  });
+
+  it('keeps the newest MAX_SCHEDULE_HISTORY disjoint segments', () => {
+    const extra = 5;
+    const total = MAX_SCHEDULE_HISTORY + extra;
+    const day = (index: number) => new Date(Date.UTC(2020, 0, 1) + index * 86_400_000).toISOString().slice(0, 10);
+    const scheduleHistory = Array.from({ length: total }, (_, i) => ({
+      startDate: day(i * 2),
+      endDate: day(i * 2),
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+    }));
+    const parsed = parseSyncPayload(
+      JSON.stringify({
+        tasks: [
+          task(10, {
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+            scheduleHistory,
+          }),
+        ],
+      }),
+      { now }
+    );
+    const kept = parsed.tasks[0]?.scheduleHistory;
+    expect(kept).toHaveLength(MAX_SCHEDULE_HISTORY);
+    expect(kept?.[0]?.startDate).toBe(day(extra * 2));
+    expect(kept?.at(-1)?.startDate).toBe(day((total - 1) * 2));
   });
 
   it('raises payload limits to 50 MB and 100,000 records', () => {
@@ -260,33 +289,36 @@ describe('parseSyncPayload', () => {
     expect(parsed).not.toHaveProperty('folders');
   });
 
-  it('retains the newest 365 unique completions regardless of input order or > 1,460 entries', () => {
-    const ascending = Array.from({ length: 2_000 }, (_, i) => i + 1);
+  it('retains the newest MAX_HISTORY unique completions regardless of input order', () => {
+    const count = 40_000;
+    const oldestKept = count - MAX_HISTORY + 1;
+    const ascending = Array.from({ length: count }, (_, i) => i + 1);
+    const descending = [...ascending].reverse();
+    const withDupes = [...ascending, ...ascending.slice(-100)];
+
     const parsedAsc = parseSyncPayload(
       JSON.stringify({ tasks: [task(10, { completionHistory: ascending })] }),
       { now }
     );
-    expect(parsedAsc.tasks[0]?.completionHistory).toHaveLength(365);
-    expect(parsedAsc.tasks[0]?.completionHistory[0]).toBe(1_636);
-    expect(parsedAsc.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+    expect(parsedAsc.tasks[0]?.completionHistory).toHaveLength(MAX_HISTORY);
+    expect(parsedAsc.tasks[0]?.completionHistory[0]).toBe(oldestKept);
+    expect(parsedAsc.tasks[0]?.completionHistory.at(-1)).toBe(count);
 
-    const descending = [...ascending].reverse();
     const parsedDesc = parseSyncPayload(
       JSON.stringify({ tasks: [task(10, { completionHistory: descending })] }),
       { now }
     );
-    expect(parsedDesc.tasks[0]?.completionHistory).toHaveLength(365);
-    expect(parsedDesc.tasks[0]?.completionHistory[0]).toBe(1_636);
-    expect(parsedDesc.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+    expect(parsedDesc.tasks[0]?.completionHistory).toHaveLength(MAX_HISTORY);
+    expect(parsedDesc.tasks[0]?.completionHistory[0]).toBe(oldestKept);
+    expect(parsedDesc.tasks[0]?.completionHistory.at(-1)).toBe(count);
 
-    const withDupes = [...ascending, ...ascending.slice(-100)];
     const parsedDupes = parseSyncPayload(
       JSON.stringify({ tasks: [task(10, { completionHistory: withDupes })] }),
       { now }
     );
-    expect(parsedDupes.tasks[0]?.completionHistory).toHaveLength(365);
-    expect(parsedDupes.tasks[0]?.completionHistory[0]).toBe(1_636);
-    expect(parsedDupes.tasks[0]?.completionHistory.at(-1)).toBe(2_000);
+    expect(parsedDupes.tasks[0]?.completionHistory).toHaveLength(MAX_HISTORY);
+    expect(parsedDupes.tasks[0]?.completionHistory[0]).toBe(oldestKept);
+    expect(parsedDupes.tasks[0]?.completionHistory.at(-1)).toBe(count);
   });
 
   it('parses and clamps tombstonesPrunedBefore when valid and omits invalid values', () => {

@@ -36,6 +36,7 @@ import { newId } from '../domain/id';
 import { computeTopSortOrder } from '../domain/sorting';
 import { recordDiagEvent } from '../domain/diagnostics';
 import { TOMBSTONE_TTL_MS } from '../domain/merge';
+import { MAX_HISTORY } from '../domain/syncPayload';
 import type { NewTaskPosition } from '../prefs/prefs';
 import { getGoogleAccount } from '../sync/googleAccount';
 import { setTombstonesPrunedBefore } from '../sync/syncWatermark';
@@ -518,7 +519,7 @@ function recordSkippedDateUpdates(
     next[d] = ts;
   }
   const entries = Object.entries(next).sort(([a], [b]) => a.localeCompare(b));
-  const capped = entries.length > 365 ? entries.slice(-365) : entries;
+  const capped = entries.length > MAX_HISTORY ? entries.slice(-MAX_HISTORY) : entries;
   return capped.length > 0 ? Object.fromEntries(capped) : undefined;
 }
 
@@ -838,7 +839,7 @@ function capRescheduledDates(map: Record<string, string>): Record<string, string
     .filter(([k, v]) => k !== v)
     .sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return undefined;
-  const capped = entries.length > 365 ? entries.slice(-365) : entries;
+  const capped = entries.length > MAX_HISTORY ? entries.slice(-MAX_HISTORY) : entries;
   return Object.fromEntries(capped);
 }
 
@@ -1498,7 +1499,7 @@ function mergeTaskGroup(group: Task[], now: number): { keeper: Task; dropped: Ta
 
   const mergedHistory = Array.from(historySet)
     .sort((a, b) => a - b)
-    .slice(-365);
+    .slice(-MAX_HISTORY);
   const keeper: Task = {
     ...primary,
     completionHistory: mergedHistory,

@@ -15,9 +15,13 @@ export const MAX_SYNC_RECORDS = 100_000;
 export const MAX_ID_LENGTH = 128;
 export const MAX_TITLE_LENGTH = 2_000;
 export const MAX_NOTES_LENGTH = 10_000;
-export const MAX_HISTORY = 365;
+export const MAX_HISTORY = 36_500;
+/**
+ * Entries inspected in one oversized completionHistory (the two ends of the array).
+ * Stays above MAX_HISTORY so a list at the cap is read in full.
+ */
 const MAX_HISTORY_SCAN = 50_000;
-export const MAX_SCHEDULE_HISTORY = 100;
+export const MAX_SCHEDULE_HISTORY = 10_000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Timestamps further ahead than this are hostile and are rewritten to `now`. */
 export const CLOCK_SKEW_MS = 5 * 60 * 1000;

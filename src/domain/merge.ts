@@ -1,8 +1,6 @@
 import type { Task } from '../types/task';
 import { isWindowPeriodic } from './recurrence';
-
-/** Match the CSV import cap so a hostile history cannot grow without bound. */
-const MAX_MERGED_HISTORY = 365;
+import { MAX_HISTORY } from './syncPayload';
 
 /** Default retention window for soft-delete tombstones before automatic pruning during Drive sync. */
 export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -32,7 +30,7 @@ export function hasExpiredTombstones(
 }
 
 function capTail<T>(items: T[]): T[] {
-  return items.length > MAX_MERGED_HISTORY ? items.slice(-MAX_MERGED_HISTORY) : items;
+  return items.length > MAX_HISTORY ? items.slice(-MAX_HISTORY) : items;
 }
 
 type Mergeable = {

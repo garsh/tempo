@@ -19,8 +19,7 @@ import {
   startOfDay,
   taskOccursOnDate,
 } from './recurrence';
-
-const MAX_SCHEDULE_HISTORY = 100;
+import { MAX_SCHEDULE_HISTORY } from './syncPayload';
 
 function normalizedWeekdays(weekdays: Weekday[] | undefined): string {
   if (!weekdays || weekdays.length === 0) return '';

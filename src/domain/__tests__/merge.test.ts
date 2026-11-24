@@ -4,6 +4,7 @@ import {
   mergeTasks,
   TOMBSTONE_TTL_MS,
 } from '../merge';
+import { MAX_HISTORY } from '../syncPayload';
 import type { Task } from '../../types/task';
 
 describe('Merge & Conflict Resolution Engine', () => {
@@ -65,14 +66,16 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(resolved.completionHistory).toEqual([500, 1500, 2500]);
   });
 
-  it('caps the union of completion history at 365 entries', () => {
-    const history = (start: number) => Array.from({ length: 300 }, (_, i) => start + i);
+  it('caps the union of completion history at MAX_HISTORY entries', () => {
+    const localHistory = Array.from({ length: 30_000 }, (_, i) => 1 + i);
+    const remoteHistory = Array.from({ length: 30_000 }, (_, i) => 20_000 + i);
     const resolved = resolveTaskConflict(
-      { ...baseTask, completionHistory: history(1), updatedAt: 1 },
-      { ...baseTask, completionHistory: history(200), updatedAt: 2 }
+      { ...baseTask, completionHistory: localHistory, updatedAt: 1 },
+      { ...baseTask, completionHistory: remoteHistory, updatedAt: 2 }
     );
-    expect(resolved.completionHistory).toHaveLength(365);
-    expect(resolved.completionHistory.at(-1)).toBe(499);
+    expect(resolved.completionHistory).toHaveLength(MAX_HISTORY);
+    expect(resolved.completionHistory[0]).toBe(49_999 - MAX_HISTORY + 1);
+    expect(resolved.completionHistory.at(-1)).toBe(49_999);
   });
 
   it('unions skippedDates and preserves startDate across conflicts', () => {
