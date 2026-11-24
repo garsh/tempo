@@ -33,6 +33,16 @@ export function summarizeAccount(
   if (status.phase === 'error' || Boolean(status.lastError)) {
     return { title, subtitle: 'Sync failed — tap to fix', warn: true };
   }
+  if (status.authPrompt) {
+    return {
+      title,
+      subtitle:
+        status.authPrompt.reason === 'popup_blocked_interactive'
+          ? 'Popups blocked — allow & tap to sync'
+          : 'Sync paused — tap to reconnect',
+      warn: true,
+    };
+  }
   if (!hasClientId && !account) return { title, subtitle: 'Sign in to sync with Drive', warn: true };
   if (!status.lastSyncedAt) return { title, subtitle: 'Tap to sign in & sync', warn: true };
   return {

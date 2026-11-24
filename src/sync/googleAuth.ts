@@ -15,8 +15,9 @@ declare global {
             }) => void;
             error_callback?: (err: { type?: string; message?: string }) => void;
             prompt?: string;
+            hint?: string;
           }) => {
-            requestAccessToken: (overrideConfig?: { prompt?: string }) => void;
+            requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
           };
           /** Present when the GIS script has loaded. Revokes an access token. */
           revoke?: (accessToken: string, done: () => void) => void;
@@ -159,6 +160,44 @@ export function loadGoogleScript(): Promise<void> {
 
 export type TokenRequestMode = 'interactive' | 'silent';
 
+export type AuthErrorCode =
+  | 'popup_failed_to_open'
+  | 'popup_closed'
+  | 'interaction_required'
+  | 'unknown';
+
+const POPUP_BLOCKED_RE = /popup_failed_to_open|failed to open popup/i;
+const INTERACTION_ERROR_RE =
+  /interaction_required|login_required|consent_required|access_denied|user_logged_out|popup_closed|user_closed/i;
+
+export class GoogleAuthError extends Error {
+  readonly code: AuthErrorCode;
+
+  constructor(message: string, code: AuthErrorCode) {
+    super(message);
+    this.name = 'GoogleAuthError';
+    this.code = code;
+  }
+}
+
+export function isPopupBlockedError(err: unknown): boolean {
+  if (err instanceof GoogleAuthError) return err.code === 'popup_failed_to_open';
+  const message = err instanceof Error ? err.message : String(err);
+  return POPUP_BLOCKED_RE.test(message);
+}
+
+export function isAuthInteractionError(err: unknown): boolean {
+  if (err instanceof GoogleAuthError) {
+    return err.code === 'interaction_required' || err.code === 'popup_closed';
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return INTERACTION_ERROR_RE.test(message);
+}
+
+export function isGoogleScriptLoaded(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.google?.accounts?.oauth2);
+}
+
 /**
  * Request a Drive AppData access token.
  * - interactive: may show Google consent UI
@@ -167,7 +206,8 @@ export type TokenRequestMode = 'interactive' | 'silent';
  */
 export function requestGoogleAccessToken(
   clientId: string,
-  mode: TokenRequestMode = 'interactive'
+  mode: TokenRequestMode = 'interactive',
+  opts: { hint?: string } = {}
 ): Promise<string> {
   const cached = getCachedAccessToken();
   if (cached) return Promise.resolve(cached);
@@ -185,7 +225,12 @@ export function requestGoogleAccessToken(
         callback: (resp) => {
           if (resp.error) {
             clearStoredToken();
-            reject(new Error(resp.error));
+            reject(
+              new GoogleAuthError(
+                resp.error,
+                INTERACTION_ERROR_RE.test(resp.error) ? 'interaction_required' : 'unknown'
+              )
+            );
           } else if (resp.access_token) {
             storeAccessToken(resp.access_token, resp.expires_in);
             resolve(resp.access_token);
@@ -194,12 +239,26 @@ export function requestGoogleAccessToken(
           }
         },
         error_callback: (err) => {
-          reject(new Error(err?.message || err?.type || 'Token request failed'));
+          const rawMessage = err?.message || err?.type || 'Token request failed';
+          if (err?.type === 'popup_failed_to_open' || POPUP_BLOCKED_RE.test(rawMessage)) {
+            reject(
+              new GoogleAuthError(
+                err?.message || 'Failed to open popup window',
+                'popup_failed_to_open'
+              )
+            );
+          } else if (err?.type === 'popup_closed') {
+            reject(new GoogleAuthError(rawMessage, 'popup_closed'));
+          } else {
+            reject(new GoogleAuthError(rawMessage, 'unknown'));
+          }
         },
       });
 
       if (mode === 'silent') {
-        client.requestAccessToken({ prompt: '' });
+        client.requestAccessToken(opts.hint ? { prompt: '', hint: opts.hint } : { prompt: '' });
+      } else if (opts.hint) {
+        client.requestAccessToken({ prompt: '', hint: opts.hint });
       } else {
         client.requestAccessToken();
       }
@@ -214,28 +273,30 @@ function browserIsOffline(): boolean {
 }
 
 /**
- * Prefer the in-memory token; otherwise try silent refresh, then optional interactive.
+ * Prefer the in-memory token; otherwise request silently or interactively.
+ * Interactive requests run synchronously once the GIS script is loaded so
+ * browser user-gesture activation is preserved for OAuth popups.
  * Offline reloads fail soft with AuthOfflineError so the cached account stays put.
  */
 export async function ensureGoogleAccessToken(
   clientId: string,
-  opts: { allowInteractive?: boolean } = {}
+  opts: { allowInteractive?: boolean; hint?: string } = {}
 ): Promise<string> {
   const cached = getCachedAccessToken();
   if (cached) return cached;
 
   if (browserIsOffline()) throw new AuthOfflineError();
 
-  await loadGoogleScript();
-  try {
-    return await requestGoogleAccessToken(clientId, 'silent');
-  } catch (silentErr) {
-    if (!opts.allowInteractive || browserIsOffline()) {
-      if (browserIsOffline()) throw new AuthOfflineError();
-      throw silentErr;
-    }
-    return requestGoogleAccessToken(clientId, 'interactive');
+  if (!isGoogleScriptLoaded()) {
+    await loadGoogleScript();
+    if (browserIsOffline()) throw new AuthOfflineError();
   }
+
+  if (opts.allowInteractive) {
+    return requestGoogleAccessToken(clientId, 'interactive', { hint: opts.hint });
+  }
+
+  return requestGoogleAccessToken(clientId, 'silent', { hint: opts.hint });
 }
 
 function broadcastSignOut(): void {

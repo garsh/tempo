@@ -19,10 +19,15 @@ describe('autoSync', () => {
     vi.stubGlobal('localStorage', createMockStorage());
     vi.stubGlobal('sessionStorage', createMockStorage());
     vi.clearAllMocks();
+    googleAuth.clearStoredToken();
+    autoSync.clearSyncAuthPrompt();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
+    autoSync.clearSyncAuthPrompt();
+    googleAuth.clearStoredToken();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -116,5 +121,84 @@ describe('autoSync', () => {
     vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('');
     const result = await autoSync.runDriveSync({ force: true });
     expect(result).toBeNull();
+  });
+
+  it('handles background popup_failed_to_open without storing lastError, clears stale error, and pauses repeat background popups', async () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    vi.spyOn(googleAuth, 'loadGoogleScript').mockResolvedValue();
+    const tokenSpy = vi
+      .spyOn(googleAuth, 'ensureGoogleAccessToken')
+      .mockRejectedValue(
+        new googleAuth.GoogleAuthError('Failed to open popup window', 'popup_failed_to_open')
+      );
+    autoSync.setAutoSyncEnabled(true);
+    autoSync.recordSyncError('Failed to open popup window');
+
+    const listener = vi.fn();
+    const unsubscribe = autoSync.subscribeSyncStatusChange(listener);
+    try {
+      const first = await autoSync.runDriveSync();
+      expect(first).toBeNull();
+      expect(autoSync.getLastSyncError()).toBeNull();
+      expect(autoSync.getSyncAuthPrompt()).toEqual({
+        reason: 'popup_blocked',
+        dismissed: false,
+      });
+      expect(listener).toHaveBeenCalled();
+
+      // Subsequent background sync must not keep retrying popups while authPrompt is active
+      const second = await autoSync.runDriveSync();
+      expect(second).toBeNull();
+      expect(tokenSpy).toHaveBeenCalledTimes(1);
+
+      // Dismissing hides the toast but continues to suppress background popup attempts
+      autoSync.dismissSyncAuthPrompt();
+      expect(autoSync.getSyncAuthPrompt()).toEqual({
+        reason: 'popup_blocked',
+        dismissed: true,
+      });
+      await autoSync.runDriveSync();
+      expect(tokenSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('sets popup_blocked_interactive on interactive popup block and clears authPrompt once interactive sync succeeds', async () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    vi.spyOn(googleAuth, 'loadGoogleScript').mockResolvedValue();
+    const tokenSpy = vi
+      .spyOn(googleAuth, 'ensureGoogleAccessToken')
+      .mockRejectedValueOnce(
+        new googleAuth.GoogleAuthError('Failed to open popup window', 'popup_failed_to_open')
+      );
+
+    await expect(
+      autoSync.runDriveSync({ allowInteractive: true, force: true })
+    ).rejects.toMatchObject({ code: 'popup_failed_to_open' });
+
+    expect(autoSync.getLastSyncError()).toBeNull();
+    expect(autoSync.getSyncAuthPrompt()).toEqual({
+      reason: 'popup_blocked_interactive',
+      dismissed: false,
+    });
+
+    tokenSpy.mockResolvedValueOnce('fresh-token');
+    vi.spyOn(googleAccount, 'fetchDriveAccount').mockResolvedValue(null);
+    vi.spyOn(googleDrive, 'syncWithGoogleDrive').mockResolvedValue({
+      success: true,
+      tasksCount: 1,
+      listsCount: 1,
+      foldersCount: 0,
+      filtersCount: 0,
+      syncedAt: 555_000,
+    });
+
+    const result = await autoSync.runDriveSync({ allowInteractive: true, force: true });
+    expect(result?.success).toBe(true);
+    expect(autoSync.getSyncAuthPrompt()).toBeNull();
+    expect(autoSync.getLastSyncError()).toBeNull();
   });
 });

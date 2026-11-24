@@ -63,6 +63,59 @@ describe('account summary (drawer header / settings account)', () => {
     });
   });
 
+  it('surfaces authPrompt states while letting syncing and lastError take precedence', () => {
+    expect(
+      summarizeAccount(
+        { email: 'a@b.c' },
+        snap({ phase: 'idle', lastSyncedAt: 1_000, authPrompt: { reason: 'popup_blocked', dismissed: false } }),
+        true
+      )
+    ).toEqual({
+      title: 'a@b.c',
+      subtitle: 'Sync paused — tap to reconnect',
+      warn: true,
+    });
+
+    expect(
+      summarizeAccount(
+        { email: 'a@b.c' },
+        snap({
+          phase: 'idle',
+          lastSyncedAt: 1_000,
+          authPrompt: { reason: 'popup_blocked_interactive', dismissed: false },
+        }),
+        true
+      )
+    ).toEqual({
+      title: 'a@b.c',
+      subtitle: 'Popups blocked — allow & tap to sync',
+      warn: true,
+    });
+
+    expect(
+      summarizeAccount(
+        { email: 'a@b.c' },
+        snap({
+          phase: 'syncing',
+          authPrompt: { reason: 'popup_blocked', dismissed: false },
+        }),
+        true
+      ).subtitle
+    ).toBe('Syncing…');
+
+    expect(
+      summarizeAccount(
+        { email: 'a@b.c' },
+        snap({
+          phase: 'idle',
+          lastError: 'Network error',
+          authPrompt: { reason: 'popup_blocked', dismissed: false },
+        }),
+        true
+      ).subtitle
+    ).toBe('Sync failed — tap to fix');
+  });
+
   it('formats relative times', () => {
     expect(formatAgo(1000, 1000 + 30_000)).toBe('just now');
     expect(formatAgo(0, 3 * 3600_000)).toBe('3h ago');

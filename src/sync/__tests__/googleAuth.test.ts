@@ -17,10 +17,14 @@ const mockSessionStorage = createStorage();
 
 import {
   clearStoredToken,
+  ensureGoogleAccessToken,
   getCachedAccessToken,
   getCustomClientId,
   getDefaultClientId,
   getStoredClientId,
+  isAuthInteractionError,
+  isPopupBlockedError,
+  requestGoogleAccessToken,
   setStoredClientId,
   signOutGoogleSession,
   storeAccessToken,
@@ -105,5 +109,111 @@ describe('googleAuth client id resolution', () => {
     // Storing a token with 300s (5 minutes) remaining lifetime
     storeAccessToken('long-lived-token', 300);
     expect(getCachedAccessToken()).toBe('long-lived-token');
+  });
+
+  it('classifies popup_failed_to_open, popup_closed, and interaction_required errors', async () => {
+    expect(isPopupBlockedError(new Error('Failed to open popup window'))).toBe(true);
+    expect(isPopupBlockedError(new Error('popup_failed_to_open'))).toBe(true);
+    expect(isAuthInteractionError(new Error('interaction_required'))).toBe(true);
+    expect(isAuthInteractionError(new Error('popup_closed'))).toBe(true);
+
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const initTokenClient = vi.fn(
+      (config: {
+        callback: (resp: { access_token?: string; error?: string }) => void;
+        error_callback?: (err: { type?: string; message?: string }) => void;
+      }) => ({
+        requestAccessToken: vi.fn((override?: { prompt?: string }) => {
+          if (override?.prompt === '') {
+            config.error_callback?.({
+              type: 'popup_failed_to_open',
+              message: 'Failed to open popup window',
+            });
+          } else {
+            config.callback({ error: 'interaction_required' });
+          }
+        }),
+      })
+    );
+
+    vi.stubGlobal('window', { google: { accounts: { oauth2: { initTokenClient } } } });
+    try {
+      await expect(
+        requestGoogleAccessToken('client.apps.googleusercontent.com', 'silent')
+      ).rejects.toMatchObject({
+        name: 'GoogleAuthError',
+        code: 'popup_failed_to_open',
+      });
+
+      await expect(
+        requestGoogleAccessToken('client.apps.googleusercontent.com', 'interactive')
+      ).rejects.toMatchObject({
+        name: 'GoogleAuthError',
+        code: 'interaction_required',
+      });
+
+      initTokenClient.mockImplementationOnce((config) => ({
+        requestAccessToken: vi.fn(() => config.error_callback?.({ type: 'popup_closed' })),
+      }));
+      await expect(
+        requestGoogleAccessToken('client.apps.googleusercontent.com', 'interactive')
+      ).rejects.toMatchObject({
+        name: 'GoogleAuthError',
+        code: 'popup_closed',
+      });
+    } finally {
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+    }
+  });
+
+  it('invokes requestAccessToken synchronously on interactive calls when GIS is already loaded', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const requestAccessToken = vi.fn();
+    const initTokenClient = vi.fn(
+      (config: {
+        callback: (resp: { access_token?: string; expires_in?: number }) => void;
+      }) => {
+        requestAccessToken.mockImplementation(() => {
+          queueMicrotask(() => {
+            config.callback({ access_token: 'fresh-token', expires_in: 3600 });
+          });
+        });
+        return { requestAccessToken };
+      }
+    );
+
+    vi.stubGlobal('window', { google: { accounts: { oauth2: { initTokenClient } } } });
+    try {
+      const promiseWithHint = ensureGoogleAccessToken('client.apps.googleusercontent.com', {
+        allowInteractive: true,
+        hint: 'user@example.com',
+      });
+      expect(requestAccessToken).toHaveBeenCalledTimes(1);
+      expect(requestAccessToken).toHaveBeenCalledWith({
+        prompt: '',
+        hint: 'user@example.com',
+      });
+      await expect(promiseWithHint).resolves.toBe('fresh-token');
+
+      clearStoredToken();
+      requestAccessToken.mockClear();
+
+      const promiseNoHint = ensureGoogleAccessToken('client.apps.googleusercontent.com', {
+        allowInteractive: true,
+      });
+      expect(requestAccessToken).toHaveBeenCalledTimes(1);
+      expect(requestAccessToken).toHaveBeenCalledWith();
+      await expect(promiseNoHint).resolves.toBe('fresh-token');
+    } finally {
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+    }
   });
 });

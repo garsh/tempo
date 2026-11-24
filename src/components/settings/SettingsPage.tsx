@@ -34,12 +34,15 @@ import {
   getDefaultClientId,
   getCustomClientId,
   getStoredClientId,
+  isPopupBlockedError,
   isValidGoogleClientId,
   setStoredClientId,
   signOutGoogleSession,
 } from '../../sync/googleAuth';
 import {
+  clearSyncAuthPrompt,
   clearSyncError,
+  formatSyncErrorMessage,
   isAutoSyncEnabled,
   runDriveSync,
   setAutoSyncEnabled,
@@ -365,7 +368,11 @@ function AccountPage({
     } catch (err: unknown) {
       setIsSyncing(false);
       onSyncStatusChange();
-      setStatus({ type: 'error', message: `Sync failed: ${err instanceof Error ? err.message : String(err)}` });
+      const message = formatSyncErrorMessage(err);
+      setStatus({
+        type: 'error',
+        message: isPopupBlockedError(err) ? message : `Sync failed: ${message}`,
+      });
     }
   };
 
@@ -373,6 +380,7 @@ function AccountPage({
     void signOutGoogleSession();
     setGoogleAccount(null);
     clearSyncWatermarkState();
+    clearSyncAuthPrompt();
     clearSyncError();
     setStatus({ type: 'success', message: 'Signed out on this device. Local tasks are kept.' });
     onSyncStatusChange();
@@ -409,6 +417,22 @@ function AccountPage({
         >
           <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
           <span className="flex-1 break-words">Last sync failed: {syncStatus.lastError}</span>
+        </div>
+      )}
+
+      {syncStatus.authPrompt && !syncStatus.lastError && !isSyncing && !suppressLastErrorBanner && (
+        <div
+          role="status"
+          className="mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] border border-amber-500/30 bg-amber-500/10 text-tt-icon-amber"
+        >
+          <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
+          <span className="flex-1 break-words">
+            {syncStatus.authPrompt.reason === 'popup_blocked_interactive'
+              ? 'Your browser blocked the Google sign-in popup. Allow popups for this site in your browser settings, then tap Sync Now below.'
+              : syncStatus.authPrompt.reason === 'popup_blocked'
+                ? 'Background sync is paused because your browser blocked the popup window. Tap Sync Now below to reconnect.'
+                : 'Google Drive sign-in expired. Tap Sync Now below to reconnect.'}
+          </span>
         </div>
       )}
 
@@ -898,7 +922,7 @@ function DataDiagnosticsPage({
           return `Staged cleanup of ${summary}. It will finish purging on your next Google Drive sync.`;
         } catch (syncErr: unknown) {
           onSyncStatusChange();
-          const reason = syncErr instanceof Error ? syncErr.message : String(syncErr);
+          const reason = formatSyncErrorMessage(syncErr);
           return `Staged cleanup of ${summary}; Drive sync failed (${reason}). Tombstones will finish purging on your next successful Drive sync.`;
         }
       },

@@ -83,6 +83,7 @@ import { DeleteConfirmDialog } from './components/dialogs/DeleteConfirmDialog';
 import { MoveRecurringDialog } from './components/dialogs/MoveRecurringDialog';
 import { ShortcutsHelpDialog } from './components/dialogs/ShortcutsHelpDialog';
 import { InstallPrompt } from './components/InstallPrompt';
+import { SyncReconnectPrompt } from './components/SyncReconnectPrompt';
 import { UndoToast } from './components/ui/UndoToast';
 import { TaskGroupHeader } from './components/shell/TaskGroupHeader';
 import { DesktopSidebar } from './components/shell/DesktopSidebar';
@@ -289,7 +290,13 @@ export function App() {
   const liveTasks = useLiveQuery(() => db.tasks.toArray(), []);
   const allTasks = liveTasks ?? initialTasks ?? EMPTY_TASKS;
 
-  const { status: syncStatus, refreshStatus: refreshSyncStatus, scheduleSync } = useAutoSync();
+  const {
+    status: syncStatus,
+    syncNow,
+    refreshStatus: refreshSyncStatus,
+    scheduleSync,
+    dismissAuthPrompt,
+  } = useAutoSync();
   const activeTasks = useMemo(() => allTasks.filter((t) => !t.deletedAt), [allTasks]);
 
   const displayedTasks = useMemo(() => {
@@ -1123,6 +1130,7 @@ export function App() {
                 ? 'error'
                 : syncStatus.phase
           }
+          syncNeedsAuth={Boolean(syncStatus.authPrompt)}
           onSelectCalendar={() => {
             setIsSearchOpen(false);
             setIsRecurringOpen(false);
@@ -1569,6 +1577,12 @@ export function App() {
       </div>
 
       <UndoToast toast={undoToast} onDismiss={dismissUndoToast} />
+      <SyncReconnectPrompt
+        authPrompt={syncStatus.authPrompt}
+        hidden={isSettingsModalOpen || Boolean(undoToast)}
+        onReconnect={() => syncNow(true)}
+        onDismiss={() => dismissAuthPrompt?.()}
+      />
 
       {/* FAB (Portrait, Compact Landscape, Medium Split) */}
       {!layout.isDesktop && (

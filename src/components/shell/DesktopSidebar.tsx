@@ -17,6 +17,7 @@ interface DesktopSidebarProps {
   tasksDotTone: 'overdue' | 'amber' | 'green' | null;
   tasksCount: number;
   syncPhase: SyncStatusSnapshot['phase'];
+  syncNeedsAuth?: boolean;
   onSelectCalendar: () => void;
   onSelectTasks: () => void;
   onSelectRecurring: () => void;
@@ -42,6 +43,7 @@ export function DesktopSidebar({
   tasksDotTone,
   tasksCount,
   syncPhase,
+  syncNeedsAuth = false,
   onSelectCalendar,
   onSelectTasks,
   onSelectRecurring,
@@ -219,11 +221,15 @@ export function DesktopSidebar({
         >
           <span className="relative shrink-0">
             <Settings className="w-[18px] h-[18px] text-tt-secondary" strokeWidth={1.9} />
-            {(syncPhase === 'error' || syncPhase === 'syncing') && (
+            {(syncPhase === 'error' || syncPhase === 'syncing' || syncNeedsAuth) && (
               <span
                 aria-hidden="true"
                 className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-tt-sidebar ${
-                  syncPhase === 'error' ? 'bg-tt-overdue' : 'bg-tt-blue animate-pulse'
+                  syncPhase === 'error'
+                    ? 'bg-tt-overdue'
+                    : syncPhase === 'syncing'
+                      ? 'bg-tt-blue animate-pulse'
+                      : 'bg-tt-icon-amber'
                 }`}
               />
             )}
