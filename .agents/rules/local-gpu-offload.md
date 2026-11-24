@@ -25,4 +25,9 @@ You have access to the `local-gpu-subagent` MCP server backed by a local RTX 507
    - Use `local_analyze_git_diff(repo_path="~/work/tempo", task=..., ref_range="HEAD", paths="")` for working-tree, staged (`"--cached"`), commit-range (`"a..b"`), or single-commit (`"<sha>^!"`) diffs.
    - Use `local_git_history(repo_path="~/work/tempo", task=..., query="", paths="")` instead of native `git log`, `git show`, or `git log -S`.
 6. **Use `local_run_and_summarize(command, question, cwd="~/work/tempo")`** for read-only informational commands with large outputs (e.g., `modern-web-guidance` searches, logs, CSV/JSON inspections).
-7. **Cloud-Only Fallback (Mandatory):** If any `local-gpu-subagent` tool returns `[LOCAL LLM UNAVAILABLE: ...]`, immediately continue using native cloud tools (`read_file`, `run_command`, `write_file`, `edit_file`, and any raw grep/diff/log output already returned in the fallback payload) so the session always succeeds without blocking.
+7. **Cloud-Only Fallback (Mandatory):**
+   - **Do NOT silently fall back to cloud-only** the first time in a session that a `local-gpu-subagent` tool returns `[LOCAL LLM UNAVAILABLE: ...]`.
+   - Instead, **stop and ask the user** (using `ask_question` when available, or plain text in CLI sessions) whether they want to:
+     1. **Start/restart the local LLM server** (`192.168.253.103:8080`) — once they confirm it is up, call `local_check_health()` to verify connectivity and retry; or
+     2. **Continue cloud-only for the rest of this session** — once approved, proceed directly with native tools (`read_file`, `run_command`, `write_file`, `edit_file`, and any fallback payload already returned) without asking again in that session.
+   - Non-LLM fast paths (passing `local_run_and_diagnose` runs on `exit 0`, small-file `local_inspect_file`, short outputs) continue working without interrupting the user.
