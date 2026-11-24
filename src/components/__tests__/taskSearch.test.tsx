@@ -480,7 +480,7 @@ describe('TaskSearchView & App Search integration', () => {
 
     // Ended recurring task has disabled checkbox and disabled Skip swipe action
     const cards = Array.from(
-      view.container.querySelectorAll<HTMLDivElement>('[data-testid="search-results"] [role="button"]')
+      view.container.querySelectorAll<HTMLDivElement>('[data-testid="search-results"] [data-testid="task-card"]')
     );
     const endedCard = cards.find((c) => c.textContent?.includes('Filter seasonal ended'))!;
     const endedCheckbox = endedCard.querySelector<HTMLButtonElement>('button[title="Mark incomplete"]');

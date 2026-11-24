@@ -60,8 +60,6 @@ vi.mock('../../db/db', () => ({
     openTasks: 0,
     completedTasks: 0,
     activeTasks: 0,
-    customLists: 0,
-    folders: 0,
   })),
   clearSampleTasks: vi.fn(async () => 0),
   isSampleId: vi.fn(() => false),
@@ -465,9 +463,9 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
 
     const labels = Array.from(view.container.querySelectorAll('label')).map((l) => l.textContent?.trim());
     expect(labels).toEqual(
-      expect.arrayContaining(['Theme', 'New task placement', 'Week starts on', 'Time format', 'Seasons'])
+      expect.arrayContaining(['Theme', 'New task placement', 'Week starts on', 'Seasons'])
     );
-    expect(view.container.querySelectorAll('select')).toHaveLength(5);
+    expect(view.container.querySelectorAll('select')).toHaveLength(4);
 
     const nav = view.container.querySelector('nav[aria-label="Settings categories"]')!;
     const navButtons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).map((b) =>

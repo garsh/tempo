@@ -1,20 +1,51 @@
 import {
   AuthOfflineError,
+  clearStoredToken,
   ensureGoogleAccessToken,
   getAuthGeneration,
   getCachedAccessToken,
   getStoredClientId,
   isAuthInteractionError,
-  isGoogleScriptLoaded,
   isPopupBlockedError,
-  loadGoogleScript,
 } from './googleAuth';
-import { syncWithGoogleDrive, type DriveSyncResult } from './googleDrive';
+import {
+  DriveAuthError,
+  SyncCancelledError,
+  syncWithGoogleDrive,
+  type DriveSyncResult,
+} from './googleDrive';
 import { fetchDriveAccount, getGoogleAccount, setGoogleAccount, type GoogleAccount } from './googleAccount';
 
 const LAST_SYNC_KEY = 'tempo_last_synced_at';
 const AUTO_SYNC_KEY = 'tempo_auto_sync_enabled';
 const LAST_ERROR_KEY = 'tempo_last_sync_error';
+
+function readStorage(key: string): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode / unavailable storage */
+  }
+}
+
+function removeStorage(key: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(key);
+  } catch {
+    /* private mode / unavailable storage */
+  }
+}
 
 /** Default interval for background sync while the app is open. */
 export const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
@@ -91,7 +122,7 @@ export function formatSyncErrorMessage(err: unknown): string {
 }
 
 export function isAutoSyncEnabled(): boolean {
-  const v = localStorage.getItem(AUTO_SYNC_KEY);
+  const v = readStorage(AUTO_SYNC_KEY);
   // Default on when client id exists; explicit '0' disables
   if (v === '0') return false;
   if (v === '1') return true;
@@ -99,33 +130,33 @@ export function isAutoSyncEnabled(): boolean {
 }
 
 export function setAutoSyncEnabled(enabled: boolean): void {
-  localStorage.setItem(AUTO_SYNC_KEY, enabled ? '1' : '0');
+  writeStorage(AUTO_SYNC_KEY, enabled ? '1' : '0');
 }
 
 export function getLastSyncedAt(): number | null {
-  const raw = localStorage.getItem(LAST_SYNC_KEY);
+  const raw = readStorage(LAST_SYNC_KEY);
   if (!raw) return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
 
 export function getLastSyncError(): string | null {
-  return localStorage.getItem(LAST_ERROR_KEY);
+  return readStorage(LAST_ERROR_KEY);
 }
 
 export function recordSyncSuccess(syncedAt: number): void {
-  localStorage.setItem(LAST_SYNC_KEY, String(syncedAt));
-  localStorage.removeItem(LAST_ERROR_KEY);
+  writeStorage(LAST_SYNC_KEY, String(syncedAt));
+  removeStorage(LAST_ERROR_KEY);
   notifySyncListeners();
 }
 
 export function recordSyncError(message: string): void {
-  localStorage.setItem(LAST_ERROR_KEY, message);
+  writeStorage(LAST_ERROR_KEY, message);
   notifySyncListeners();
 }
 
 export function clearSyncError(): void {
-  localStorage.removeItem(LAST_ERROR_KEY);
+  removeStorage(LAST_ERROR_KEY);
   notifySyncListeners();
 }
 
@@ -141,17 +172,31 @@ export function readSyncStatusSnapshot(phase: SyncPhase = 'idle'): SyncStatusSna
 }
 
 /** Cache the Drive account (email/avatar) for the drawer + Settings. Never throws. */
-export async function refreshGoogleAccount(accessToken: string): Promise<void> {
+export async function refreshGoogleAccount(
+  accessToken: string,
+  isCancelled?: () => boolean
+): Promise<void> {
   const account = await fetchDriveAccount(accessToken);
-  if (account) setGoogleAccount(account);
+  if (account && !isCancelled?.()) setGoogleAccount(account);
 }
 
 let inflight: Promise<DriveSyncResult | null> | null = null;
-let queuedSync = false;
+let queuedOpts: { allowInteractive?: boolean; force?: boolean } | null = null;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let accountRefreshedThisSession = false;
 
 export function isDriveSyncInflight(): boolean {
   return inflight !== null;
+}
+
+/** Cancel any pending debounced or queued background sync (e.g. on sign-out). */
+export function cancelPendingAutoSync(): void {
+  if (syncDebounceTimer) {
+    clearTimeout(syncDebounceTimer);
+    syncDebounceTimer = null;
+  }
+  queuedOpts = null;
+  accountRefreshedThisSession = false;
 }
 
 const QUIET_SYNC_ERROR_RE =
@@ -184,6 +229,7 @@ export function triggerDebouncedSync(delayMs = 2000): void {
   if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
   syncDebounceTimer = setTimeout(() => {
     syncDebounceTimer = null;
+    if (!canAutoSync()) return;
     void runDriveSync();
   }, delayMs);
 }
@@ -199,39 +245,70 @@ export async function runDriveSync(opts: {
 } = {}): Promise<DriveSyncResult | null> {
   const clientId = getStoredClientId();
   if (!clientId) return null;
+  if (!opts.allowInteractive && !getGoogleAccount()) return null;
   if (!opts.force && !isAutoSyncEnabled() && !opts.allowInteractive) return null;
   if (!opts.allowInteractive && !getCachedAccessToken() && syncAuthPrompt) return null;
 
+  const startGen = getAuthGeneration();
   if (inflight) {
-    queuedSync = true;
+    if (opts.allowInteractive) {
+      const prior = await inflight.catch(() => null);
+      if (prior?.success) return prior;
+      if (getAuthGeneration() !== startGen) return null;
+      return runDriveSync(opts);
+    }
+    queuedOpts = {
+      allowInteractive: Boolean(queuedOpts?.allowInteractive || opts.allowInteractive),
+      force: Boolean(queuedOpts?.force || opts.force),
+    };
     return inflight;
   }
 
   inflight = (async () => {
     const generation = getAuthGeneration();
     const signedOut = () => generation !== getAuthGeneration();
-    try {
-      if (!isGoogleScriptLoaded()) {
-        await loadGoogleScript();
+
+    const syncOnce = async (token: string): Promise<DriveSyncResult | null> => {
+      if (!getGoogleAccount()) {
+        await refreshGoogleAccount(token, signedOut);
         if (signedOut()) return null;
       }
-      const token = await ensureGoogleAccessToken(clientId, {
-        allowInteractive: opts.allowInteractive === true,
-        hint: getGoogleAccount()?.email,
-      });
-      if (signedOut()) return null;
-      await refreshGoogleAccount(token);
-      if (signedOut()) return null;
-      const result = await syncWithGoogleDrive(token);
+      const result = await syncWithGoogleDrive(token, { isCancelled: signedOut });
       if (signedOut()) return null;
       if (result.success) {
         syncAuthPrompt = null;
         recordSyncSuccess(result.syncedAt);
-        await refreshGoogleAccount(token);
+        if (!accountRefreshedThisSession) {
+          accountRefreshedThisSession = true;
+          void refreshGoogleAccount(token, signedOut);
+        }
       }
       return result;
-    } catch (err) {
+    };
+
+    try {
+      let token = await ensureGoogleAccessToken(clientId, {
+        allowInteractive: opts.allowInteractive === true,
+        hint: getGoogleAccount()?.email,
+      });
       if (signedOut()) return null;
+
+      try {
+        return await syncOnce(token);
+      } catch (err) {
+        if (err instanceof DriveAuthError && !signedOut()) {
+          clearStoredToken();
+          token = await ensureGoogleAccessToken(clientId, {
+            allowInteractive: opts.allowInteractive === true,
+            hint: getGoogleAccount()?.email,
+          });
+          if (signedOut()) return null;
+          return await syncOnce(token);
+        }
+        throw err;
+      }
+    } catch (err) {
+      if (err instanceof SyncCancelledError || signedOut()) return null;
       const message = err instanceof Error ? err.message : String(err);
       if (!opts.allowInteractive) {
         if (isPopupBlockedError(err)) {
@@ -278,15 +355,19 @@ export async function runDriveSync(opts: {
       throw err;
     } finally {
       inflight = null;
-      if (queuedSync) {
-        queuedSync = false;
-        if (!syncAuthPrompt) {
+      const nextQueued = queuedOpts;
+      queuedOpts = null;
+      notifySyncListeners();
+      if (nextQueued && !signedOut()) {
+        if (nextQueued.force || nextQueued.allowInteractive) {
+          void runDriveSync(nextQueued);
+        } else if (!syncAuthPrompt) {
           triggerDebouncedSync(1000);
         }
       }
-      notifySyncListeners();
     }
   })();
 
+  notifySyncListeners();
   return inflight;
 }

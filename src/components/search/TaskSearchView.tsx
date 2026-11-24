@@ -16,6 +16,8 @@ import {
   searchTasks,
   type SearchResultItem,
 } from '../../domain/search';
+import { parseDate } from '../../domain/recurrence';
+import { useTodayKey } from '../../hooks/useTodayKey';
 import { TaskCard } from '../TaskCard';
 import { TaskGroupHeader } from '../shell/TaskGroupHeader';
 
@@ -68,6 +70,8 @@ export function TaskSearchView({
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const resolvedInputRef = inputRef ?? localInputRef;
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const rowRefCallbacksRef = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+  const itemsByKeyRef = useRef(new Map<string, SearchResultItem>());
 
   const [completedCollapsed, setCompletedCollapsed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -75,14 +79,15 @@ export function TaskSearchView({
 
   const deferredQuery = useDeferredValue(query);
   const cacheRef = useRef(createNextOccurrenceCache());
+  const todayKey = useTodayKey();
 
   useEffect(() => {
     resolvedInputRef.current?.focus({ preventScroll: true });
   }, [resolvedInputRef]);
 
   const results = useMemo(
-    () => searchTasks(tasks, deferredQuery, new Date(), cacheRef.current),
-    [tasks, deferredQuery]
+    () => searchTasks(tasks, deferredQuery, parseDate(todayKey), cacheRef.current),
+    [tasks, deferredQuery, todayKey]
   );
 
   const visibleItems = useMemo(
@@ -171,12 +176,35 @@ export function TaskSearchView({
     }
   };
 
-  const registerRowRef = useCallback(
-    (rowKey: string) => (el: HTMLDivElement | null) => {
-      if (el) rowRefs.current.set(rowKey, el);
-      else rowRefs.current.delete(rowKey);
+  const getRowRefCallback = useCallback((rowKey: string) => {
+    let cb = rowRefCallbacksRef.current.get(rowKey);
+    if (!cb) {
+      cb = (el: HTMLDivElement | null) => {
+        if (el) rowRefs.current.set(rowKey, el);
+        else rowRefs.current.delete(rowKey);
+      };
+      rowRefCallbacksRef.current.set(rowKey, cb);
+    }
+    return cb;
+  }, []);
+
+  itemsByKeyRef.current = new Map(
+    visibleItems.map((item) => [`${item.id}::${item.task.dueAt ?? ''}`, item])
+  );
+
+  useEffect(() => {
+    const keep = new Set(visibleItems.map((item) => `${item.status}:${item.id}:${item.task.dueAt ?? ''}`));
+    for (const k of rowRefCallbacksRef.current.keys()) {
+      if (!keep.has(k)) rowRefCallbacksRef.current.delete(k);
+    }
+  }, [visibleItems]);
+
+  const handleSelectRow = useCallback(
+    (task: Task) => {
+      const item = itemsByKeyRef.current.get(`${task.id}::${task.dueAt ?? ''}`);
+      if (item) activateItem(item);
     },
-    []
+    [activateItem]
   );
 
   const trimmedDeferred = deferredQuery.trim();
@@ -188,25 +216,26 @@ export function TaskSearchView({
     const isCompletedItem = item.status === 'completed';
 
     return (
-      <TaskCard
-        key={rowKey}
-        task={item.task}
-        selected={flatIndex === effectiveActiveIndex || (selectedTaskId != null && selectedTaskId === item.id)}
-        showDetails={showDetails}
-        notesSnippet={item.notesSnippet}
-        highlightTokens={results.tokens}
-        reorderEnabled={false}
-        rowRef={registerRowRef(rowKey)}
-        onSelect={() => activateItem(item)}
-        onEdit={item.jumpDateStr ? undefined : onEdit}
-        onComplete={item.completable ? onComplete : NOOP_COMPLETE}
-        onUncomplete={item.completable ? onUncomplete : undefined}
-        onRequestChangeDate={onRequestChangeDate}
-        onRequestLogDate={onRequestLogDate}
-        onRequestSkipOccurrence={isCompletedItem ? undefined : onRequestSkipOccurrence}
-        onRequestDelete={onRequestDelete}
-        onDelete={onDelete}
-      />
+      <div key={rowKey} id={`${inputId}-result-${flatIndex}`}>
+        <TaskCard
+          task={item.task}
+          selected={flatIndex === effectiveActiveIndex || (selectedTaskId != null && selectedTaskId === item.id)}
+          showDetails={showDetails}
+          notesSnippet={item.notesSnippet}
+          highlightTokens={results.tokens}
+          reorderEnabled={false}
+          rowRef={getRowRefCallback(rowKey)}
+          onSelect={handleSelectRow}
+          onEdit={item.jumpDateStr ? undefined : onEdit}
+          onComplete={item.completable ? onComplete : NOOP_COMPLETE}
+          onUncomplete={item.completable ? onUncomplete : undefined}
+          onRequestChangeDate={onRequestChangeDate}
+          onRequestLogDate={onRequestLogDate}
+          onRequestSkipOccurrence={isCompletedItem ? undefined : onRequestSkipOccurrence}
+          onRequestDelete={onRequestDelete}
+          onDelete={onDelete}
+        />
+      </div>
     );
   };
 
@@ -228,7 +257,7 @@ export function TaskSearchView({
             <label htmlFor={inputId} className="sr-only">
               Search tasks
             </label>
-            <div className="flex-1 flex items-center gap-2 min-w-0 h-10 compact-landscape:h-9 px-3 rounded-xl bg-tt-input">
+            <div className="flex-1 flex items-center gap-2 min-w-0 h-10 compact-landscape:h-9 px-3 rounded-xl bg-tt-input focus-within:ring-2 focus-within:ring-tt-blue">
               <Search className="w-4 h-4 shrink-0 text-tt-muted" aria-hidden="true" />
               <input
                 ref={resolvedInputRef}
@@ -238,6 +267,9 @@ export function TaskSearchView({
                 value={query}
                 onChange={(e) => onQueryChange(e.target.value)}
                 onKeyDown={handleInputKeyDown}
+                aria-activedescendant={
+                  effectiveActiveIndex >= 0 ? `${inputId}-result-${effectiveActiveIndex}` : undefined
+                }
                 enterKeyHint="search"
                 autoComplete="off"
                 autoCorrect="off"

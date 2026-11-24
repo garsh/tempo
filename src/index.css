@@ -53,117 +53,51 @@
 
   --tt-blue: #4772fa;
   --tt-blue-hover: #3b63e6;
-  --tt-blue-soft: #e8eefe;
+  --tt-blue-soft: light-dark(#e8eefe, #18213d);
 
   /* App background (mobile page, TickTick light #F2F4F9) */
-  --tt-bg: #f2f4f9;
+  --tt-bg: light-dark(#f2f4f9, #000000);
   /* Panes on desktop (list, detail) */
-  --tt-surface: #ffffff;
+  --tt-surface: light-dark(#ffffff, #0f0f10);
   /* Modals, popovers, sheets, cards */
-  --tt-elevated: #ffffff;
-  --tt-sidebar: #f5f5f7;
-  --tt-rail: #2c2c2e;
-  --tt-border: #e8e8ed;
-  --tt-input: #eef0f5;
-  --tt-hover: rgb(0 0 0 / 0.04);
-  --tt-text: #191919;
-  --tt-secondary: #8e8e93;
-  --tt-muted: #a4a5a8;
+  --tt-elevated: light-dark(#ffffff, #1c1c1e);
+  --tt-sidebar: light-dark(#f5f5f7, #161617);
+  --tt-rail: light-dark(#2c2c2e, #0a0a0a);
+  --tt-border: light-dark(#e8e8ed, #2a2a2d);
+  --tt-input: light-dark(#eef0f5, #1c1c1e);
+  --tt-hover: light-dark(rgb(0 0 0 / 0.04), rgb(255 255 255 / 0.06));
+  --tt-text: light-dark(#191919, #ebebeb);
+  --tt-secondary: light-dark(#59595e, #a1a1a8);
+  --tt-muted: light-dark(#68696e, #8c8c94);
 
-  --tt-overdue: #e03131;
-  --tt-pri-none: #c7c7cc;
+  --tt-overdue: light-dark(#d42626, #f87171);
+  --tt-pri-none: light-dark(#c7c7cc, #5c5c60);
   --tt-success: #34c759;
-  --tt-shadow: rgb(0 0 0 / 0.12);
+  --tt-success-text: light-dark(#15803d, #4ade80);
+  --tt-warning-text: light-dark(#b45309, #fbbf24);
+  --tt-shadow: light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.6));
 
   /* Overflow menu card + settings rows */
-  --tt-menu: #ffffff;
-  --tt-menu-divider: #f1f1f1;
-  --tt-chevron: #bababa;
+  --tt-menu: light-dark(#ffffff, #2c2c2e);
+  --tt-menu-divider: light-dark(#f1f1f1, #3a3a3c);
+  --tt-chevron: light-dark(#bababa, #5c5c60);
   --tt-icon-green: #0cce9c;
   --tt-icon-amber: #ffb000;
-  --tt-scrim: rgb(0 0 0 / 0.4);
-  --tt-mark-bg: #fef08a;
-  --tt-mark-text: #191919;
+  --tt-scrim: light-dark(rgb(0 0 0 / 0.4), rgb(0 0 0 / 0.6));
+  --tt-mark-bg: light-dark(#fef08a, #713f12);
+  --tt-mark-text: light-dark(#191919, #fef9c3);
 
   /* Radial progress ring tokens */
-  --tt-ring-track: #e2e4ea;
-  --tt-ring-muted: #9ca3af;
-  --tt-ring-green: #16a34a;
-  --tt-ring-amber: #d97706;
-  --tt-ring-orange: #ea580c;
-  --tt-ring-overdue: #e03131;
-}
-
-/* Dark: OS dark unless the user pinned Light; or the user pinned Dark. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --tt-blue-soft: #18213d;
-
-    --tt-bg: #000000;
-    --tt-surface: #0f0f10;
-    --tt-elevated: #1c1c1e;
-    --tt-sidebar: #161617;
-    --tt-rail: #0a0a0a;
-    --tt-border: #2a2a2d;
-    --tt-input: #1c1c1e;
-    --tt-hover: rgb(255 255 255 / 0.06);
-    --tt-text: #ebebeb;
-    --tt-secondary: #8e8e93;
-    --tt-muted: #5c5c5c;
-
-    --tt-pri-none: #5c5c60;
-    --tt-shadow: rgb(0 0 0 / 0.6);
-
-    --tt-menu: #2c2c2e;
-    --tt-menu-divider: #3a3a3c;
-    --tt-chevron: #5c5c60;
-    --tt-scrim: rgb(0 0 0 / 0.6);
-    --tt-mark-bg: #713f12;
-    --tt-mark-text: #fef9c3;
-
-    --tt-ring-track: #2e2e32;
-    --tt-ring-muted: #6b7280;
-    --tt-ring-green: #22c55e;
-    --tt-ring-amber: #f59e0b;
-    --tt-ring-orange: #fb923c;
-    --tt-ring-overdue: #f87171;
-  }
+  --tt-ring-track: light-dark(#e2e4ea, #2e2e32);
+  --tt-ring-muted: light-dark(#9ca3af, #6b7280);
+  --tt-ring-green: light-dark(#16a34a, #22c55e);
+  --tt-ring-amber: light-dark(#d97706, #f59e0b);
+  --tt-ring-orange: light-dark(#ea580c, #fb923c);
+  --tt-ring-overdue: light-dark(#d42626, #f87171);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-
-  --tt-blue-soft: #18213d;
-
-  --tt-bg: #000000;
-  --tt-surface: #0f0f10;
-  --tt-elevated: #1c1c1e;
-  --tt-sidebar: #161617;
-  --tt-rail: #0a0a0a;
-  --tt-border: #2a2a2d;
-  --tt-input: #1c1c1e;
-  --tt-hover: rgb(255 255 255 / 0.06);
-  --tt-text: #ebebeb;
-  --tt-secondary: #8e8e93;
-  --tt-muted: #5c5c5c;
-
-  --tt-pri-none: #5c5c60;
-  --tt-shadow: rgb(0 0 0 / 0.6);
-
-  --tt-menu: #2c2c2e;
-  --tt-menu-divider: #3a3a3c;
-  --tt-chevron: #5c5c60;
-  --tt-scrim: rgb(0 0 0 / 0.6);
-  --tt-mark-bg: #713f12;
-  --tt-mark-text: #fef9c3;
-
-  --tt-ring-track: #2e2e32;
-  --tt-ring-muted: #6b7280;
-  --tt-ring-green: #22c55e;
-  --tt-ring-amber: #f59e0b;
-  --tt-ring-orange: #fb923c;
-  --tt-ring-overdue: #f87171;
-
 }
 
 :root[data-theme="light"] {
@@ -188,6 +122,8 @@
   --color-tt-overdue: var(--tt-overdue);
   --color-tt-pri-none: var(--tt-pri-none);
   --color-tt-success: var(--tt-success);
+  --color-tt-success-text: var(--tt-success-text);
+  --color-tt-warning-text: var(--tt-warning-text);
   --color-tt-menu: var(--tt-menu);
   --color-tt-menu-divider: var(--tt-menu-divider);
   --color-tt-chevron: var(--tt-chevron);

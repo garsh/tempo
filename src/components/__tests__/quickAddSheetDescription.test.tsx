@@ -216,4 +216,26 @@ describe('QuickAddSheet description auto-expand', () => {
 
     view.unmount();
   });
+
+  it('adds safe-area padding and keeps a single submit button when expanded (Item N)', () => {
+    const view = mount(
+      <QuickAddSheet
+        isOpen={true}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        initialTask={taskWithNotes('Line one\nLine two')}
+      />
+    );
+
+    const dialog = dialogOf(view.container);
+    expect(dialog.className).toContain('pt-[env(safe-area-inset-top)]');
+    expect(dialog.className).toContain('pb-[env(safe-area-inset-bottom)]');
+    const submitButtons = Array.from(dialog.querySelectorAll('button')).filter(
+      (b) => b.textContent?.trim() === 'Save' || b.textContent?.trim() === 'Done'
+    );
+    expect(submitButtons).toHaveLength(1);
+    expect(submitButtons[0]?.textContent?.trim()).toBe('Save');
+
+    view.unmount();
+  });
 });

@@ -76,7 +76,7 @@ describe('googleAccount', () => {
       const account = await fetchDriveAccount('valid-token-abc');
       expect(mockFetch).toHaveBeenCalledWith(
         'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName,photoLink)',
-        { headers: { Authorization: 'Bearer valid-token-abc' } }
+        expect.objectContaining({ headers: { Authorization: 'Bearer valid-token-abc' } })
       );
       expect(account).toEqual({
         email: 'syncuser@example.com',

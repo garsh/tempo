@@ -28,6 +28,8 @@ const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 const DRIVE_FILE_ID_KEY = 'tempo_drive_backup_file_id';
 const DRIVE_FILE_ID_RE = /^[A-Za-z0-9_-]+$/;
+const DRIVE_META_TIMEOUT_MS = 25_000;
+const DRIVE_DATA_TIMEOUT_MS = 60_000;
 
 /** Use Google Drive's resumable upload protocol above 4 MB (simple media upload limit is 5 MB). */
 export const SIMPLE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
@@ -38,9 +40,6 @@ export const SYNC_VERSION = 4;
 export interface DriveSyncResult {
   success: boolean;
   tasksCount: number;
-  listsCount: number;
-  foldersCount: number;
-  filtersCount: number;
   syncedAt: number;
   error?: string;
 }
@@ -50,6 +49,42 @@ export class DriveConflictError extends Error {
     super(message);
     this.name = 'DriveConflictError';
   }
+}
+
+export class DriveAuthError extends Error {
+  constructor(message = 'Google Drive authorization expired (401)') {
+    super(message);
+    this.name = 'DriveAuthError';
+  }
+}
+
+export class SyncCancelledError extends Error {
+  constructor(message = 'Sync cancelled') {
+    super(message);
+    this.name = 'SyncCancelledError';
+  }
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  if (typeof AbortController === 'undefined') {
+    return fetch(url, init);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function formatHttpFailure(prefix: string, res: Response): string {
+  const parts = [res.status ? String(res.status) : '', res.statusText || ''].filter(Boolean);
+  return parts.length > 0 ? `${prefix}: ${parts.join(' ')}` : prefix;
 }
 
 export function isSafeDriveFileId(id: string): boolean {
@@ -112,24 +147,33 @@ export function driveFileResourcePath(fileId: string): string {
   return `/files/${encodeURIComponent(fileId)}`;
 }
 
-export async function getOrCreateAppDataFile(accessToken: string): Promise<string> {
+export async function getOrCreateAppDataFile(
+  accessToken: string,
+  isCancelled?: () => boolean
+): Promise<string> {
   const query = encodeURIComponent(`name='${BACKUP_FILENAME}' and trashed=false`);
   const fields = 'files(id,name,modifiedTime)';
   const searchUrl =
     `${DRIVE_API_URL}/files?spaces=appDataFolder&q=${query}&orderBy=modifiedTime desc&pageSize=10&fields=${fields}`;
-  let searchRes = await fetch(searchUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  let searchRes = await fetchWithTimeout(
+    searchUrl,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    DRIVE_META_TIMEOUT_MS
+  );
   // Some Drive views reject orderBy. Fall back so sync still finds the file.
   if (searchRes.status === 400) {
-    searchRes = await fetch(
+    searchRes = await fetchWithTimeout(
       `${DRIVE_API_URL}/files?spaces=appDataFolder&q=${query}&pageSize=10&fields=${fields}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      DRIVE_META_TIMEOUT_MS
     );
   }
 
+  if (searchRes.status === 401) {
+    throw new DriveAuthError();
+  }
   if (!searchRes.ok) {
-    throw new Error(`Drive search failed: ${searchRes.statusText}`);
+    throw new Error(formatHttpFailure('Drive search failed', searchRes));
   }
 
   const searchData = (await searchRes.json()) as {
@@ -138,31 +182,42 @@ export async function getOrCreateAppDataFile(accessToken: string): Promise<strin
   const ids = orderBackupFileIdsNewestFirst(searchData.files ?? []);
   const chosen = selectBackupFileId(readRememberedFileId(), ids);
   if (chosen) {
+    if (isCancelled?.()) throw new SyncCancelledError();
     rememberFileId(chosen);
     recordDiagEvent('drive_file', `chosen=${chosen} matches=${ids.filter(isSafeDriveFileId).length}`);
     return chosen;
   }
 
-  const createRes = await fetch(`${DRIVE_API_URL}/files`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: BACKUP_FILENAME,
-      parents: ['appDataFolder'],
-    }),
-  });
+  if (isCancelled?.()) throw new SyncCancelledError();
 
+  const createRes = await fetchWithTimeout(
+    `${DRIVE_API_URL}/files`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: BACKUP_FILENAME,
+        parents: ['appDataFolder'],
+      }),
+    },
+    DRIVE_META_TIMEOUT_MS
+  );
+
+  if (createRes.status === 401) {
+    throw new DriveAuthError();
+  }
   if (!createRes.ok) {
-    throw new Error(`Failed to create backup file in Drive: ${createRes.statusText}`);
+    throw new Error(formatHttpFailure('Failed to create backup file in Drive', createRes));
   }
 
   const createdFile = (await createRes.json()) as { id?: string };
   if (!createdFile.id || !isSafeDriveFileId(createdFile.id)) {
     throw new Error('Drive returned an invalid file id');
   }
+  if (isCancelled?.()) throw new SyncCancelledError();
   rememberFileId(createdFile.id);
   recordDiagEvent('drive_file', `created=${createdFile.id}`);
   return createdFile.id;
@@ -172,16 +227,22 @@ export async function downloadDriveBackup(
   fileId: string,
   accessToken: string
 ): Promise<{ data: SyncData | null; etag: string | null }> {
-  const res = await fetch(`${DRIVE_API_URL}${driveFileResourcePath(fileId)}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await fetchWithTimeout(
+    `${DRIVE_API_URL}${driveFileResourcePath(fileId)}?alt=media`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    DRIVE_DATA_TIMEOUT_MS
+  );
+
+  if (res.status === 401) {
+    throw new DriveAuthError();
+  }
 
   if (res.status === 404 || res.headers.get('content-length') === '0') {
     return { data: null, etag: res.headers.get('ETag') };
   }
 
   if (!res.ok) {
-    throw new Error(`Failed to download backup: ${res.statusText}`);
+    throw new Error(formatHttpFailure('Failed to download backup', res));
   }
 
   let text: string;
@@ -234,11 +295,14 @@ function isSafeDriveUploadUrl(rawUrl: string): boolean {
 }
 
 function checkUploadResponse(res: Response): void {
+  if (res.status === 401) {
+    throw new DriveAuthError();
+  }
   if (res.status === 412) {
     throw new DriveConflictError();
   }
   if (!res.ok) {
-    throw new Error(`Failed to upload to Drive: ${res.status} ${res.statusText}`);
+    throw new Error(formatHttpFailure('Failed to upload to Drive', res));
   }
 }
 
@@ -261,11 +325,15 @@ export async function uploadDriveBackup(
       headers['If-Match'] = etag;
     }
 
-    const res = await fetch(`${UPLOAD_API_URL}${filePath}?uploadType=media`, {
-      method: 'PATCH',
-      headers,
-      body: bodyText,
-    });
+    const res = await fetchWithTimeout(
+      `${UPLOAD_API_URL}${filePath}?uploadType=media`,
+      {
+        method: 'PATCH',
+        headers,
+        body: bodyText,
+      },
+      DRIVE_DATA_TIMEOUT_MS
+    );
     checkUploadResponse(res);
     recordDiagEvent('drive_upload', `bytes=${byteLen} mode=media`);
     return res.headers.get('ETag');
@@ -281,11 +349,15 @@ export async function uploadDriveBackup(
     initHeaders['If-Match'] = etag;
   }
 
-  const initRes = await fetch(`${UPLOAD_API_URL}${filePath}?uploadType=resumable`, {
-    method: 'PATCH',
-    headers: initHeaders,
-    body: '{}',
-  });
+  const initRes = await fetchWithTimeout(
+    `${UPLOAD_API_URL}${filePath}?uploadType=resumable`,
+    {
+      method: 'PATCH',
+      headers: initHeaders,
+      body: '{}',
+    },
+    DRIVE_META_TIMEOUT_MS
+  );
   checkUploadResponse(initRes);
 
   const uploadUrl = initRes.headers.get('Location');
@@ -293,13 +365,17 @@ export async function uploadDriveBackup(
     throw new Error('Failed to upload to Drive: invalid resumable upload URL');
   }
 
-  const putRes = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
+  const putRes = await fetchWithTimeout(
+    uploadUrl,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: bodyText,
     },
-    body: bodyText,
-  });
+    DRIVE_DATA_TIMEOUT_MS
+  );
   checkUploadResponse(putRes);
   recordDiagEvent('drive_upload', `bytes=${byteLen} mode=resumable`);
   return putRes.headers.get('ETag');
@@ -395,7 +471,8 @@ async function deletePrunedEntities(prunedIds: PrunedEntityIds, cutoff: number):
 async function mergeRemoteIntoLocal(
   remoteData: SyncData | null,
   fileId: string,
-  now: number
+  now: number,
+  isCancelled?: () => boolean
 ): Promise<MergedSyncResult> {
   const remoteTasks: Task[] = remoteData?.tasks || [];
   const remoteLists: TaskList[] = remoteData?.lists || [];
@@ -413,6 +490,8 @@ async function mergeRemoteIntoLocal(
       db.lists.toArray(),
       db.folders.toArray(),
     ]);
+
+    if (isCancelled?.()) throw new SyncCancelledError();
 
     const autoCutoff = now - TOMBSTONE_TTL_MS;
     if (
@@ -440,6 +519,8 @@ async function mergeRemoteIntoLocal(
     const tasksToPut = getChangedEntities(localTasks, mergedTasks);
     const listsToPut = getChangedEntities(localLists, mergedLists);
     const foldersToPut = getChangedEntities(localFolders, mergedFolders);
+
+    if (isCancelled?.()) throw new SyncCancelledError();
 
     if (tasksToPut.length > 0) await db.tasks.bulkPut(tasksToPut);
     if (listsToPut.length > 0) await db.lists.bulkPut(listsToPut);
@@ -475,18 +556,43 @@ async function mergeRemoteIntoLocal(
   });
 }
 
+function syncContentSignature(data: SyncData): string {
+  const compact = compactSyncData(data);
+  const byId = <T extends { id: string }>(items: T[]) =>
+    [...items].sort((a, b) => a.id.localeCompare(b.id));
+  return JSON.stringify({
+    tombstonesPrunedBefore: compact.tombstonesPrunedBefore ?? 0,
+    tasks: byId(compact.tasks),
+    lists: byId(compact.lists),
+    folders: byId(compact.folders ?? []),
+  });
+}
+
 /**
  * Full Drive sync with ETag / If-Match. On 412 conflict, re-download, re-merge, retry once.
  */
-export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyncResult> {
-  await ensureInboxList();
+export async function syncWithGoogleDrive(
+  accessToken: string,
+  options?: { isCancelled?: () => boolean }
+): Promise<DriveSyncResult> {
+  const isCancelled = options?.isCancelled;
+  const assertNotCancelled = () => {
+    if (isCancelled?.()) throw new SyncCancelledError();
+  };
 
-  const fileId = await getOrCreateAppDataFile(accessToken);
+  assertNotCancelled();
+  await ensureInboxList();
+  assertNotCancelled();
+
+  const fileId = await getOrCreateAppDataFile(accessToken, isCancelled);
 
   const attempt = async (): Promise<DriveSyncResult> => {
+    assertNotCancelled();
     const { data: remoteData, etag } = await downloadDriveBackup(fileId, accessToken);
+    assertNotCancelled();
     const now = Date.now();
-    const merged = await mergeRemoteIntoLocal(remoteData, fileId, now);
+    const merged = await mergeRemoteIntoLocal(remoteData, fileId, now, isCancelled);
+    assertNotCancelled();
 
     const syncPayload: SyncData = {
       version: SYNC_VERSION,
@@ -499,8 +605,15 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
       folders: merged.folders,
     };
 
-    await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
+    if (remoteData !== null && syncContentSignature(remoteData) === syncContentSignature(syncPayload)) {
+      recordDiagEvent('drive_sync_noop', 'upload skipped');
+    } else {
+      await uploadDriveBackup(fileId, accessToken, syncPayload, etag);
+    }
+
+    assertNotCancelled();
     await deletePrunedEntities(merged.prunedIds, merged.tombstonesPrunedBefore);
+    assertNotCancelled();
     recordSyncedFile(fileId);
     if (merged.tombstonesPrunedBefore > 0) {
       setTombstonesPrunedBefore(merged.tombstonesPrunedBefore, fileId);
@@ -509,9 +622,6 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
     return {
       success: true,
       tasksCount: merged.tasks.length,
-      listsCount: merged.lists.length,
-      foldersCount: merged.folders.length,
-      filtersCount: 0,
       syncedAt: now,
     };
   };
@@ -519,7 +629,7 @@ export async function syncWithGoogleDrive(accessToken: string): Promise<DriveSyn
   try {
     return await attempt();
   } catch (err) {
-    if (err instanceof DriveConflictError) {
+    if (err instanceof DriveConflictError && !isCancelled?.()) {
       // Another client wrote — merge again and retry upload once
       return await attempt();
     }

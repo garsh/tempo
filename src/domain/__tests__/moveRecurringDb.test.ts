@@ -9,7 +9,10 @@ import {
   restoreTaskSnapshot,
   saveTask,
   skipTaskOccurrence,
+  uncompleteTask,
+  unskipTaskOccurrence,
 } from '../../db/db';
+import { mergeTasks } from '../merge';
 import {
   completionTimestampForDate,
   isCompletedOnDate,
@@ -47,6 +50,10 @@ describe('db recurring task move operations', () => {
 
   beforeEach(() => {
     store = new Map();
+    vi.spyOn(db, 'transaction').mockImplementation((async (...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }) as never);
     vi.spyOn(db.tasks, 'get').mockImplementation(((id: string) =>
       Promise.resolve(store.get(id))) as never);
     vi.spyOn(db.tasks, 'put').mockImplementation(((t: Task) => {
@@ -267,5 +274,91 @@ describe('db recurring task move operations', () => {
     const completed = await completeTask(initial.id, '2026-11-21');
     expect(completed!.skippedDates).toEqual([]);
     expect(completed!.removedSkippedDates).toEqual(['2026-11-21']);
+  });
+
+  it('survives Drive merge when re-completing a past date or undoing a completed move after sync', async () => {
+    const initial = makeSeriesTask({
+      completionHistory: [
+        completionTimestampForDate('2026-11-07'),
+        completionTimestampForDate('2026-11-14'),
+      ],
+    });
+    store.set(initial.id, structuredClone(initial));
+
+    const moved = await moveRecurringOccurrenceOnly({
+      id: initial.id,
+      fromDate: '2026-11-14',
+      toDate: '2026-11-13',
+      today: parseDate('2026-11-24'),
+    });
+    // Simulate debounced sync uploading moved task (containing removedCompletions for 2026-11-14)
+    const syncedRemote = structuredClone(moved!.task);
+
+    // User clicks Undo -> restoreTaskSnapshot
+    const restored = await restoreTaskSnapshot(moved!.previousTask, moved!.task);
+    const mergedAfterUndo = mergeTasks([restored], [syncedRemote])[0]!;
+    expect(isCompletedOnDate(mergedAfterUndo, '2026-11-14')).toBe(true);
+    expect(isCompletedOnDate(mergedAfterUndo, '2026-11-13')).toBe(false);
+
+    // Also test uncomplete -> sync -> re-complete same past date
+    const uncompleted = await uncompleteTask(initial.id, '2026-11-07');
+    const syncedAfterUncomplete = structuredClone(uncompleted!);
+    const recompleted = await completeTask(initial.id, '2026-11-07');
+    const mergedAfterRecomplete = mergeTasks([recompleted!], [syncedAfterUncomplete])[0]!;
+    expect(isCompletedOnDate(mergedAfterRecomplete, '2026-11-07')).toBe(true);
+  });
+
+  it('clears all completionHistory when uncompleting an overdue one-off task and clears stale startDate when removing recurrence', async () => {
+    const todayTs = new Date(2026, 10, 24, 10, 0, 0).getTime();
+    const pastTs = completionTimestampForDate('2026-11-20');
+    const oneOff: Task = {
+      id: 'oneoff-overdue',
+      title: 'Mail package',
+      listId: INBOX_LIST_ID,
+      dueAt: '2026-11-20',
+      completedAt: todayTs,
+      completionHistory: [pastTs, todayTs],
+      recurrence: null,
+      createdAt: 1000,
+      updatedAt: todayTs,
+    };
+    store.set(oneOff.id, oneOff);
+
+    const uncompleted = await uncompleteTask(oneOff.id, '2026-11-20');
+    expect(uncompleted!.completedAt).toBeNull();
+    expect(uncompleted!.completionHistory).toEqual([]);
+    expect(uncompleted!.removedCompletions).toEqual([pastTs, todayTs].sort((a, b) => a - b));
+
+    // Removing recurrence on a fixed recurring task clears startDate
+    const series = makeSeriesTask();
+    store.set(series.id, series);
+    const turnedOneOff = await saveTask({
+      id: series.id,
+      title: series.title,
+      dueAt: '2026-11-24',
+      recurrence: null,
+    });
+    expect(turnedOneOff.startDate).toBeNull();
+  });
+
+  it('unskipTaskOccurrence removes only the requested skipped date and clears empty skippedDates (Item T)', async () => {
+    const initial = makeSeriesTask({
+      skippedDates: ['2026-11-21', '2026-11-28'],
+    });
+    store.set(initial.id, structuredClone(initial));
+
+    const first = await unskipTaskOccurrence(initial.id, '2026-11-21');
+    expect(first).not.toBeNull();
+    expect(first!.skippedDates).toEqual(['2026-11-28']);
+    expect(store.get(initial.id)!.skippedDates).toEqual(['2026-11-28']);
+
+    const second = await unskipTaskOccurrence(initial.id, '2026-11-28');
+    expect(second).not.toBeNull();
+    expect(second!.skippedDates).toBeUndefined();
+    expect(store.get(initial.id)!.skippedDates).toBeUndefined();
+
+    const noop = await unskipTaskOccurrence(initial.id, '2026-12-05');
+    expect(noop).not.toBeNull();
+    expect(noop!.skippedDates).toBeUndefined();
   });
 });

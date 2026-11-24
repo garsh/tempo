@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useId, useRef, useState } from 'react';
 import type { Task, TaskUrgency } from '../types/task';
 import {
   formatDueLabel,
@@ -9,7 +9,9 @@ import {
   isFixedRecurring,
   isRecurring,
   isWindowPeriodic,
+  parseDate,
 } from '../domain/recurrence';
+import { useTodayKey } from '../hooks/useTodayKey';
 import {
   Check,
   GripVertical,
@@ -122,14 +124,16 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   onSwipeChange,
 }) => {
   const [justCompleted, setJustCompleted] = useState(false);
+  const cardInstanceId = useId();
+  const todayKey = useTodayKey();
   const windowPeriodic = isWindowPeriodic(task);
   const fixedRecurring = isFixedRecurring(task);
   const recurring = isRecurring(task);
-  const progress = windowPeriodic ? getWindowProgress(task) : null;
+  const progress = windowPeriodic ? getWindowProgress(task, parseDate(todayKey)) : null;
   const completed = windowPeriodic
     ? task.completedAt != null || (occurrenceDateStr == null && progress?.doneToday === true)
     : isCompleted(task);
-  const canSkip = fixedRecurring && !!onRequestSkipOccurrence;
+  const canSkip = fixedRecurring && !completed && !!onRequestSkipOccurrence;
   const urgency = getTaskUrgency(task.dueAt);
   const borderColor = 'var(--tt-pri-none, #c7c7cc)';
   const dueLabel = windowPeriodic ? null : formatRowDue(task.dueAt, urgency);
@@ -187,12 +191,23 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     didSwipe: boolean;
   } | null>(null);
   const swipeDirectionRef = useRef<'horizontal' | 'vertical' | null>(null);
+  const mouseCleanupRef = useRef<(() => void) | null>(null);
   const suppressClickRef = useRef(false);
   const onSwipeChangeRef = useRef(onSwipeChange);
 
   useEffect(() => {
     onSwipeChangeRef.current = onSwipeChange;
   });
+
+  const stopMouseSwipeTracking = () => {
+    const cleanup = mouseCleanupRef.current;
+    if (cleanup) {
+      mouseCleanupRef.current = null;
+      cleanup();
+    }
+  };
+
+  useEffect(() => stopMouseSwipeTracking, []);
 
   const setDrawerVisibility = (visible: boolean, interactive: boolean) => {
     if (!drawerRef.current) return;
@@ -210,7 +225,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     setDrawerVisibility(true, true);
     setIsOpen(true);
     setSwipeOffset(-DRAWER_WIDTH);
-    globalSwipeCoordinator.notifyOpened(task.id);
+    globalSwipeCoordinator.notifyOpened(cardInstanceId);
     onSwipeChangeRef.current?.(task.id, true);
   };
 
@@ -226,19 +241,19 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     setIsOpen(false);
     setSwipeOffset(0);
     if (wasOpen) {
-      globalSwipeCoordinator.notifyClosed(task.id);
+      globalSwipeCoordinator.notifyClosed(cardInstanceId);
       onSwipeChangeRef.current?.(task.id, false);
     }
   };
 
   // Register with global coordinator for mutual exclusion across all task cards
   useEffect(() => {
-    return globalSwipeCoordinator.register(task.id, (activeId) => {
-      if (activeId !== task.id && isOpenRef.current) {
+    return globalSwipeCoordinator.register(cardInstanceId, (activeId) => {
+      if (activeId !== cardInstanceId && isOpenRef.current) {
         closeSwipe();
       }
     });
-  }, [task.id]);
+  }, [cardInstanceId]);
 
   useEffect(() => {
     if (isSwipedOpen !== undefined) {
@@ -282,6 +297,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     if (isDragging) {
       touchStartRef.current = null;
       mouseStartRef.current = null;
+      stopMouseSwipeTracking();
       swipeDirectionRef.current = null;
       if (isOpenRef.current) {
         closeSwipe();
@@ -356,58 +372,93 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     onRowPointerDown?.(e);
     if (e.pointerType === 'mouse' && e.button === 0 && !isDragging) {
       if ((e.target as HTMLElement).closest('button, input, a, [data-drag-handle="true"]')) return;
+      stopMouseSwipeTracking();
       mouseStartRef.current = {
         x: e.clientX,
         y: e.clientY,
         initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
         didSwipe: false,
       };
-    }
-  };
+      if (typeof window === 'undefined') return;
 
-  const handleRowPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === 'mouse' && mouseStartRef.current) {
-      const dx = e.clientX - mouseStartRef.current.x;
-      const dy = e.clientY - mouseStartRef.current.y;
-      if (!mouseStartRef.current.didSwipe) {
-        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+      const onWinMove = (ev: PointerEvent) => {
+        if (ev.pointerType !== 'mouse' || !mouseStartRef.current) return;
+        if ((ev.buttons & 1) === 0) {
+          stopMouseSwipeTracking();
+          const { didSwipe } = mouseStartRef.current;
           mouseStartRef.current = null;
+          commitSwipe(didSwipe);
           return;
         }
-        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
-          mouseStartRef.current.didSwipe = true;
+        const dx = ev.clientX - mouseStartRef.current.x;
+        const dy = ev.clientY - mouseStartRef.current.y;
+        if (!mouseStartRef.current.didSwipe) {
+          if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+            mouseStartRef.current = null;
+            stopMouseSwipeTracking();
+            return;
+          }
+          if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+            mouseStartRef.current.didSwipe = true;
+          }
         }
-      }
-      if (mouseStartRef.current.didSwipe) {
-        applySwipeOffset(mouseStartRef.current.initialOffset, dx);
-      }
+        if (mouseStartRef.current.didSwipe) {
+          applySwipeOffset(mouseStartRef.current.initialOffset, dx);
+        }
+      };
+
+      const onWinUp = (ev: PointerEvent) => {
+        if (ev.pointerType !== 'mouse') return;
+        stopMouseSwipeTracking();
+        if (!mouseStartRef.current) return;
+        const { didSwipe } = mouseStartRef.current;
+        mouseStartRef.current = null;
+        commitSwipe(didSwipe);
+      };
+
+      const onWinCancel = (ev: Event) => {
+        if (ev.type === 'pointercancel' && (ev as PointerEvent).pointerType !== 'mouse') return;
+        stopMouseSwipeTracking();
+        if (!mouseStartRef.current) return;
+        const wasOpened = mouseStartRef.current.initialOffset !== 0;
+        mouseStartRef.current = null;
+        if (wasOpened) {
+          openSwipe();
+        } else {
+          closeSwipe();
+        }
+      };
+
+      window.addEventListener('pointermove', onWinMove);
+      window.addEventListener('pointerup', onWinUp);
+      window.addEventListener('pointercancel', onWinCancel);
+      window.addEventListener('blur', onWinCancel);
+      mouseCleanupRef.current = () => {
+        window.removeEventListener('pointermove', onWinMove);
+        window.removeEventListener('pointerup', onWinUp);
+        window.removeEventListener('pointercancel', onWinCancel);
+        window.removeEventListener('blur', onWinCancel);
+      };
     }
   };
-
-  const finishMouseSwipe = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === 'mouse' && mouseStartRef.current) {
-      const { didSwipe } = mouseStartRef.current;
-      mouseStartRef.current = null;
-      commitSwipe(didSwipe);
-    }
-  };
-
 
   return (
     <div
       ref={rowRef}
-      role="button"
-      tabIndex={0}
+      data-testid="task-card"
       data-dragging={isDragging ? 'true' : undefined}
       onPointerDown={handleRowPointerDown}
-      onPointerMove={handleRowPointerMove}
-      onPointerUp={finishMouseSwipe}
-      onPointerCancel={finishMouseSwipe}
       onClickCapture={onRowClickCapture}
       onContextMenu={onRowContextMenu}
       onClick={(e) => {
         if (suppressClickRef.current) {
           suppressClickRef.current = false;
+          return;
+        }
+        if ((e.target as HTMLElement).closest('button, input, a')) {
+          return;
+        }
+        if (typeof window !== 'undefined' && window.getSelection?.()?.toString()) {
           return;
         }
         if (isOpen) {
@@ -417,16 +468,9 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         }
         activate();
       }}
-      onDoubleClick={() => !isOpen && onEdit?.(task)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          if (isOpen) {
-            closeSwipe();
-          } else {
-            activate();
-          }
-        }
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest('button, input, a')) return;
+        if (!isOpen) onEdit?.(task);
       }}
       style={
         isDragging
@@ -447,7 +491,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       className={`group relative overflow-hidden border-b border-tt-border/80 cursor-pointer ${
         isDragging
           ? 'z-20 bg-tt-elevated/45 backdrop-blur-[1px] shadow-md ring-2 ring-tt-blue/60 rounded-xl opacity-60 select-none'
-          : `transition-colors ${reorderEnabled ? 'select-none' : ''}`
+          : `transition-colors ${reorderEnabled ? 'select-none hover-pointer:select-text' : ''}`
       }`}
     >
       {/* Revealed Swipe Action Buttons on the Right */}
@@ -494,9 +538,11 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
               ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
               : windowPeriodic
                 ? 'Skip Occurrence: Not used for approximate window routines'
-                : recurring
-                  ? 'Skip Occurrence: Not available for ended series'
-                  : 'Skip Occurrence: Only available for recurring tasks'
+                : fixedRecurring && completed
+                  ? 'Skip Occurrence: Already completed for this date'
+                  : recurring
+                    ? 'Skip Occurrence: Not available for ended series'
+                    : 'Skip Occurrence: Only available for recurring tasks'
           }
           disabled={!canSkip}
           colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
@@ -547,12 +593,15 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         )}
         <button
           type="button"
+          role="checkbox"
+          aria-checked={completed}
+          aria-label={completed ? `Mark "${task.title}" incomplete` : `Complete "${task.title}"`}
           onClick={handleCheck}
           onPointerDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
           disabled={completed && !onUncomplete}
           title={completed ? 'Mark incomplete' : recurring ? 'Complete this occurrence' : 'Complete'}
-          className={`relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] desktop:mt-[1px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors after:absolute after:-inset-2 after:content-[''] ${contentOpacityClass}`}
+          className={`relative flex-shrink-0 w-[21px] h-[21px] mt-[2.5px] desktop:mt-[1px] rounded-[5px] border-[1.5px] flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue focus-visible:ring-offset-1 focus-visible:ring-offset-tt-surface after:absolute after:-inset-2 after:content-[''] ${contentOpacityClass}`}
           style={{
             borderColor: completed || justCompleted ? '#34C759' : borderColor,
             backgroundColor: completed || justCompleted ? '#34C759' : 'transparent',
@@ -562,7 +611,22 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           {(completed || justCompleted) && <Check className="w-3 h-3 stroke-[3]" />}
         </button>
 
-      <div className={`flex-1 min-w-0 ${contentOpacityClass}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (isOpen) {
+              closeSwipe();
+            } else {
+              activate();
+            }
+          }
+        }}
+        className={`flex-1 min-w-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue ${contentOpacityClass}`}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <span
             data-testid="task-title"

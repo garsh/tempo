@@ -55,9 +55,9 @@ export function DesktopSidebar({
   const navBtn = (active: boolean) =>
     `relative w-full flex items-center ${
       wide ? 'justify-start px-3 gap-2.5 h-9' : 'justify-center px-0 h-10'
-    } rounded-xl text-[14px] transition-colors cursor-pointer ${
+    } rounded-xl text-[14px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue cursor-pointer ${
       active
-        ? 'bg-tt-blue-soft text-tt-blue font-semibold'
+        ? 'bg-tt-blue-soft text-tt-blue dark:text-blue-300 font-semibold'
         : 'text-tt-text hover:bg-tt-hover font-medium'
     }`;
 
@@ -95,7 +95,7 @@ export function DesktopSidebar({
           onClick={onNewTask}
           aria-label="New task"
           title={wide ? 'New task (N)' : 'New task (N)'}
-          className={`flex items-center justify-center rounded-xl bg-tt-blue hover:bg-tt-blue-hover active:scale-[0.98] text-white font-semibold shadow-sm shadow-tt-blue/25 transition-all cursor-pointer ${
+          className={`flex items-center justify-center rounded-xl bg-tt-blue hover:bg-tt-blue-hover active:scale-[0.98] text-white font-semibold shadow-sm shadow-tt-blue/25 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue focus-visible:ring-offset-2 focus-visible:ring-offset-tt-sidebar cursor-pointer ${
             wide ? 'w-full h-9 px-3 gap-2 text-[14px]' : 'w-10 h-10'
           }`}
         >
@@ -119,6 +119,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onSelectCalendar}
+          aria-label={wide ? undefined : 'Calendar'}
           aria-current={activeNav === 'calendar' ? 'page' : undefined}
           title={wide ? undefined : 'Calendar (1)'}
           className={navBtn(activeNav === 'calendar')}
@@ -130,6 +131,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onSelectTasks}
+          aria-label={wide ? undefined : 'Tasks'}
           aria-current={activeNav === 'tasks' ? 'page' : undefined}
           title={wide ? undefined : 'Tasks (2)'}
           className={navBtn(activeNav === 'tasks')}
@@ -167,6 +169,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onSelectRecurring}
+          aria-label={wide ? undefined : 'Recurring'}
           aria-current={activeNav === 'recurring' ? 'page' : undefined}
           title={wide ? undefined : 'Recurring (3)'}
           className={navBtn(activeNav === 'recurring')}
@@ -178,6 +181,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onSelectSearch}
+          aria-label={wide ? undefined : 'Search'}
           aria-current={activeNav === 'search' ? 'page' : undefined}
           title={wide ? undefined : 'Search (/)'}
           className={navBtn(activeNav === 'search')}
@@ -199,6 +203,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onOpenShortcuts}
+          aria-label={wide ? undefined : 'Shortcuts'}
           title={wide ? undefined : 'Keyboard shortcuts (?)'}
           className={navBtn(false)}
         >
@@ -216,6 +221,7 @@ export function DesktopSidebar({
         <button
           type="button"
           onClick={onOpenSettings}
+          aria-label={wide ? undefined : 'Settings'}
           title={wide ? undefined : 'Settings'}
           className={navBtn(false)}
         >

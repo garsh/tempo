@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AUTO_SYNC_INTERVAL_MS,
+  cancelPendingAutoSync,
   canAutoSync,
   clearSyncAuthPrompt,
   clearSyncError,
@@ -25,6 +26,7 @@ import {
   subscribeGoogleSignOut,
 } from '../sync/googleAuth';
 import { getGoogleAccount, setGoogleAccount } from '../sync/googleAccount';
+import { clearSyncWatermarkState } from '../sync/syncWatermark';
 
 export interface SyncNowResult {
   synced: boolean;
@@ -32,7 +34,7 @@ export interface SyncNowResult {
   error?: string;
 }
 
-export function useAutoSync(onSynced?: () => void): {
+export function useAutoSync(): {
   status: SyncStatusSnapshot;
   syncNow: (interactive?: boolean) => Promise<SyncNowResult>;
   scheduleSync: (delayMs?: number) => void;
@@ -40,10 +42,6 @@ export function useAutoSync(onSynced?: () => void): {
   dismissAuthPrompt: () => void;
 } {
   const [status, setStatus] = useState<SyncStatusSnapshot>(() => readSyncStatusSnapshot());
-  const onSyncedRef = useRef(onSynced);
-  useEffect(() => {
-    onSyncedRef.current = onSynced;
-  }, [onSynced]);
 
   const scheduleSync = useCallback((delayMs = 2000) => {
     triggerDebouncedSync(delayMs);
@@ -72,7 +70,6 @@ export function useAutoSync(onSynced?: () => void): {
         });
         if (result?.success) {
           setStatus(readSyncStatusSnapshot('ok'));
-          onSyncedRef.current?.();
           return { synced: true };
         }
         setStatus(readSyncStatusSnapshot('skipped'));
@@ -135,7 +132,9 @@ export function useAutoSync(onSynced?: () => void): {
     window.addEventListener('online', onOnline);
     const unsubscribeSignOut = subscribeGoogleSignOut(() => {
       applyRemoteSignOut();
+      cancelPendingAutoSync();
       setGoogleAccount(null);
+      clearSyncWatermarkState();
       clearSyncAuthPrompt();
       clearSyncError();
       refreshStatus('idle');

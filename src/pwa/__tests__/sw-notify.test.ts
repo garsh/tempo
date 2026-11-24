@@ -8,22 +8,14 @@ function loadWorkerHelpers() {
   };
   return new Function(
     'self',
-    `${source}\nreturn { safeNotificationUrl, shareTextFromForm };`
+    `${source}\nreturn { shareTextFromForm };`
   )(self) as {
-    safeNotificationUrl: (raw: unknown) => string;
     shareTextFromForm: (title: unknown, text: unknown, url: unknown) => string;
   };
 }
 
-describe('service worker notification and share helpers', () => {
-  const { safeNotificationUrl, shareTextFromForm } = loadWorkerHelpers();
-
-  it('opens only same-origin paths', () => {
-    expect(safeNotificationUrl('https://evil.example/')).toBe('/');
-    expect(safeNotificationUrl('//evil.example/phish')).toBe('/');
-    expect(safeNotificationUrl('/')).toBe('/');
-    expect(safeNotificationUrl('/?share=1')).toBe('/?share=1');
-  });
+describe('service worker share helpers', () => {
+  const { shareTextFromForm } = loadWorkerHelpers();
 
   it('caps shared text', () => {
     const text = shareTextFromForm('Title', 'x'.repeat(5000), 'https://example.com');

@@ -1,4 +1,4 @@
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { IntervalUnit, RecurrenceType, Weekday } from '../../types/task';
 import { WEEKDAY_LABELS } from '../../types/task';
@@ -18,7 +18,6 @@ import { usePrefs } from '../../prefs/prefs';
 
 export type EndMode = 'never' | 'on_date' | 'after_count';
 
-const ALL_WEEKDAYS: Weekday[] = [0, 1, 2, 3, 4, 5, 6];
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 export interface RepeatPanelProps {
@@ -61,6 +60,9 @@ export interface RepeatPanelProps {
   historySectionRef: RefObject<HTMLDivElement | null>;
   onLogCompletionDate?: (taskId: string, dateStr: string) => Promise<void> | void;
   onRemoveCompletionTimestamp?: (taskId: string, timestamp: number) => Promise<void> | void;
+  localSkippedDates?: string[];
+  setLocalSkippedDates?: Dispatch<SetStateAction<string[]>>;
+  onUnskipOccurrence?: (taskId: string, dateStr: string) => Promise<void> | void;
 }
 
 /**
@@ -107,8 +109,34 @@ export function RepeatPanel({
   historySectionRef,
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
+  localSkippedDates,
+  setLocalSkippedDates,
+  onUnskipOccurrence,
 }: RepeatPanelProps) {
   const [prefs] = usePrefs();
+  const weekDaysOrder = Array.from(
+    { length: 7 },
+    (_, i) => (((prefs.weekStart ?? 0) + i) % 7) as Weekday
+  );
+  const [monthDayInput, setMonthDayInput] = useState(String(monthDay));
+  useEffect(() => {
+    setMonthDayInput(String(monthDay));
+  }, [monthDay]);
+  const logDateInputRef = useRef<HTMLInputElement>(null);
+  const openLogDatePicker = () => {
+    const input = logDateInputRef.current;
+    if (!input) return;
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        /* Fall back to focus + click */
+      }
+    }
+    input.focus({ preventScroll: true });
+    input.click();
+  };
   const seasonPresets = getSeasonPresets(prefs.hemisphere);
   const currentAnnualWindow = {
     startMonth: annualStartMonth,
@@ -131,7 +159,7 @@ export function RepeatPanel({
   }
 
   return (
-    <div className="px-4 pb-4 space-y-3.5 border-t border-tt-border/80 pt-3 animate-in fade-in duration-150">
+    <div className="px-4 pb-4 space-y-3.5 border-t border-tt-border/80 pt-3">
       <div className="space-y-3.5 p-3.5 sm:p-4 rounded-2xl bg-tt-sidebar/60 border border-tt-border">
         {recurrenceType === 'fixed_interval' ? (
           <>
@@ -195,7 +223,7 @@ export function RepeatPanel({
                   On Weekdays (Optional)
                 </label>
                 <div className="grid grid-cols-7 gap-1.5">
-                  {ALL_WEEKDAYS.map((d) => {
+                  {weekDaysOrder.map((d) => {
                     const sel = weekdays.includes(d);
                     return (
                       <button
@@ -232,14 +260,30 @@ export function RepeatPanel({
                 {useMonthDay && (
                   <div className="inline-flex items-center gap-2">
                     <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={monthDay}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={monthDayInput}
                       aria-label="Day of month"
-                      onChange={(e) =>
-                        setMonthDay(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))
-                      }
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setMonthDayInput(raw);
+                        const trimmed = raw.trim();
+                        if (/^\d+$/.test(trimmed)) {
+                          const parsed = parseInt(trimmed, 10);
+                          if (parsed >= 1 && parsed <= 31) {
+                            setMonthDay(parsed);
+                          }
+                        }
+                      }}
+                      onBlur={() => {
+                        const parsed = parseInt(monthDayInput.trim(), 10);
+                        const clamped = Number.isNaN(parsed)
+                          ? 1
+                          : Math.min(31, Math.max(1, parsed));
+                        setMonthDay(clamped);
+                        setMonthDayInput(String(clamped));
+                      }}
                       className="w-20 h-10 px-3 bg-tt-sidebar border border-tt-border rounded-xl text-tt-text text-base sm:text-lg font-bold outline-none focus:border-tt-blue focus:ring-1 focus:ring-tt-blue"
                     />
                     <span className="text-sm sm:text-base text-tt-text/90 font-medium">
@@ -307,6 +351,45 @@ export function RepeatPanel({
                 )}
               </div>
             </div>
+
+            {initialTaskId && localSkippedDates && localSkippedDates.length > 0 && (
+              <div data-testid="skipped-dates-panel" className="pt-2 border-t border-tt-border/80 space-y-1.5">
+                <div className="text-xs font-semibold text-tt-secondary">
+                  {`Skipped (${localSkippedDates.length})`}
+                </div>
+                <ul className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                  {[...localSkippedDates]
+                    .sort((a, b) => b.localeCompare(a))
+                    .map((dStr) => (
+                      <li
+                        key={dStr}
+                        className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-tt-elevated border border-tt-border/70 text-sm text-tt-text"
+                      >
+                        <span>
+                          {parseDate(dStr).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                        {onUnskipOccurrence && (
+                          <button
+                            type="button"
+                            aria-label={`Unskip ${dStr}`}
+                            onClick={() => {
+                              setLocalSkippedDates?.((prev) => prev.filter((d) => d !== dStr));
+                              void onUnskipOccurrence(initialTaskId, dStr);
+                            }}
+                            className="px-2 py-0.5 text-xs font-semibold text-tt-blue hover:text-tt-blue-hover hover:bg-tt-blue-soft/60 rounded cursor-pointer"
+                          >
+                            Unskip
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -606,11 +689,19 @@ export function RepeatPanel({
                     {`Done ${count} ${count === 1 ? 'time' : 'times'}${avgText}`}
                   </div>
                   {onLogCompletionDate && (
-                    <label className="relative inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-tt-blue hover:text-tt-blue-hover cursor-pointer px-2 py-1 rounded-lg hover:bg-tt-blue-soft/60">
-                      <span>+ Log date</span>
+                    <>
+                      <button
+                        type="button"
+                        onClick={openLogDatePicker}
+                        className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-tt-blue hover:text-tt-blue-hover cursor-pointer px-2 py-1 rounded-lg hover:bg-tt-blue-soft/60"
+                      >
+                        + Log date
+                      </button>
                       <input
+                        ref={logDateInputRef}
                         type="date"
                         aria-label="Log past completion date"
+                        tabIndex={-1}
                         max={todayStr}
                         value=""
                         onChange={(e) => {
@@ -624,9 +715,9 @@ export function RepeatPanel({
                           );
                           void onLogCompletionDate(initialTaskId, val);
                         }}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        className="sr-only"
                       />
-                    </label>
+                    </>
                   )}
                 </div>
 

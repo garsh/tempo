@@ -1,8 +1,8 @@
-import type React from 'react';
+import { useRef, type FC } from 'react';
 import { Trash2, X, AlertTriangle, PauseCircle } from 'lucide-react';
 import type { Task } from '../../types/task';
 import { isRecurring } from '../../domain/recurrence';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { ModalDialog } from '../ui/ModalDialog';
 
 interface DeleteConfirmDialogProps {
   isOpen: boolean;
@@ -12,14 +12,14 @@ interface DeleteConfirmDialogProps {
   onStopRepeating?: (task: Task) => Promise<void> | void;
 }
 
-export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
+export const DeleteConfirmDialog: FC<DeleteConfirmDialogProps> = ({
   isOpen,
   task,
   onClose,
   onConfirm,
   onStopRepeating,
 }) => {
-  useEscapeKey(isOpen, onClose, { preventDefault: true });
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
   if (!isOpen || !task) return null;
 
@@ -39,16 +39,14 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="delete-dialog-title"
-      className="fixed inset-0 z-[65] flex items-center justify-center p-4 compact-landscape:p-2 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <ModalDialog
+      open={true}
+      onClose={onClose}
+      ariaLabelledBy="delete-dialog-title"
+      initialFocusRef={cancelBtnRef}
+      className="m-auto p-0 w-[min(calc(100dvw-2rem),32rem)] max-w-none max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl text-tt-text"
     >
-      <div className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-8 compact-landscape:p-4 text-tt-text space-y-6 compact-landscape:space-y-3">
+      <div className="p-6 sm:p-8 compact-landscape:p-4 space-y-6 compact-landscape:space-y-3">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-3.5 min-w-0">
@@ -80,7 +78,7 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-2 rounded-xl text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors"
+            className="p-2 rounded-xl text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
           >
             <X className="w-6 h-6" />
           </button>
@@ -126,6 +124,7 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
         {canStopRepeating ? (
           <div className="flex flex-wrap items-center justify-end gap-2.5 pt-4 border-t border-tt-border">
             <button
+              ref={cancelBtnRef}
               type="button"
               onClick={onClose}
               className="px-4 py-2.5 text-[15px] sm:text-[16px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-2xl transition-colors cursor-pointer"
@@ -150,23 +149,24 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
         ) : (
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-tt-border">
             <button
+              ref={cancelBtnRef}
               type="button"
               onClick={onClose}
-              className="px-6 py-3 text-[17px] sm:text-[18px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-2xl transition-colors"
+              className="px-6 py-3 text-[17px] sm:text-[18px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-2xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleConfirm}
-              className="px-7 py-3 text-[17px] sm:text-[18px] font-bold bg-red-600 hover:bg-red-700 text-white rounded-2xl shadow-lg transition-colors active:scale-95"
+              className="px-7 py-3 text-[17px] sm:text-[18px] font-bold bg-red-600 hover:bg-red-700 text-white rounded-2xl shadow-lg transition-colors active:scale-95 cursor-pointer"
             >
               {recurring ? 'Delete All Occurrences' : 'Delete'}
             </button>
           </div>
         )}
       </div>
-    </div>
+    </ModalDialog>
   );
 };
 

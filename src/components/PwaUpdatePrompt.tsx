@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, RefreshCw, X } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import { useBottomBannerSlot } from '../domain/bottomBannerCoordinator';
 
 const MIN_CHECK_INTERVAL_MS = 15_000;
 const POLL_INTERVAL_MS = 60 * 1000;
@@ -102,6 +103,7 @@ export function PwaUpdatePrompt({
 
   const showPrompt =
     needRefresh && !(registration?.waiting && dismissedWorker === registration.waiting);
+  const bannerAllowed = useBottomBannerSlot('pwa-update', Boolean(status) || showPrompt);
 
   useEffect(() => {
     showPromptRef.current = showPrompt;
@@ -594,7 +596,7 @@ export function PwaUpdatePrompt({
     watchInstallingWorker,
   ]);
 
-  if (status) {
+  if (bannerAllowed && status) {
     return (
       <div
         role="status"
@@ -628,7 +630,7 @@ export function PwaUpdatePrompt({
     );
   }
 
-  if (!showPrompt) return null;
+  if (!bannerAllowed || !showPrompt) return null;
 
   return (
     <div

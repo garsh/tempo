@@ -4,14 +4,15 @@ import {
   mergeFolders,
   mergeLists,
   mergeTasks,
-  resolveListConflict,
-  resolveTaskConflict,
   TOMBSTONE_TTL_MS,
 } from '../merge';
 import type { Folder, Task, TaskList } from '../../types/task';
 import { INBOX_LIST_ID } from '../../types/task';
 
 describe('Merge & Conflict Resolution Engine', () => {
+  const resolveTaskConflict = (local: Task, remote: Task): Task => mergeTasks([local], [remote])[0];
+  const resolveListConflict = (local: TaskList, remote: TaskList): TaskList =>
+    mergeLists([local], [remote])[0];
   const baseTask: Task = {
     id: 'task-1',
     title: 'Water Fern',
@@ -355,5 +356,44 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(hasExpiredTombstones([{ deletedAt: cutoff + 1 }], cutoff)).toBe(false);
     expect(hasExpiredTombstones([{ deletedAt: cutoff }], cutoff)).toBe(true);
     expect(hasExpiredTombstones([{ deletedAt: null }], cutoff)).toBe(false);
+  });
+
+  it('uses per-date skippedDateUpdatedAt LWW so skip -> unskip -> re-skip converges and clears stale startDate on non-recurring tasks', () => {
+    const local: Task = {
+      ...baseTask,
+      id: 'reskip-1',
+      startDate: '2026-11-01',
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+      skippedDates: ['2026-11-10'],
+      skippedDateUpdatedAt: { '2026-11-10': 5000 },
+      updatedAt: 5000,
+    };
+    const remote: Task = {
+      ...local,
+      skippedDates: [],
+      removedSkippedDates: ['2026-11-10'],
+      skippedDateUpdatedAt: { '2026-11-10': 3000 },
+      updatedAt: 4000,
+    };
+
+    const merged = mergeTasks([local], [remote]);
+    expect(merged[0].skippedDates).toEqual(['2026-11-10']);
+    expect(merged[0].removedSkippedDates).toBeUndefined();
+    expect(merged[0].skippedDateUpdatedAt).toEqual({ '2026-11-10': 5000 });
+
+    const oneOffLocal: Task = {
+      ...baseTask,
+      id: 'oneoff-clean-start',
+      startDate: '2026-10-01',
+      recurrence: null,
+      updatedAt: 2000,
+    };
+    const oneOffRemote: Task = {
+      ...oneOffLocal,
+      startDate: '2026-10-01',
+      updatedAt: 1000,
+    };
+    const mergedOneOff = mergeTasks([oneOffLocal], [oneOffRemote]);
+    expect(mergedOneOff[0].startDate).toBeNull();
   });
 });

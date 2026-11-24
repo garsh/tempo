@@ -46,19 +46,33 @@ export function getGoogleAccount(): GoogleAccount | null {
 }
 
 export function setGoogleAccount(account: GoogleAccount | null): void {
-  if (!account) {
-    localStorage.removeItem(ACCOUNT_KEY);
-    return;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (!account) {
+      localStorage.removeItem(ACCOUNT_KEY);
+      return;
+    }
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(normalizeGoogleAccount(account)));
+  } catch {
+    /* private mode / unavailable storage */
   }
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(normalizeGoogleAccount(account)));
 }
+
+const ACCOUNT_FETCH_TIMEOUT_MS = 15_000;
 
 /** Best-effort; returns null on any failure (offline, scope, etc.). */
 export async function fetchDriveAccount(accessToken: string): Promise<GoogleAccount | null> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), ACCOUNT_FETCH_TIMEOUT_MS)
+    : null;
   try {
     const res = await fetch(
       'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName,photoLink)',
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        ...(controller ? { signal: controller.signal } : {}),
+      }
     );
     if (!res.ok) return null;
     const data = (await res.json()) as {
@@ -69,5 +83,7 @@ export async function fetchDriveAccount(accessToken: string): Promise<GoogleAcco
     return { email, name: data.user?.displayName, photoUrl: sanitizePhotoUrl(data.user?.photoLink) };
   } catch {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

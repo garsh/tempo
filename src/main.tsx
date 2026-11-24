@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt'
 import { getPrefs, subscribePrefs } from './prefs/prefs'
 import { applyTheme } from './prefs/theme'
@@ -27,7 +28,9 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
-    <PwaUpdatePrompt />
+    <ErrorBoundary>
+      <App />
+      <PwaUpdatePrompt />
+    </ErrorBoundary>
   </StrictMode>,
 )

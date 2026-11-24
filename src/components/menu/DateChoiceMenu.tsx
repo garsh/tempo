@@ -46,6 +46,7 @@ export function DateChoiceMenu({
   onDatePicked,
 }: DateChoiceMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const itemCount =
     mode === 'last_done' ? 3 : allowNoDate && onNoDate ? 4 : 3;
   const menuHeight = 44 * itemCount + 19;
@@ -63,6 +64,21 @@ export function DateChoiceMenu({
   const choose = (fn?: () => void) => () => {
     fn?.();
     onClose();
+  };
+
+  const openDatePicker = () => {
+    const input = dateInputRef.current;
+    if (!input) return;
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker();
+        return;
+      } catch {
+        /* Fall back to focus + click when showPicker throws */
+      }
+    }
+    input.focus({ preventScroll: true });
+    input.click();
   };
 
   return (
@@ -99,21 +115,14 @@ export function DateChoiceMenu({
               Today
               {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
             </button>
-            <label role="menuitem" className={`${row} relative`}>
-              <span className="pointer-events-none">Select</span>
-              <input
-                type="date"
-                aria-label="Select"
-                value={dateValue}
-                max={maxDate}
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  onDatePicked(e.target.value);
-                  onClose();
-                }}
-                className="absolute inset-0 h-full w-full cursor-pointer text-[16px] opacity-0"
-              />
-            </label>
+            <button
+              type="button"
+              role="menuitem"
+              className={row}
+              onClick={openDatePicker}
+            >
+              Select
+            </button>
           </>
         ) : (
           <>
@@ -139,20 +148,14 @@ export function DateChoiceMenu({
                 {active === 'tomorrow' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
               </button>
             )}
-            <label role="menuitem" className={`${row} relative`}>
-              <span className="pointer-events-none">Select</span>
-              <input
-                type="date"
-                aria-label="Select"
-                value={dateValue}
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  onDatePicked(e.target.value);
-                  onClose();
-                }}
-                className="absolute inset-0 h-full w-full cursor-pointer text-[16px] opacity-0"
-              />
-            </label>
+            <button
+              type="button"
+              role="menuitem"
+              className={row}
+              onClick={openDatePicker}
+            >
+              Select
+            </button>
             {allowNoDate && onNoDate && (
               <button
                 type="button"
@@ -167,6 +170,20 @@ export function DateChoiceMenu({
             )}
           </>
         )}
+        <input
+          ref={dateInputRef}
+          type="date"
+          aria-label="Select"
+          tabIndex={-1}
+          value={dateValue}
+          max={mode === 'last_done' ? maxDate : undefined}
+          onChange={(e) => {
+            if (!e.target.value) return;
+            onDatePicked(e.target.value);
+            onClose();
+          }}
+          className="sr-only"
+        />
       </div>
     </div>
   );

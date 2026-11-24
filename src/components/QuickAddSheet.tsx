@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
@@ -35,6 +35,7 @@ import {
   splitDueAt,
 } from '../domain/recurrence';
 import { dueAtForSelectedDay } from '../domain/calendarUi';
+import { useTodayKey } from '../hooks/useTodayKey';
 import { DateChoiceMenu, type DatePreset } from './menu/DateChoiceMenu';
 import { RepeatChoiceMenu } from './menu/RepeatChoiceMenu';
 import { RepeatPanel, type EndMode } from './quickAdd/RepeatPanel';
@@ -53,36 +54,7 @@ export interface QuickAddSheetProps {
   onRequestDelete?: (task: Task) => void;
   onLogCompletionDate?: (taskId: string, dateStr: string) => Promise<void> | void;
   onRemoveCompletionTimestamp?: (taskId: string, timestamp: number) => Promise<void> | void;
-}
-
-export const KEYBOARD_HEIGHT_STORAGE_KEY = 'tempo_last_keyboard_height';
-
-export function isMobileKeyboardDevice(): boolean {
-  if (typeof window === 'undefined') return false;
-  const isTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-  const isCoarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
-  const isMobileUA = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const isSmallScreen = window.innerWidth < 1024;
-  return isSmallScreen && (isTouch || isCoarse || isMobileUA);
-}
-
-export function getStoredOrEstimatedKeyboardHeight(): number {
-  if (typeof window === 'undefined') return 0;
-  if (!isMobileKeyboardDevice()) return 0;
-
-  try {
-    const stored = localStorage.getItem(KEYBOARD_HEIGHT_STORAGE_KEY);
-    if (stored) {
-      const val = parseInt(stored, 10);
-      if (!Number.isNaN(val) && val >= 160 && val <= 500) {
-        return val;
-      }
-    }
-  } catch {
-    // Ignore localStorage access failures
-  }
-
-  return Math.min(330, Math.max(260, Math.round(window.innerHeight * 0.36)));
+  onUnskipOccurrence?: (taskId: string, dateStr: string) => Promise<void> | void;
 }
 
 /**
@@ -95,37 +67,6 @@ export const LONG_DESCRIPTION_MIN_LENGTH = 100;
 export function descriptionExpandsDialog(notes: string): boolean {
   if (notes.includes('\n')) return true;
   return notes.trim().length >= LONG_DESCRIPTION_MIN_LENGTH;
-}
-
-export function computeQuickAddSheetMaxHeight({
-  keyboardInset,
-}: {
-  keyboardInset: number;
-}): string {
-  if (keyboardInset > 0) {
-    return `calc(100dvh - ${keyboardInset}px - max(24px, env(safe-area-inset-top)))`;
-  }
-  return 'calc(100dvh - max(24px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)))';
-}
-
-export function computeQuickAddSheetBottom({
-  isMobile,
-  activeKeyboardInset,
-  lastKnownKeyboardInset,
-  fallbackHeight,
-}: {
-  isMobile: boolean;
-  activeKeyboardInset: number;
-  lastKnownKeyboardInset: number;
-  fallbackHeight: number;
-}): number {
-  if (!isMobile) {
-    return activeKeyboardInset > 0 ? activeKeyboardInset : 0;
-  }
-  if (activeKeyboardInset > 100) {
-    return activeKeyboardInset;
-  }
-  return lastKnownKeyboardInset > 0 ? lastKnownKeyboardInset : fallbackHeight;
 }
 
 /**
@@ -143,7 +84,9 @@ export function QuickAddSheet({
   onRequestDelete,
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
+  onUnskipOccurrence,
 }: QuickAddSheetProps) {
+  const isEditMode = Boolean(initialTask?.id);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
   const repeatButtonRef = useRef<HTMLButtonElement>(null);
@@ -155,27 +98,7 @@ export function QuickAddSheet({
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [repeatMenuOpen, setRepeatMenuOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Preserve the last measured virtual keyboard height across focus shifts
-  const lastActiveKeyboardInsetRef = useRef<number>(0);
-  const [keyboardInset, setKeyboardInset] = useState(() =>
-    isOpen ? getStoredOrEstimatedKeyboardHeight() : 0
-  );
-
-  // When opening on mobile, immediately position above the keyboard before the first paint
-  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
-  if (isOpen && !prevIsOpen) {
-    setPrevIsOpen(true);
-    setDateMenuOpen(false);
-    if (isMobileKeyboardDevice()) {
-      const initialHeight = lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
-      if (initialHeight > 0 && keyboardInset !== initialHeight) {
-        setKeyboardInset(initialHeight);
-      }
-    }
-  } else if (!isOpen && prevIsOpen) {
-    setPrevIsOpen(false);
-  }
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
   // Recurrence states
   const [isRecurring, setIsRecurring] = useState(false);
@@ -198,37 +121,24 @@ export function QuickAddSheet({
   const [endAfterCount, setEndAfterCount] = useState('');
   const [initialLastDoneDate, setInitialLastDoneDate] = useState<string | null>(null);
   const [localHistory, setLocalHistory] = useState<number[]>([]);
+  const [localSkippedDates, setLocalSkippedDates] = useState<string[]>([]);
 
-  const todayStr = formatDate(new Date());
-  const tomorrowStr = formatDate(addDays(new Date(), 1));
+  const todayStr = useTodayKey();
+  const tomorrowStr = useMemo(() => formatDate(addDays(parseDate(todayStr), 1)), [todayStr]);
 
-  // Visual viewport tracking for mobile virtual keyboard
+  // Visual viewport tracking for virtual keyboard
   useEffect(() => {
-    if (!isOpen || typeof window === 'undefined') return;
+    if (!isOpen) {
+      setKeyboardInset(0);
+      return;
+    }
+    if (typeof window === 'undefined') return;
     const vv = window.visualViewport;
     if (!vv) return;
 
-    const isMobile = isMobileKeyboardDevice();
-
     const update = () => {
       const activeInset = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)));
-      if (activeInset > 100) {
-        lastActiveKeyboardInsetRef.current = activeInset;
-        setKeyboardInset(activeInset);
-        try {
-          localStorage.setItem(KEYBOARD_HEIGHT_STORAGE_KEY, String(activeInset));
-        } catch {
-          // Ignore localStorage errors
-        }
-      } else if (!isMobile || panel !== 'none') {
-        // When configuring the Repeat panel without an active virtual keyboard, allow full window expansion
-        setKeyboardInset(0);
-      } else {
-        // Mobile virtual keyboard dismissed on main form: remain above the keyboard
-        const preservedHeight =
-          lastActiveKeyboardInsetRef.current || getStoredOrEstimatedKeyboardHeight();
-        setKeyboardInset(preservedHeight);
-      }
+      setKeyboardInset(activeInset > 100 ? activeInset : 0);
     };
 
     vv.addEventListener('resize', update);
@@ -239,7 +149,7 @@ export function QuickAddSheet({
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
     };
-  }, [isOpen, panel]);
+  }, [isOpen]);
 
   // When opening the Repeat panel, dismiss any text-field keyboard focus so the window can expand fully
   useEffect(() => {
@@ -255,10 +165,19 @@ export function QuickAddSheet({
     }
   }, [panel]);
 
+  const defaultDueAtRef = useRef(defaultDueAt);
+  defaultDueAtRef.current = defaultDueAt;
+
   const resetForm = useCallback(() => {
+    const currentTodayStr = formatDate(new Date());
+    const currentDefaultDueAt = defaultDueAtRef.current;
     setTitle('');
     setNotes('');
-    setDueAt(defaultDueAt === null ? null : dueAtForSelectedDay(defaultDueAt, todayStr));
+    setDueAt(
+      currentDefaultDueAt === null
+        ? null
+        : dueAtForSelectedDay(currentDefaultDueAt, currentTodayStr)
+    );
     setIsRecurring(false);
     setRecurrenceType('fixed_interval');
     setIntervalValue(1);
@@ -279,6 +198,7 @@ export function QuickAddSheet({
     setEndAfterCount('');
     setInitialLastDoneDate(null);
     setLocalHistory([]);
+    setLocalSkippedDates([]);
     setPanel('none');
     setDateMenuOpen(false);
     setRepeatMenuOpen(false);
@@ -286,7 +206,7 @@ export function QuickAddSheet({
     window.requestAnimationFrame(() => {
       titleRef.current?.focus({ preventScroll: true });
     });
-  }, [defaultDueAt, todayStr]);
+  }, []);
 
   // Reset or populate state when opened or initialTask changes
   useEffect(() => {
@@ -300,6 +220,7 @@ export function QuickAddSheet({
       const isApprox = !isAnnual && isWindowPeriodic(initialTask);
       setIsRecurring(hasRecurrence);
       setLocalHistory([...(initialTask.completionHistory || [])]);
+      setLocalSkippedDates([...(initialTask.skippedDates || [])]);
       setInitialLastDoneDate(null);
 
       if (initialTask.recurrence) {
@@ -374,7 +295,15 @@ export function QuickAddSheet({
           }
         }
       } else {
-        setDueAt(initialTask.dueAt ? getDueDatePart(initialTask.dueAt) : null);
+        setDueAt(
+          initialTask.dueAt
+            ? getDueDatePart(initialTask.dueAt)
+            : !initialTask.id && initialTask.dueAt === undefined
+              ? defaultDueAtRef.current === null
+                ? null
+                : dueAtForSelectedDay(defaultDueAtRef.current, formatDate(new Date()))
+              : null
+        );
         setRecurrenceType('fixed_interval');
         setIntervalValue(1);
         setMaxIntervalValue(2);
@@ -618,6 +547,7 @@ export function QuickAddSheet({
   };
 
   const onTitleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void handleSubmit();
@@ -630,6 +560,7 @@ export function QuickAddSheet({
   };
 
   const onNotesKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       void handleSubmit();
@@ -728,7 +659,7 @@ export function QuickAddSheet({
     {
       active: 'bg-tt-blue text-white border border-tt-blue shadow-sm shadow-tt-blue/25',
       inactive:
-        'bg-white text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 hover:text-zinc-600 dark:hover:text-zinc-300 shadow-xs',
+        'bg-tt-surface text-tt-secondary border border-tt-border hover:text-tt-text shadow-xs',
     },
     { expanded: repeatMenuOpen, controlsId: 'repeat-choice-menu', buttonRef: repeatButtonRef },
   );
@@ -774,6 +705,9 @@ export function QuickAddSheet({
       historySectionRef={historySectionRef}
       onLogCompletionDate={onLogCompletionDate}
       onRemoveCompletionTimestamp={onRemoveCompletionTimestamp}
+      localSkippedDates={localSkippedDates}
+      setLocalSkippedDates={setLocalSkippedDates}
+      onUnskipOccurrence={onUnskipOccurrence}
     />
   );
 
@@ -822,7 +756,7 @@ export function QuickAddSheet({
           data-testid="quick-add-sheet"
           data-presentation="drawer"
           role="dialog"
-          aria-label={initialTask ? 'Edit routine' : 'Add routine'}
+          aria-label={isEditMode ? 'Edit routine' : 'Add routine'}
           className={`${
             overlayDrawer
               ? 'absolute inset-y-0 right-0 z-40 shadow-[-8px_0_28px_var(--tt-shadow)] min-[1680px]:static min-[1680px]:shadow-none'
@@ -831,7 +765,7 @@ export function QuickAddSheet({
         >
           <div className="shrink-0 h-14 px-5 border-b border-tt-border flex items-center justify-between gap-2">
             <span className="text-[14px] font-bold uppercase tracking-wider text-tt-secondary">
-              {initialTask ? 'Edit Routine' : 'New Routine'}
+              {isEditMode ? 'Edit Routine' : 'New Routine'}
             </span>
             <button
               type="button"
@@ -848,7 +782,7 @@ export function QuickAddSheet({
             <div className="px-5 pt-4">
               <div
                 className="tt-autogrow-field w-full py-1.5 text-[20px] font-semibold leading-snug text-tt-text"
-                data-replicated-value={title || (initialTask ? 'Routine title' : 'What would you like to do?')}
+                data-replicated-value={title || (isEditMode ? 'Routine title' : 'What would you like to do?')}
                 style={{ '--tt-autogrow-min': '1lh', '--tt-autogrow-max': '8lh' } as React.CSSProperties}
               >
                 <textarea
@@ -861,9 +795,7 @@ export function QuickAddSheet({
                   onKeyDown={onTitleKeyDown}
                   enterKeyHint="done"
                   autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
+                  placeholder={isEditMode ? 'Routine title' : 'What would you like to do?'}
                   aria-label="Routine title"
                   className="w-full bg-transparent text-tt-text placeholder:text-tt-muted outline-none resize-none wrap-break-word"
                 />
@@ -878,7 +810,6 @@ export function QuickAddSheet({
                   onChange={(e) => setNotes(e.target.value)}
                   onKeyDown={onNotesKeyDown}
                   autoComplete="off"
-                  autoCorrect="off"
                   placeholder="Description (optional)"
                   aria-label="Description"
                   rows={4}
@@ -896,7 +827,7 @@ export function QuickAddSheet({
           </div>
 
           <div className="shrink-0 px-5 py-3 border-t border-tt-border bg-tt-elevated flex items-center justify-between gap-2">
-            {initialTask?.id && onRequestDelete ? (
+            {isEditMode && initialTask && onRequestDelete ? (
               <button
                 type="button"
                 onClick={() => onRequestDelete(initialTask)}
@@ -918,7 +849,7 @@ export function QuickAddSheet({
               </button>
               <button
                 type="button"
-                aria-label={initialTask ? 'Save routine' : 'Create routine'}
+                aria-label={isEditMode ? 'Save routine' : 'Create routine'}
                 disabled={!canSubmit || isSubmitting}
                 onClick={() => void handleSubmit()}
                 className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] font-bold tracking-wide transition-all ${
@@ -927,12 +858,12 @@ export function QuickAddSheet({
                     : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
                 }`}
               >
-                {initialTask ? (
+                {isEditMode ? (
                   <Check className="w-4 h-4 stroke-[3]" />
                 ) : (
                   <Plus className="w-4 h-4 stroke-[3]" />
                 )}
-                <span>{initialTask ? 'Save' : 'Create'}</span>
+                <span>{isEditMode ? 'Save' : 'Create'}</span>
               </button>
             </div>
           </div>
@@ -945,11 +876,11 @@ export function QuickAddSheet({
   const expanded = descriptionExpandsDialog(notes);
 
   const shellClass = expanded
-    ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto'
+    ? 'fixed inset-0 z-[60] flex flex-col bg-tt-elevated overflow-y-auto pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]'
     : 'relative w-full max-w-xl sm:max-w-2xl flex flex-col bg-tt-elevated rounded-2xl sm:rounded-3xl border border-tt-border/80 shadow-2xl overflow-y-auto';
 
-  const dialogStyle: React.CSSProperties = expanded
-    ? {}
+  const dialogStyle: React.CSSProperties | undefined = expanded
+    ? undefined
     : {
         maxHeight: keyboardInset > 0
           ? `calc(100dvh - ${keyboardInset}px - max(24px, env(safe-area-inset-top)))`
@@ -978,7 +909,7 @@ export function QuickAddSheet({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={initialTask ? 'Edit routine' : 'Add routine'}
+        aria-label={isEditMode ? 'Edit routine' : 'Add routine'}
         className={shellClass}
         style={dialogStyle}
         onClick={(e) => e.stopPropagation()}
@@ -990,44 +921,58 @@ export function QuickAddSheet({
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="w-10 h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text"
+              className="w-10 h-10 flex items-center justify-center text-tt-secondary hover:text-tt-text cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
             <span className="flex-1 text-[17px] font-bold text-tt-text">
-              {initialTask ? 'Edit Routine' : 'New Routine'}
+              {isEditMode ? 'Edit Routine' : 'New Routine'}
             </span>
-            <button
-              type="button"
-              disabled={!canSubmit || isSubmitting}
-              onClick={() => void handleSubmit()}
-              className="px-3 py-1.5 text-[15px] font-semibold text-tt-blue disabled:opacity-40"
-            >
-              {initialTask ? 'Done' : 'Create'}
-            </button>
+            {isEditMode && initialTask && onRequestDelete && (
+              <button
+                type="button"
+                onClick={() => onRequestDelete(initialTask)}
+                aria-label="Delete routine"
+                className="w-10 h-10 flex items-center justify-center rounded-lg text-tt-overdue hover:bg-red-500/10 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
 
         {!expanded && (
           <div className="flex items-center justify-between px-4 sm:px-5 pt-1.5 pb-0.5">
             <span className="text-xs font-bold uppercase tracking-wider text-tt-secondary">
-              {initialTask ? 'Edit Routine' : 'New Routine'}
+              {isEditMode ? 'Edit Routine' : 'New Routine'}
             </span>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="p-1 text-tt-secondary hover:text-tt-text rounded-md cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              {isEditMode && initialTask && onRequestDelete && (
+                <button
+                  type="button"
+                  onClick={() => onRequestDelete(initialTask)}
+                  aria-label="Delete routine"
+                  className="w-9 h-9 flex items-center justify-center text-tt-overdue hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="w-9 h-9 -mr-1.5 flex items-center justify-center text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
         <div className={`px-4 sm:px-5 ${expanded ? 'pt-4 flex-1' : 'pt-2'}`}>
           <div
             className="tt-autogrow-field w-full py-1.5 text-[20px] sm:text-[22px] font-semibold leading-snug text-tt-text"
-            data-replicated-value={title || (initialTask ? 'Routine title' : 'What would you like to do?')}
+            data-replicated-value={title || (isEditMode ? 'Routine title' : 'What would you like to do?')}
             style={{ '--tt-autogrow-min': '1lh', '--tt-autogrow-max': '8lh' } as React.CSSProperties}
           >
             <textarea
@@ -1040,9 +985,7 @@ export function QuickAddSheet({
               onKeyDown={onTitleKeyDown}
               enterKeyHint="done"
               autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder={initialTask ? 'Routine title' : 'What would you like to do?'}
+              placeholder={isEditMode ? 'Routine title' : 'What would you like to do?'}
               aria-label="Routine title"
               className="w-full bg-transparent text-tt-text placeholder:text-tt-muted outline-none resize-none wrap-break-word"
             />
@@ -1057,7 +1000,6 @@ export function QuickAddSheet({
               onChange={(e) => setNotes(e.target.value)}
               onKeyDown={onNotesKeyDown}
               autoComplete="off"
-              autoCorrect="off"
               placeholder="Description (optional)"
               aria-label="Description"
               rows={expanded ? 6 : 1}
@@ -1074,7 +1016,7 @@ export function QuickAddSheet({
           <div className="flex-1 min-w-1" />
           <button
             type="button"
-            aria-label={initialTask ? 'Save routine' : 'Create routine'}
+            aria-label={isEditMode ? 'Save routine' : 'Create routine'}
             disabled={!canSubmit || isSubmitting}
             onClick={() => void handleSubmit()}
             className={`shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[14px] sm:text-[15px] font-bold tracking-wide transition-all ${
@@ -1083,12 +1025,12 @@ export function QuickAddSheet({
                 : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
             }`}
           >
-            {initialTask ? (
+            {isEditMode ? (
               <Check className="w-4 h-4 stroke-[3]" />
             ) : (
               <Plus className="w-4 h-4 stroke-[3]" />
             )}
-            <span>{initialTask ? 'Save' : 'Create'}</span>
+            <span>{isEditMode ? 'Save' : 'Create'}</span>
           </button>
         </div>
 

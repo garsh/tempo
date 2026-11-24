@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { RefreshCw, Search, Settings } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { handleMenuArrowKeyDown } from './useAnchoredMenu';
 
 const ICON = {
   width: 20,
@@ -79,35 +80,59 @@ interface OverflowMenuProps {
 export function OverflowMenu(props: OverflowMenuProps) {
   const { open, anchor, onClose } = props;
   const cardRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   // Card overlaps the ⋮ button (top ≈ button top + 4, right edge ≥ 12px in).
   const pos = anchor
     ? { top: Math.max(8, anchor.top + 4), right: Math.max(12, window.innerWidth - anchor.right) }
     : { top: 14, right: 12 };
 
-  useEscapeKey(open, onClose, { capture: true, stopPropagation: true });
+  const handleDismiss = () => {
+    onClose();
+    const target = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (target?.isConnected) {
+      target.focus({ preventScroll: true });
+    }
+  };
+
+  useEscapeKey(open, handleDismiss, { capture: true, stopPropagation: true });
 
   useEffect(() => {
-    if (open) cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    if (open) {
+      if (typeof document !== 'undefined') {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && !cardRef.current?.contains(active)) {
+          returnFocusRef.current = active;
+        }
+      }
+      cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    }
   }, [open]);
 
   if (!open) return null;
 
   const act = (fn?: () => void) => () => {
+    returnFocusRef.current = null;
     fn?.();
     onClose();
   };
   const row =
-    'w-full h-[43px] flex items-center pl-[20px] pr-[18px] gap-[12px] text-left text-[18px] leading-none text-tt-text outline-none focus-visible:bg-tt-hover active:bg-tt-hover';
+    'w-full h-[43px] flex items-center pl-[20px] pr-[18px] gap-[12px] text-left text-[18px] leading-none text-tt-text outline-none cursor-pointer hover:bg-tt-hover focus-visible:bg-tt-hover active:bg-tt-hover';
 
   return (
-    <div className="fixed inset-0 z-[65]" onClick={onClose} data-testid="overflow-menu-layer">
+    <div className="fixed inset-0 z-[65]" onClick={handleDismiss} data-testid="overflow-menu-layer">
       <div
         ref={cardRef}
         role="menu"
         aria-label="More options"
         onClick={(e) => e.stopPropagation()}
-        className="absolute w-[247px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
-        style={{ top: pos.top, right: pos.right }}
+        onKeyDown={(e) => handleMenuArrowKeyDown(e, cardRef.current)}
+        className="absolute w-[247px] max-h-[calc(100dvh-16px)] overflow-y-auto rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
+        style={{
+          top: pos.top,
+          right: pos.right,
+          maxHeight: typeof window !== 'undefined' ? `calc(100dvh - ${pos.top + 8}px)` : undefined,
+        }}
       >
         {props.onSearch && (
           <button type="button" role="menuitem" className={row} onClick={act(props.onSearch)}>

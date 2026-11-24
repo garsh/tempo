@@ -1,4 +1,4 @@
-import type React from 'react';
+import { useRef, type FC } from 'react';
 import { SkipForward, X, ArrowRight, AlertCircle } from 'lucide-react';
 import type { Task } from '../../types/task';
 import {
@@ -8,8 +8,7 @@ import {
   getSkipOccurrenceDate,
   isFixedRecurring,
 } from '../../domain/recurrence';
-import { usePrefs } from '../../prefs/prefs';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { ModalDialog } from '../ui/ModalDialog';
 
 interface SkipOccurrenceDialogProps {
   isOpen: boolean;
@@ -18,15 +17,13 @@ interface SkipOccurrenceDialogProps {
   onConfirm: (task: Task, dateToSkip: string) => Promise<void> | void;
 }
 
-export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
+export const SkipOccurrenceDialog: FC<SkipOccurrenceDialogProps> = ({
   isOpen,
   task,
   onClose,
   onConfirm,
 }) => {
-  const [{ timeFormat }] = usePrefs();
-
-  useEscapeKey(isOpen, onClose, { preventDefault: true });
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
   if (!isOpen || !task) return null;
 
@@ -34,8 +31,8 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
   const curDateStr = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date());
   const nextOccurrenceDueAt = recurring ? getSkipOccurrenceDate(task, curDateStr) : null;
 
-  const currentLabel = task.dueAt ? formatDueLabel(task.dueAt, timeFormat) : formatDueLabel(curDateStr, timeFormat);
-  const nextLabel = nextOccurrenceDueAt ? formatDueLabel(nextOccurrenceDueAt, timeFormat) : 'End of recurrence';
+  const currentLabel = task.dueAt ? formatDueLabel(task.dueAt) : formatDueLabel(curDateStr);
+  const nextLabel = nextOccurrenceDueAt ? formatDueLabel(nextOccurrenceDueAt) : 'End of recurrence';
 
   const handleConfirm = async () => {
     await onConfirm(task, curDateStr);
@@ -43,16 +40,14 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="skip-dialog-title"
-      className="fixed inset-0 z-[65] flex items-center justify-center p-4 compact-landscape:p-2 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <ModalDialog
+      open={true}
+      onClose={onClose}
+      ariaLabelledBy="skip-dialog-title"
+      initialFocusRef={cancelBtnRef}
+      className="m-auto p-0 w-[min(calc(100dvw-2rem),32rem)] max-w-none max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl text-tt-text"
     >
-      <div className="relative w-full max-w-lg max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl p-6 sm:p-8 compact-landscape:p-4 text-tt-text space-y-6 compact-landscape:space-y-3">
+      <div className="p-6 sm:p-8 compact-landscape:p-4 space-y-6 compact-landscape:space-y-3">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-tt-border">
           <div className="flex items-center gap-3.5 min-w-0">
@@ -72,7 +67,7 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-2 rounded-xl text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors"
+            className="p-2 rounded-xl text-tt-secondary hover:text-tt-text hover:bg-tt-hover transition-colors cursor-pointer"
           >
             <X className="w-6 h-6" />
           </button>
@@ -83,7 +78,7 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
           <div className="space-y-5">
             <p className="text-[18px] sm:text-[19px] text-tt-text leading-relaxed">
               Skip the scheduled occurrence for{' '}
-              <span className="font-bold text-tt-text">"{task.title}"</span>? The task will advance to the next occurrence without being marked as completed.
+              <span className="font-bold text-tt-text">&ldquo;{task.title}&rdquo;</span>? The task will advance to the next occurrence without being marked as completed.
             </p>
 
             {/* Date transition card */}
@@ -121,9 +116,10 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
         {/* Actions */}
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-tt-border">
           <button
+            ref={cancelBtnRef}
             type="button"
             onClick={onClose}
-            className="px-6 py-3 text-[17px] sm:text-[18px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-2xl transition-colors"
+            className="px-6 py-3 text-[17px] sm:text-[18px] font-semibold text-tt-secondary hover:text-tt-text hover:bg-tt-hover rounded-2xl transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -131,14 +127,14 @@ export const SkipOccurrenceDialog: React.FC<SkipOccurrenceDialogProps> = ({
             <button
               type="button"
               onClick={handleConfirm}
-              className="px-7 py-3 text-[17px] sm:text-[18px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-2xl shadow-lg transition-colors active:scale-95"
+              className="px-7 py-3 text-[17px] sm:text-[18px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-2xl shadow-lg transition-colors active:scale-95 cursor-pointer"
             >
               Skip Occurrence
             </button>
           )}
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 };
 

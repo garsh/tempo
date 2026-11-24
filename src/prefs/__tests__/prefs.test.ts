@@ -42,7 +42,6 @@ describe('prefs persistence', () => {
       hideCompleted: true,
       showOverdue: false,
       weekStart: 1 as const,
-      timeFormat: '24h' as const,
       hemisphere: 'south' as const,
     };
     savePrefs(next, storage);
@@ -56,7 +55,7 @@ describe('prefs persistence', () => {
     const p = sanitizePrefs({
       theme: 'neon',
       weekStart: 3,
-      timeFormat: '13h',
+      timeFormat: '24h',
       hemisphere: 'equator',
       newTaskPosition: 'middle',
       showOverdue: 'yes',

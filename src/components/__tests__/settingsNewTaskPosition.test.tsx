@@ -111,23 +111,19 @@ describe('SettingsPage consolidated preferences', () => {
 
     const themeSelect = getSelectByLabel(view.container, 'Theme');
     const weekStartSelect = getSelectByLabel(view.container, 'Week starts on');
-    const timeFormatSelect = getSelectByLabel(view.container, 'Time format');
     const seasonsSelect = getSelectByLabel(view.container, 'Seasons');
 
     expect(themeSelect.value).toBe('system');
     expect(weekStartSelect.value).toBe('0');
-    expect(timeFormatSelect.value).toBe('12h');
     expect(seasonsSelect.value).toBe('north');
 
     selectOption(themeSelect, 'dark');
     selectOption(weekStartSelect, '1');
-    selectOption(timeFormatSelect, '24h');
     selectOption(seasonsSelect, 'south');
 
     expect(getPrefs()).toMatchObject({
       theme: 'dark',
       weekStart: 1,
-      timeFormat: '24h',
       hemisphere: 'south',
     });
 
@@ -170,7 +166,7 @@ describe('SettingsPage consolidated preferences', () => {
     const root = view.container.querySelector('[data-testid="settings-page"]');
     expect(root?.getAttribute('data-settings-layout')).toBe('drilldown');
     expect(root?.getAttribute('data-settings-page')).toBe('root');
-    expect(view.container.querySelectorAll('select')).toHaveLength(5);
+    expect(view.container.querySelectorAll('select')).toHaveLength(4);
     expect(view.container.textContent).toContain('Account');
     expect(view.container.textContent).toContain('Backup & Diagnostics');
     expect(view.container.textContent).toContain('Keyboard shortcuts');

@@ -1,7 +1,7 @@
 import type { Task, TaskList } from '../types/task';
 import { isCompleted, isRecurring, isUndatedOneTime, isWindowPeriodic } from './recurrence';
 
-export const BUILD_ID = '2026-11-15-fix5';
+export const BUILD_ID = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : 'dev';
 const DIAG_STORAGE_KEY = 'tempo_diag_log_v1';
 const MAX_DIAG_EVENTS = 60;
 
@@ -129,6 +129,10 @@ export function getDiagEvents(): DiagEvent[] {
   return [...inMemoryEvents];
 }
 
+export function flushDiagnostics(): void {
+  flushStorageEvents();
+}
+
 export function clearDiagEvents(): void {
   if (flushTimer) {
     clearTimeout(flushTimer);
@@ -162,6 +166,15 @@ export function initDiagnostics(): void {
     const msg = reason instanceof Error ? reason.message : String(reason ?? 'Unhandled rejection');
     recordDiagEvent('unhandled_rejection', msg);
   });
+
+  window.addEventListener('pagehide', flushStorageEvents);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushStorageEvents();
+      }
+    });
+  }
 }
 
 export function countDuplicateOpenTasks(tasks: Task[]): {

@@ -24,6 +24,7 @@ import {
   getStoredClientId,
   isAuthInteractionError,
   isPopupBlockedError,
+  loadGoogleScript,
   requestGoogleAccessToken,
   setStoredClientId,
   signOutGoogleSession,
@@ -209,6 +210,119 @@ describe('googleAuth client id resolution', () => {
       expect(requestAccessToken).toHaveBeenCalledWith();
       await expect(promiseNoHint).resolves.toBe('fresh-token');
     } finally {
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+    }
+  });
+
+  it('clears cached token when changing or clearing custom client id', () => {
+    storeAccessToken('old-client-token', 3600);
+    expect(getCachedAccessToken()).toBe('old-client-token');
+
+    expect(setStoredClientId('new-client.apps.googleusercontent.com')).toBe(true);
+    expect(getCachedAccessToken()).toBeNull();
+
+    storeAccessToken('new-client-token', 3600);
+    expect(setStoredClientId('')).toBe(true);
+    expect(getCachedAccessToken()).toBeNull();
+  });
+
+  it('loadGoogleScript removes failed script tags and recovers on subsequent retry', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const previousDocument = (globalThis as { document?: unknown }).document;
+    const win: Record<string, unknown> = {};
+    const scripts: Array<{
+      src: string;
+      async: boolean;
+      defer: boolean;
+      onload: (() => void) | null;
+      onerror: (() => void) | null;
+      remove: ReturnType<typeof vi.fn>;
+    }> = [];
+    const doc = {
+      querySelector: vi.fn(() => scripts[0] ?? null),
+      createElement: vi.fn(() => {
+        const el = {
+          src: '',
+          async: false,
+          defer: false,
+          onload: null as (() => void) | null,
+          onerror: null as (() => void) | null,
+          remove: vi.fn(() => {
+            const idx = scripts.indexOf(el);
+            if (idx >= 0) scripts.splice(idx, 1);
+          }),
+        };
+        return el;
+      }),
+      head: {
+        appendChild: vi.fn((el: (typeof scripts)[number]) => {
+          scripts.push(el);
+        }),
+      },
+    };
+    vi.stubGlobal('window', win);
+    vi.stubGlobal('document', doc);
+
+    try {
+      // Pre-existing failed script from initial offline page load
+      scripts.push({
+        src: 'https://accounts.google.com/gsi/client',
+        async: true,
+        defer: true,
+        onload: null,
+        onerror: null,
+        remove: vi.fn(() => {
+          scripts.shift();
+        }),
+      });
+
+      const firstAttempt = loadGoogleScript();
+      expect(scripts).toHaveLength(1);
+      scripts[0]!.onerror?.();
+      await expect(firstAttempt).rejects.toThrow('Failed to load Google Sign-In script');
+      expect(scripts).toHaveLength(0);
+
+      // Next attempt after reconnect appends a new script and resolves once GIS loads
+      const secondAttempt = loadGoogleScript();
+      expect(scripts).toHaveLength(1);
+      win.google = { accounts: { oauth2: { initTokenClient: vi.fn() } } };
+      scripts[0]!.onload?.();
+      await expect(secondAttempt).resolves.toBeUndefined();
+    } finally {
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+      if (previousDocument === undefined) {
+        delete (globalThis as { document?: unknown }).document;
+      } else {
+        vi.stubGlobal('document', previousDocument);
+      }
+    }
+  });
+
+  it('times out silent access token requests that never invoke GIS callbacks', async () => {
+    vi.useFakeTimers();
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const initTokenClient = vi.fn(() => ({
+      requestAccessToken: vi.fn(),
+    }));
+    vi.stubGlobal('window', { google: { accounts: { oauth2: { initTokenClient } } } });
+    try {
+      const pending = requestGoogleAccessToken('client.apps.googleusercontent.com', 'silent');
+      const assertion = expect(pending).rejects.toMatchObject({
+        name: 'GoogleAuthError',
+        code: 'interaction_required',
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
       if (previousWindow === undefined) {
         delete (globalThis as { window?: unknown }).window;
       } else {

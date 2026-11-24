@@ -58,13 +58,28 @@ describe('parseSyncPayload', () => {
     expect(parsed.tasks[0]?.completionHistory.at(-1)).toBe(400);
   });
 
-  it('rejects a non-array tasks field', () => {
+  it('rejects a non-array tasks field, missing tasks property, or invalid JSON', () => {
     expect(() => parseSyncPayload(JSON.stringify({ tasks: 'nope' }), { now })).toThrow(SyncPayloadError);
+    for (const bad of [
+      JSON.stringify({ tasks: 'nope' }),
+      JSON.stringify({}),
+      JSON.stringify({ error: 'proxy error' }),
+    ]) {
+      try {
+        parseSyncPayload(bad, { now });
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(SyncPayloadError);
+        expect((err as SyncPayloadError).code).toBe('tasks_not_array');
+      }
+    }
+
     try {
-      parseSyncPayload(JSON.stringify({ tasks: 'nope' }), { now });
+      parseSyncPayload('<html>captive portal</html>', { now });
+      expect.unreachable('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(SyncPayloadError);
-      expect((err as SyncPayloadError).code).toBe('tasks_not_array');
+      expect((err as SyncPayloadError).code).toBe('invalid');
     }
   });
 
@@ -501,5 +516,39 @@ describe('compactSyncData', () => {
 
     const withWatermark = compactSyncData({ ...input, tombstonesPrunedBefore: 987654 });
     expect(withWatermark.tombstonesPrunedBefore).toBe(987654);
+  });
+
+  it('sanitizes and compacts skippedDateUpdatedAt on fixed recurring tasks', () => {
+    const parsed = parseSyncPayload(
+      JSON.stringify({
+        tasks: [
+          task(10, {
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+            skippedDateUpdatedAt: {
+              '2026-11-20': 1000,
+              'bad-key': 2000,
+              '2026-11-21': -5,
+              '2026-11-22': now + CLOCK_SKEW_MS + 60_000,
+            },
+          }),
+        ],
+      }),
+      { now }
+    );
+    expect(parsed.tasks[0]?.skippedDateUpdatedAt).toEqual({
+      '2026-11-20': 1000,
+      '2026-11-22': now,
+    });
+    const compacted = compactSyncData({
+      version: 4,
+      exportedAt: now,
+      tasks: parsed.tasks,
+      lists: [],
+      folders: [],
+    });
+    expect(compacted.tasks[0]?.skippedDateUpdatedAt).toEqual({
+      '2026-11-20': 1000,
+      '2026-11-22': now,
+    });
   });
 });

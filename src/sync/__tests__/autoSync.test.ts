@@ -3,6 +3,7 @@ import * as autoSync from '../autoSync';
 import * as googleAuth from '../googleAuth';
 import * as googleAccount from '../googleAccount';
 import * as googleDrive from '../googleDrive';
+import * as syncWatermark from '../syncWatermark';
 
 function createMockStorage() {
   const store = new Map<string, string>();
@@ -96,9 +97,6 @@ describe('autoSync', () => {
     vi.spyOn(googleDrive, 'syncWithGoogleDrive').mockResolvedValue({
       success: true,
       tasksCount: 0,
-      listsCount: 0,
-      foldersCount: 0,
-      filtersCount: 0,
       syncedAt: Date.now(),
     });
     autoSync.setAutoSyncEnabled(true);
@@ -190,9 +188,6 @@ describe('autoSync', () => {
     vi.spyOn(googleDrive, 'syncWithGoogleDrive').mockResolvedValue({
       success: true,
       tasksCount: 1,
-      listsCount: 1,
-      foldersCount: 0,
-      filtersCount: 0,
       syncedAt: 555_000,
     });
 
@@ -200,5 +195,75 @@ describe('autoSync', () => {
     expect(result?.success).toBe(true);
     expect(autoSync.getSyncAuthPrompt()).toBeNull();
     expect(autoSync.getLastSyncError()).toBeNull();
+  });
+
+  it('retries once with a fresh token when Drive returns 401 (DriveAuthError)', async () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    vi.spyOn(googleAccount, 'fetchDriveAccount').mockResolvedValue(null);
+    googleAuth.storeAccessToken('stale-token', 3600);
+    const tokenSpy = vi
+      .spyOn(googleAuth, 'ensureGoogleAccessToken')
+      .mockResolvedValueOnce('stale-token')
+      .mockResolvedValueOnce('fresh-token');
+    const syncSpy = vi
+      .spyOn(googleDrive, 'syncWithGoogleDrive')
+      .mockRejectedValueOnce(new googleDrive.DriveAuthError())
+      .mockResolvedValueOnce({
+        success: true,
+        tasksCount: 2,
+        syncedAt: 777_000,
+      });
+
+    const result = await autoSync.runDriveSync({ allowInteractive: true, force: true });
+    expect(result?.success).toBe(true);
+    expect(tokenSpy).toHaveBeenCalledTimes(2);
+    expect(syncSpy).toHaveBeenNthCalledWith(1, 'stale-token', expect.any(Object));
+    expect(syncSpy).toHaveBeenNthCalledWith(2, 'fresh-token', expect.any(Object));
+  });
+
+  it('cancelPendingAutoSync cancels pending debounced sync and clearSyncWatermarkState clears lastSyncedAt', () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    autoSync.setAutoSyncEnabled(true);
+    autoSync.recordSyncSuccess(123_456);
+    expect(autoSync.getLastSyncedAt()).toBe(123_456);
+
+    autoSync.triggerDebouncedSync(2000);
+    expect(vi.getTimerCount()).toBe(1);
+    autoSync.cancelPendingAutoSync();
+    expect(vi.getTimerCount()).toBe(0);
+
+    syncWatermark.clearSyncWatermarkState();
+    expect(autoSync.getLastSyncedAt()).toBeNull();
+  });
+
+  it('interactive runDriveSync waits for failed silent inflight sync and retries interactively', async () => {
+    vi.spyOn(googleAuth, 'getStoredClientId').mockReturnValue('client-123');
+    vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'test@example.com' });
+    vi.spyOn(googleAccount, 'fetchDriveAccount').mockResolvedValue(null);
+    autoSync.setAutoSyncEnabled(true);
+
+    let rejectSilent!: (err: unknown) => void;
+    const silentPromise = new Promise<string>((_res, rej) => {
+      rejectSilent = rej;
+    });
+
+    vi.spyOn(googleAuth, 'ensureGoogleAccessToken')
+      .mockReturnValueOnce(silentPromise)
+      .mockResolvedValueOnce('interactive-token');
+    vi.spyOn(googleDrive, 'syncWithGoogleDrive').mockResolvedValueOnce({
+      success: true,
+      tasksCount: 1,
+      syncedAt: 888_000,
+    });
+
+    const silentRun = autoSync.runDriveSync({ allowInteractive: false });
+    const interactiveRun = autoSync.runDriveSync({ allowInteractive: true, force: true });
+
+    rejectSilent(new googleAuth.GoogleAuthError('interaction_required', 'interaction_required'));
+    await expect(silentRun).resolves.toBeNull();
+    const interactiveResult = await interactiveRun;
+    expect(interactiveResult?.success).toBe(true);
   });
 });

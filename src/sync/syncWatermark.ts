@@ -109,4 +109,5 @@ export function clearSyncWatermarkState(): void {
   removeStorage(TOMBSTONES_PRUNED_FILE_ID_KEY);
   removeStorage(LAST_SYNCED_FILE_ID_KEY);
   removeStorage(DRIVE_FILE_ID_KEY);
+  removeStorage(LAST_SYNC_KEY);
 }

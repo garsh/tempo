@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, RefreshCw, X } from 'lucide-react';
 import type { SyncNowResult } from '../hooks/useAutoSync';
 import type { SyncAuthPromptState } from '../sync/autoSync';
+import { useBottomBannerSlot } from '../domain/bottomBannerCoordinator';
 
 interface SyncReconnectPromptProps {
   authPrompt: SyncAuthPromptState | null | undefined;
@@ -28,6 +29,9 @@ export function SyncReconnectPrompt({
   const [errorMessage, setErrorMessage] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const wantsBanner =
+    !hidden && (uiState !== 'idle' || Boolean(authPrompt && !authPrompt.dismissed));
+  const bannerAllowed = useBottomBannerSlot('sync-reconnect', wantsBanner);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -44,7 +48,7 @@ export function SyncReconnectPrompt({
     };
   }, []);
 
-  if (hidden) return null;
+  if (hidden || !bannerAllowed) return null;
 
   const containerClass =
     'fixed bottom-20 desktop:bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--tt-elevated)] text-[var(--tt-text)] border border-[var(--tt-border)] shadow-[0_8px_24px_var(--tt-shadow)] max-w-[calc(100dvw-2rem)]';

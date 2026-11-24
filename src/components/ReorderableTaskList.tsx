@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '../types/task';
 import { moveItemToSlot } from '../domain/reorder';
 
@@ -124,8 +124,19 @@ export function ReorderableTaskList({
   const detachDragTouchRef = useRef<() => void>(() => {});
 
   const tasksRef = useRef(tasks);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const onReorderRef = useRef(onReorder);
   const onDragActiveChangeRef = useRef(onDragActiveChange);
+  const rowCallbacksRef = useRef<
+    Map<
+      string,
+      {
+        rowRef: (el: HTMLDivElement | null) => void;
+        onRowPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+      }
+    >
+  >(new Map());
 
   useEffect(() => {
     onReorderRef.current = onReorder;
@@ -171,6 +182,16 @@ export function ReorderableTaskList({
     tasksRef.current = displayTasks;
   }, [displayTasks]);
 
+  useLayoutEffect(() => {
+    const active = activeRef.current;
+    if (!active) return;
+    const draggedEl = rowRefs.current.get(active.taskId);
+    if (draggedEl) {
+      draggedEl.style.transform = `translateY(${active.offsetY}px)`;
+      draggedEl.style.transition = 'none';
+    }
+  }, [dragState]);
+
   const clearPending = useCallback(() => {
     const p = pendingRef.current;
     if (p) {
@@ -187,6 +208,11 @@ export function ReorderableTaskList({
       settleTimerRef.current = null;
     }
     if (activeRef.current) {
+      const draggedEl = rowRefs.current.get(activeRef.current.taskId);
+      if (draggedEl) {
+        draggedEl.style.transform = '';
+        draggedEl.style.transition = '';
+      }
       activeRef.current = null;
       setDragState(null);
       onDragActiveChangeRef.current?.(false);
@@ -253,18 +279,26 @@ export function ReorderableTaskList({
               : fromSnap.midpoint
           : e.clientY;
       const targetIndex = computeTargetIndex(probeY, active.snapshots);
+      const prevTargetIndex = active.targetIndex;
       active.offsetY = offsetY;
       active.targetIndex = targetIndex;
-      setDragState({
-        taskId: active.taskId,
-        fromIndex: active.fromIndex,
-        targetIndex,
-        offsetY,
-        settling: false,
-        draggedHeight: active.draggedHeight,
-        indicatorTop: computeIndicatorTop(active, targetIndex),
-        orderKeys: active.orderKeys,
-      });
+      const draggedEl = rowRefs.current.get(active.taskId);
+      if (draggedEl) {
+        draggedEl.style.transform = `translateY(${offsetY}px)`;
+        draggedEl.style.transition = 'none';
+      }
+      if (targetIndex !== prevTargetIndex) {
+        setDragState({
+          taskId: active.taskId,
+          fromIndex: active.fromIndex,
+          targetIndex,
+          offsetY,
+          settling: false,
+          draggedHeight: active.draggedHeight,
+          indicatorTop: computeIndicatorTop(active, targetIndex),
+          orderKeys: active.orderKeys,
+        });
+      }
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -311,6 +345,12 @@ export function ReorderableTaskList({
         onReorderRef.current(reorderedIds);
       }
 
+      const draggedEl = rowRefs.current.get(taskId);
+      if (draggedEl) {
+        draggedEl.style.transition = 'transform 160ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease';
+        draggedEl.style.transform = `translateY(${destOffsetY}px)`;
+      }
+
       // Smoothly drop the dragged item into the now-empty slot before clearing transforms
       setDragState({
         taskId,
@@ -325,6 +365,11 @@ export function ReorderableTaskList({
 
       settleTimerRef.current = window.setTimeout(() => {
         settleTimerRef.current = null;
+        const settledEl = rowRefs.current.get(taskId);
+        if (settledEl) {
+          settledEl.style.transform = '';
+          settledEl.style.transition = '';
+        }
         setDragState(null);
         onDragActiveChangeRef.current?.(false);
         window.setTimeout(() => {
@@ -359,7 +404,7 @@ export function ReorderableTaskList({
 
   const handleRowPointerDown = useCallback(
     (taskId: string, e: React.PointerEvent<HTMLDivElement>) => {
-      if (!enabled || tasksRef.current.length < 2 || settleTimerRef.current !== null) return;
+      if (!enabledRef.current || tasksRef.current.length < 2 || settleTimerRef.current !== null) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       if ((e.target as HTMLElement).closest('button, input, a')) return;
 
@@ -431,7 +476,7 @@ export function ReorderableTaskList({
 
       pendingRef.current = { taskId, pointerId, startX, startY, timerId };
     },
-    [enabled, clearPending]
+    [clearPending]
   );
 
   const handleRowClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -451,6 +496,25 @@ export function ReorderableTaskList({
     if (el) rowRefs.current.set(id, el);
     else rowRefs.current.delete(id);
   }, []);
+
+  const getRowCallbacks = (key: string) => {
+    let entry = rowCallbacksRef.current.get(key);
+    if (!entry) {
+      entry = {
+        rowRef: (el: HTMLDivElement | null) => registerRow(key, el),
+        onRowPointerDown: (e: React.PointerEvent<HTMLDivElement>) => handleRowPointerDown(key, e),
+      };
+      rowCallbacksRef.current.set(key, entry);
+    }
+    return entry;
+  };
+
+  useEffect(() => {
+    const activeKeys = new Set(displayTasks.map(rowKey));
+    for (const k of rowCallbacksRef.current.keys()) {
+      if (!activeKeys.has(k)) rowCallbacksRef.current.delete(k);
+    }
+  }, [displayTasks]);
 
   const isDragActive = dragState !== null;
   const insertAt = dragState
@@ -477,14 +541,15 @@ export function ReorderableTaskList({
             shiftY = dragState.draggedHeight;
           }
         }
+        const { rowRef, onRowPointerDown } = getRowCallbacks(key);
         return renderRow(task, {
           isDragging,
           isSettling: isDragging && dragState.settling,
           isDragActive,
           dragOffsetY: isDragging ? dragState.offsetY : 0,
           shiftY,
-          rowRef: (el) => registerRow(key, el),
-          onRowPointerDown: (e) => handleRowPointerDown(key, e),
+          rowRef,
+          onRowPointerDown,
           onRowClickCapture: handleRowClickCapture,
           onRowContextMenu: handleRowContextMenu,
         });

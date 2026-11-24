@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, X } from 'lucide-react';
+import { useBottomBannerSlot } from '../domain/bottomBannerCoordinator';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -7,6 +8,33 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 const DISMISS_KEY = 'tempo_install_prompt_dismissed';
+
+function readStorage(key: string): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
+
+function removeStorage(key: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(key);
+  } catch {
+    /* private mode */
+  }
+}
 
 /** TickTick chrome via theme CSS variables — follows prefers-color-scheme (light default). */
 const S = {
@@ -74,35 +102,48 @@ const S = {
 export function InstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
+  const bannerAllowed = useBottomBannerSlot('install', visible);
 
   useEffect(() => {
-    if (localStorage.getItem(DISMISS_KEY) === '1') return;
-    if (window.matchMedia('(display-mode: standalone)').matches) return;
+    if (readStorage(DISMISS_KEY) === '1') return;
+    const isStandalone =
+      (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(display-mode: standalone)').matches) ||
+      (navigator as { standalone?: boolean }).standalone === true;
+    if (isStandalone) return;
 
     const onBip = (e: Event) => {
       e.preventDefault();
       setDeferred(e as BeforeInstallPromptEvent);
       setVisible(true);
     };
+    const onInstalled = () => {
+      setDeferred(null);
+      setVisible(false);
+    };
     window.addEventListener('beforeinstallprompt', onBip);
+    window.addEventListener('appinstalled', onInstalled);
 
     // Dev / static-preview helper: show light prompt once if never dismissed
     // (beforeinstallprompt often never fires on http.server).
     const params = new URLSearchParams(window.location.search);
-    if (params.get('installPrompt') === '1' || localStorage.getItem('tempo_force_install_prompt') === '1') {
+    if (params.get('installPrompt') === '1' || readStorage('tempo_force_install_prompt') === '1') {
       setVisible(true);
     }
 
-    return () => window.removeEventListener('beforeinstallprompt', onBip);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBip);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
   }, []);
 
-  if (!visible) return null;
+  if (!visible || !bannerAllowed) return null;
   // Allow force-preview without a real beforeinstallprompt event
   const canInstall = Boolean(deferred);
 
   const dismiss = () => {
-    localStorage.setItem(DISMISS_KEY, '1');
-    localStorage.removeItem('tempo_force_install_prompt');
+    writeStorage(DISMISS_KEY, '1');
+    removeStorage('tempo_force_install_prompt');
     setVisible(false);
   };
 
@@ -111,11 +152,11 @@ export function InstallPrompt() {
       dismiss();
       return;
     }
-    await deferred.prompt();
     try {
+      await deferred.prompt();
       await deferred.userChoice;
     } catch {
-      /* ignore */
+      /* ignore prompt cancellation or browser error */
     }
     setDeferred(null);
     setVisible(false);
@@ -130,8 +171,7 @@ export function InstallPrompt() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={S.title}>Install Tempo</p>
           <p style={S.body}>
-            Add to your home screen for a full-screen app, quicker capture, and more reliable
-            reminders.
+            Add to your home screen for a full-screen app, quicker capture, and offline access.
           </p>
           <div style={S.row}>
             <button type="button" onClick={install} style={S.installBtn}>

@@ -94,13 +94,12 @@ export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
         if (!t.completedAt) return false;
         const dueMatches = !!t.dueAt && getDueDatePart(t.dueAt) === dateStr;
         const compMatches = t.completedAt >= dayStartMs && t.completedAt < dayEndMs;
-        if (!dueMatches && !compMatches) return false;
-        return taskOccursOnDate(t, dateStr) && isCompletedOnDate(t, dateStr);
+        return dueMatches || compMatches;
       }
       if (!taskOccursOnDate(t, dateStr)) return false;
       return isCompletedOnDate(t, dateStr);
     })
-    .map((t) => projectTaskForDate(t, dateStr));
+    .map((t) => (!t.recurrence ? t : projectTaskForDate(t, dateStr)));
 }
 
 export function shiftMonth(year: number, monthIndex: number, delta: number): {

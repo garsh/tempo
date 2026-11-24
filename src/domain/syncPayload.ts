@@ -151,6 +151,24 @@ function asDateList(value: unknown): string[] | undefined {
   return unique.length > MAX_HISTORY ? unique.slice(-MAX_HISTORY) : unique;
 }
 
+function asSkippedDateUpdatedAt(
+  value: unknown,
+  now: number
+): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries: [string, number][] = [];
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (!DATE_RE.test(k)) continue;
+    const ts = asFinite(v);
+    if (ts === undefined || ts <= 0) continue;
+    entries.push([k, clampTimestamp(ts, now)]);
+  }
+  if (entries.length === 0) return undefined;
+  entries.sort(([a], [b]) => a.localeCompare(b));
+  const capped = entries.length > MAX_HISTORY ? entries.slice(-MAX_HISTORY) : entries;
+  return Object.fromEntries(capped);
+}
+
 function asRescheduledDates(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const entries = Object.entries(value as Record<string, unknown>)
@@ -405,6 +423,8 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   if (!isWindowRecurrence) {
     const removedSkipped = asDateList(record.removedSkippedDates);
     if (removedSkipped && removedSkipped.length > 0) task.removedSkippedDates = removedSkipped;
+    const skippedDateUpdatedAt = asSkippedDateUpdatedAt(record.skippedDateUpdatedAt, now);
+    if (skippedDateUpdatedAt) task.skippedDateUpdatedAt = skippedDateUpdatedAt;
     if (task.recurrence) {
       const rescheduled = asRescheduledDates(record.rescheduledDates);
       if (rescheduled) task.rescheduledDates = rescheduled;
@@ -476,7 +496,12 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
       'too_large'
     );
   }
-  const parsed: unknown = JSON.parse(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new SyncPayloadError('Invalid backup JSON.', 'invalid');
+  }
   const now = opts.now ?? Date.now();
 
   let taskRows: unknown[];
@@ -489,7 +514,7 @@ export function parseSyncPayload(text: string, opts: ParseSyncOptions = {}): Par
     taskRows = requireBoundedRecords(parsed, maxRecords);
   } else if (parsed && typeof parsed === 'object') {
     const record = parsed as Record<string, unknown>;
-    if ('tasks' in record && !Array.isArray(record.tasks)) {
+    if (!Array.isArray(record.tasks)) {
       throw new SyncPayloadError('Invalid format: tasks array missing.', 'tasks_not_array');
     }
     taskRows = requireBoundedRecords(record.tasks, maxRecords);
@@ -596,6 +621,9 @@ function compactTaskForSync(task: Task): Task {
   if (task.skippedDates && task.skippedDates.length > 0) compact.skippedDates = task.skippedDates;
   if (task.removedSkippedDates && task.removedSkippedDates.length > 0) {
     compact.removedSkippedDates = task.removedSkippedDates;
+  }
+  if (task.skippedDateUpdatedAt && Object.keys(task.skippedDateUpdatedAt).length > 0) {
+    compact.skippedDateUpdatedAt = task.skippedDateUpdatedAt;
   }
   if (task.rescheduledDates && Object.keys(task.rescheduledDates).length > 0) {
     compact.rescheduledDates = task.rescheduledDates;

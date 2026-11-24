@@ -7,28 +7,36 @@ const mockTasks: Task[] = [];
 const mockLists: TaskList[] = [];
 const mockFolders: Folder[] = [];
 
+function upsertItems<T extends { id: string }>(arr: T[], items: T[]) {
+  const map = new Map(arr.map((x) => [x.id, x]));
+  for (const item of items) map.set(item.id, item);
+  arr.length = 0;
+  arr.push(...map.values());
+}
+
+function deleteIds<T extends { id: string }>(arr: T[], ids: string[]) {
+  const del = new Set(ids);
+  const kept = arr.filter((x) => !del.has(x.id));
+  arr.length = 0;
+  arr.push(...kept);
+}
+
 vi.mock('../../../db/db', () => ({
   db: {
     tasks: {
       toArray: vi.fn(async () => [...mockTasks]),
-      bulkPut: vi.fn(async (items: Task[]) => {
-        mockTasks.length = 0;
-        mockTasks.push(...items);
-      }),
+      bulkPut: vi.fn(async (items: Task[]) => upsertItems(mockTasks, items)),
+      bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockTasks, ids)),
     },
     lists: {
       toArray: vi.fn(async () => [...mockLists]),
-      bulkPut: vi.fn(async (items: TaskList[]) => {
-        mockLists.length = 0;
-        mockLists.push(...items);
-      }),
+      bulkPut: vi.fn(async (items: TaskList[]) => upsertItems(mockLists, items)),
+      bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockLists, ids)),
     },
     folders: {
       toArray: vi.fn(async () => [...mockFolders]),
-      bulkPut: vi.fn(async (items: Folder[]) => {
-        mockFolders.length = 0;
-        mockFolders.push(...items);
-      }),
+      bulkPut: vi.fn(async (items: Folder[]) => upsertItems(mockFolders, items)),
+      bulkDelete: vi.fn(async (ids: string[]) => deleteIds(mockFolders, ids)),
     },
     transaction: vi.fn(async (_mode, _t1, _t2, _t3, cb) => cb()),
   },
@@ -54,6 +62,7 @@ describe('dataTransfer', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -200,6 +209,33 @@ describe('dataTransfer', () => {
       expect(mockFolders).toEqual([]);
       expect(localStorage.getItem('tempo_last_synced_file_id')).toBe('');
     });
+
+    it('bulkDeletes pruned local tombstones and counts only active tasks in message', async () => {
+      setTombstonesPrunedBefore(500);
+      mockTasks.push({
+        id: 'local-old-del',
+        title: '',
+        listId: 'inbox',
+        completionHistory: [],
+        createdAt: 1,
+        updatedAt: 300,
+        deletedAt: 300,
+      });
+
+      const msg = await importJsonBackup(
+        JSON.stringify({
+          version: 4,
+          exportedAt: 1000,
+          tasks: [
+            { id: 't-active', title: 'Active', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 600 },
+            { id: 't-del', title: '', listId: 'inbox', completionHistory: [], createdAt: 1, updatedAt: 600, deletedAt: 600 },
+          ],
+        })
+      );
+
+      expect(msg).toBe('Imported 1 task!');
+      expect(mockTasks.map((t) => t.id)).toEqual(['t-active', 't-del']);
+    });
   });
 
   describe('previewJsonBackup', () => {
@@ -292,8 +328,6 @@ describe('dataTransfer', () => {
         incomingRecurringTasks: 1,
         incomingTombstonedTasks: 2,
         skippedPrunedTombstones: 2,
-        incomingActiveLists: 1,
-        incomingActiveFolders: 1,
         newTasksToAdd: 2,
         existingTasksToUpdate: 1,
         existingLocalTasksKept: 1,
@@ -344,10 +378,13 @@ describe('dataTransfer', () => {
         click: clickSpy,
       } as unknown as HTMLElement);
 
+      vi.useFakeTimers();
       const message = await exportJsonBackup();
       expect(message).toContain('Exported 1 tasks');
       expect(clickSpy).toHaveBeenCalled();
       expect(URL.createObjectURL).toHaveBeenCalled();
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000);
       expect(URL.revokeObjectURL).toHaveBeenCalled();
 
       const exported = JSON.parse(await capturedBlob!.text()) as {

@@ -87,6 +87,8 @@ export interface Task {
   skippedDates?: string[];
   /** Skipped dates explicitly restored/unskipped (CRDT tombstones subtracted during merge). */
   removedSkippedDates?: string[];
+  /** Per-date LWW timestamps (epoch ms) for skipped/unskipped state changes on YYYY-MM-DD keys. */
+  skippedDateUpdatedAt?: Record<string, number>;
   /** Single-occurrence date overrides: original scheduled date (YYYY-MM-DD) -> target date (YYYY-MM-DD). */
   rescheduledDates?: Record<string, string>;
   /** Prior schedule segments preserved when a recurring task's schedule was moved. */

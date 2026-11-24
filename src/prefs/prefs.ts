@@ -1,12 +1,11 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Device-local UI preferences (theme, calendar week start, time format, display toggles).
+ * Device-local UI preferences (theme, calendar week start, display toggles).
  * Stored as one JSON blob in localStorage; not synced to Drive.
  */
 
 export type ThemePref = 'system' | 'light' | 'dark';
-export type TimeFormat = '12h' | '24h';
 /** 0 = Sunday, 1 = Monday, 6 = Saturday (Date#getDay numbering). */
 export type WeekStart = 0 | 1 | 6;
 export type NewTaskPosition = 'bottom' | 'top';
@@ -15,7 +14,6 @@ export type Hemisphere = 'north' | 'south';
 export interface Prefs {
   theme: ThemePref;
   weekStart: WeekStart;
-  timeFormat: TimeFormat;
   /** Hemisphere used by seasonal date-window quick presets. */
   hemisphere: Hemisphere;
   /** Where newly created tasks are inserted in manually orderable lists. */
@@ -31,7 +29,6 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
   weekStart: 0,
-  timeFormat: '12h',
   hemisphere: 'north',
   newTaskPosition: 'bottom',
   showDetails: false,
@@ -49,7 +46,6 @@ export function sanitizePrefs(raw: unknown): Prefs {
   return {
     theme: oneOf(r.theme, ['system', 'light', 'dark'] as const, DEFAULT_PREFS.theme),
     weekStart: oneOf(r.weekStart, [0, 1, 6] as const, DEFAULT_PREFS.weekStart),
-    timeFormat: oneOf(r.timeFormat, ['12h', '24h'] as const, DEFAULT_PREFS.timeFormat),
     hemisphere: oneOf(r.hemisphere, ['north', 'south'] as const, DEFAULT_PREFS.hemisphere),
     newTaskPosition: oneOf(r.newTaskPosition, ['bottom', 'top'] as const, DEFAULT_PREFS.newTaskPosition),
     showDetails: typeof r.showDetails === 'boolean' ? r.showDetails : DEFAULT_PREFS.showDetails,

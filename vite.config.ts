@@ -8,6 +8,9 @@ const TEMPO_SW_CACHE_VERSION = 'v8';
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', '-')),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -24,10 +27,10 @@ export default defineConfig({
         'theme-init.js',
       ],
       manifest: {
-        name: 'Tempo - Task Manager',
+        name: 'Tempo - Routine & Task Manager',
         short_name: 'Tempo',
         description:
-          'Local-first tasks with smart lists, calendar, and Google Drive sync.',
+          'Local-first PWA for managing periodic and recurring routines with calendar view and Google Drive sync.',
         theme_color: '#F2F4F9',
         background_color: '#F2F4F9',
         display: 'standalone',
@@ -103,8 +106,5 @@ export default defineConfig({
     host: true,
     port: 5180,
     allowedHosts: ['bird.lan'],
-  },
-  test: {
-    isolate: false,
   },
 });

@@ -220,6 +220,7 @@ export function addInterval(baseDate: Date, value: number, unit: IntervalUnit): 
 export type NextDueInput = {
   recurrence: RecurrenceRule;
   dueAt?: string | null;
+  startDate?: string | null;
   completionHistory?: number[];
 };
 
@@ -231,12 +232,14 @@ function clampMonthDay(year: number, monthIndex: number, day: number): Date {
 
 /**
  * Next occurrence on one of the given weekdays, strictly after `fromDay` (midnight).
- * `intervalWeeks` controls how many weeks to skip when wrapping past the last weekday.
+ * `intervalWeeks` controls how many weeks to skip when wrapping past an active week block,
+ * aligned to the first matching weekday cycle at or after `anchorDate` (defaulting to `fromDay`).
  */
 export function nextWeekdayAfter(
   fromDay: Date,
   weekdays: Weekday[],
-  intervalWeeks: number = 1
+  intervalWeeks: number = 1,
+  anchorDate?: Date
 ): Date {
   const sorted = [...new Set(weekdays)].sort((a, b) => a - b) as Weekday[];
   if (sorted.length === 0) {
@@ -244,38 +247,55 @@ export function nextWeekdayAfter(
   }
 
   const start = startOfDay(fromDay);
-  // Search up to a few cycles ahead
-  for (let i = 1; i <= intervalWeeks * 7 + 14; i++) {
-    const candidate = addDays(start, i);
-    const dow = candidate.getDay() as Weekday;
-    if (!sorted.includes(dow)) continue;
+  const stepWeeks = Math.max(1, Math.floor(intervalWeeks || 1));
 
-    // If intervalWeeks > 1, only accept weekdays in the "active" week of the cycle
-    // relative to fromDay's week — simpler: for multi-weekday weekly, every matching
-    // day within the pattern; when jumping from last weekday to first, require
-    // at least intervalWeeks weeks between same weekday occurrences.
-    if (intervalWeeks <= 1) {
-      return candidate;
+  if (stepWeeks <= 1) {
+    for (let i = 1; i <= 7; i++) {
+      const candidate = addDays(start, i);
+      if (sorted.includes(candidate.getDay() as Weekday)) {
+        return candidate;
+      }
     }
+    return addDays(start, 7);
+  }
 
-    // For interval > 1: allow any weekday in sorted set, but the calendar week
-    // distance from fromDay must be a multiple of intervalWeeks (or first hit
-    // in the next allowed week block).
-    const daysSince = Math.round(
-      (startOfDay(candidate).getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
-    );
-    // Accept if we're still filling the current "on" week (days 1..7 of a cycle
-    // that starts the day after fromDay), or later cycles.
-    // Practical rule: first matching weekday at least 1 day later; subsequent
-    // weeks only every intervalWeeks.
-    const weekIndex = Math.floor((daysSince - 1) / 7);
-    if (weekIndex % intervalWeeks === 0) {
+  let cycleStart = start;
+  if (anchorDate) {
+    const anchorDay = startOfDay(anchorDate);
+    for (let i = 0; i < 7; i++) {
+      const candidate = addDays(anchorDay, i);
+      if (sorted.includes(candidate.getDay() as Weekday)) {
+        cycleStart = candidate;
+        break;
+      }
+    }
+  }
+
+  if (start < cycleStart) {
+    return cycleStart;
+  }
+
+  const daysSince = localDaysBetween(cycleStart, start);
+  const w = Math.floor(daysSince / 7);
+  if (w % stepWeeks === 0) {
+    const blockEndOffset = (w + 1) * 7 - 1;
+    for (let offset = daysSince + 1; offset <= blockEndOffset; offset++) {
+      const candidate = addDays(cycleStart, offset);
+      if (sorted.includes(candidate.getDay() as Weekday)) {
+        return candidate;
+      }
+    }
+  }
+
+  const nextActiveWeek = (Math.floor(w / stepWeeks) + 1) * stepWeeks;
+  for (let k = 0; k < 7; k++) {
+    const candidate = addDays(cycleStart, nextActiveWeek * 7 + k);
+    if (sorted.includes(candidate.getDay() as Weekday)) {
       return candidate;
     }
   }
 
-  // Fallback
-  return addDays(start, intervalWeeks * 7);
+  return addDays(start, stepWeeks * 7);
 }
 
 /**
@@ -326,9 +346,10 @@ function computeRawNextDue(task: NextDueInput, completionDate: Date): Date {
 
     // fixed_interval: advance from prior due
     const dueBase = task.dueAt ? startOfDay(parseDueAt(task.dueAt)) : completionDay;
-    let next = nextWeekdayAfter(dueBase, weekdays, intervalWeeks);
+    const anchorBase = task.startDate ? parseDate(task.startDate) : dueBase;
+    let next = nextWeekdayAfter(dueBase, weekdays, intervalWeeks, anchorBase);
     while (next <= completionDay) {
-      next = nextWeekdayAfter(next, weekdays, intervalWeeks);
+      next = nextWeekdayAfter(next, weekdays, intervalWeeks, anchorBase);
     }
     return next;
   }
@@ -1232,6 +1253,8 @@ type EndAfterCountCacheEntry = {
   rescheduledDates: Readonly<Record<string, string>> | undefined;
   history: readonly number[] | undefined;
   historyLength: number;
+  skippedDates: readonly string[] | undefined;
+  skippedLength: number;
   scannedThrough: string | null;
   uncompletedCount: number;
   cutoffDateStr: string | null;
@@ -1490,24 +1513,22 @@ function scheduleMatchesDate(
     }
     if (!firstMatch || targetDate < firstMatch) return false;
 
-    const firstWeek = addDays(firstMatch, -firstMatch.getDay());
-    const targetWeek = addDays(targetDate, -targetDate.getDay());
-    const weeksDiff = Math.round((targetWeek.getTime() - firstWeek.getTime()) / (7 * 86400000));
-    return weeksDiff >= 0 && weeksDiff % intervalWeeks === 0;
+    const daysSince = localDaysBetween(firstMatch, targetDate);
+    return daysSince >= 0 && Math.floor(daysSince / 7) % intervalWeeks === 0;
   }
 
   if (rule.intervalUnit === 'days') {
-    const daysDiff = Math.round((targetDate.getTime() - baseDate.getTime()) / 86400000);
+    const daysDiff = localDaysBetween(baseDate, targetDate);
     return daysDiff >= 0 && daysDiff % interval === 0;
   }
 
   if (rule.intervalUnit === 'weeks') {
-    const daysDiff = Math.round((targetDate.getTime() - baseDate.getTime()) / 86400000);
+    const daysDiff = localDaysBetween(baseDate, targetDate);
     return daysDiff >= 0 && daysDiff % (interval * 7) === 0;
   }
 
   if (rule.intervalUnit === 'months') {
-    if (dateStr === anchorStr) return true;
+    if (rule.monthDay == null && dateStr === anchorStr) return true;
     const desiredDay =
       rule.monthDay != null ? Math.max(1, Math.min(31, rule.monthDay)) : baseDate.getDate();
     const expectedInTarget = clampMonthDay(
@@ -1572,6 +1593,188 @@ export function baseScheduleMatchesDate(
   return scheduleMatchesDate(rule, anchorStr, dateStr, anchorStr);
 }
 
+function nextScheduleMatchInSegment(
+  rule: RecurrenceRule,
+  baseStr: string,
+  fromStr: string
+): string | null {
+  const effectiveFromStr = fromStr > baseStr ? fromStr : baseStr;
+  const baseDate = parseDate(baseStr);
+  const fromDate = parseDate(effectiveFromStr);
+  if (Number.isNaN(baseDate.getTime()) || Number.isNaN(fromDate.getTime())) return null;
+
+  const formatBounded = (cand: Date): string | null => {
+    if (Number.isNaN(cand.getTime()) || cand.getFullYear() > 9999) return null;
+    return formatDate(cand);
+  };
+
+  const interval = Math.max(1, rule.intervalValue || 1);
+
+  if (rule.weekdays && rule.weekdays.length > 0) {
+    let firstMatch: Date | null = null;
+    for (let i = 0; i < 7; i++) {
+      const cand = addDays(baseDate, i);
+      if (rule.weekdays.includes(cand.getDay() as Weekday)) {
+        firstMatch = cand;
+        break;
+      }
+    }
+    if (!firstMatch) return null;
+    if (fromDate <= firstMatch) return formatBounded(firstMatch);
+
+    const intervalWeeks = rule.intervalUnit === 'weeks' ? interval : 1;
+    if (intervalWeeks <= 1) {
+      for (let i = 0; i < 7; i++) {
+        const cand = addDays(fromDate, i);
+        if (rule.weekdays.includes(cand.getDay() as Weekday)) {
+          return formatBounded(cand);
+        }
+      }
+      return null;
+    }
+
+    const daysSince = localDaysBetween(firstMatch, fromDate);
+    const w = Math.floor(daysSince / 7);
+    if (w % intervalWeeks === 0) {
+      const blockEndOffset = (w + 1) * 7 - 1;
+      for (let offset = daysSince; offset <= blockEndOffset; offset++) {
+        const cand = addDays(firstMatch, offset);
+        if (rule.weekdays.includes(cand.getDay() as Weekday)) {
+          return formatBounded(cand);
+        }
+      }
+    }
+
+    const nextActiveWeek = (Math.floor(w / intervalWeeks) + 1) * intervalWeeks;
+    for (let k = 0; k < 7; k++) {
+      const cand = addDays(firstMatch, nextActiveWeek * 7 + k);
+      if (rule.weekdays.includes(cand.getDay() as Weekday)) {
+        return formatBounded(cand);
+      }
+    }
+    return null;
+  }
+
+  if (rule.intervalUnit === 'days') {
+    const daysDiff = localDaysBetween(baseDate, fromDate);
+    const rem = daysDiff % interval;
+    const delta = rem === 0 ? 0 : interval - rem;
+    return formatBounded(addDays(fromDate, delta));
+  }
+
+  if (rule.intervalUnit === 'weeks') {
+    const step = interval * 7;
+    const daysDiff = localDaysBetween(baseDate, fromDate);
+    const rem = daysDiff % step;
+    const delta = rem === 0 ? 0 : step - rem;
+    return formatBounded(addDays(fromDate, delta));
+  }
+
+  if (rule.intervalUnit === 'months') {
+    const desiredDay =
+      rule.monthDay != null ? Math.max(1, Math.min(31, rule.monthDay)) : baseDate.getDate();
+    const candidateInBaseMonth = clampMonthDay(
+      baseDate.getFullYear(),
+      baseDate.getMonth(),
+      desiredDay
+    );
+    const firstCycleDate =
+      candidateInBaseMonth >= baseDate
+        ? candidateInBaseMonth
+        : nextMonthDayAfter(baseDate, desiredDay, 1);
+    if (fromDate <= firstCycleDate) return formatBounded(firstCycleDate);
+
+    const monthsDiff =
+      (fromDate.getFullYear() - firstCycleDate.getFullYear()) * 12 +
+      (fromDate.getMonth() - firstCycleDate.getMonth());
+    const rem = monthsDiff % interval;
+    let k = rem === 0 ? monthsDiff : monthsDiff + (interval - rem);
+    let cand = clampMonthDay(
+      firstCycleDate.getFullYear(),
+      firstCycleDate.getMonth() + k,
+      desiredDay
+    );
+    if (cand.getFullYear() > 9999) return null;
+    if (cand < fromDate) {
+      k += interval;
+      cand = clampMonthDay(
+        firstCycleDate.getFullYear(),
+        firstCycleDate.getMonth() + k,
+        desiredDay
+      );
+    }
+    return formatBounded(cand);
+  }
+
+  if (rule.intervalUnit === 'years') {
+    const yearsDiff = fromDate.getFullYear() - baseDate.getFullYear();
+    const rem = yearsDiff % interval;
+    let k = rem === 0 ? yearsDiff : yearsDiff + (interval - rem);
+    let cand = clampMonthDay(baseDate.getFullYear() + k, baseDate.getMonth(), baseDate.getDate());
+    if (cand.getFullYear() > 9999) return null;
+    if (cand < fromDate) {
+      k += interval;
+      cand = clampMonthDay(baseDate.getFullYear() + k, baseDate.getMonth(), baseDate.getDate());
+    }
+    return formatBounded(cand);
+  }
+
+  return null;
+}
+
+function nextBaseScheduleDateOnOrAfter(
+  task: Pick<
+    Task,
+    'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'scheduleHistory'
+  >,
+  fromStr: string
+): string | null {
+  const rule = task.recurrence;
+  if (!rule) return null;
+
+  let best: string | null = null;
+  const pickEarlier = (cand: string | null) => {
+    if (cand && (!best || cand < best)) {
+      best = cand;
+    }
+  };
+
+  if (task.scheduleHistory && task.scheduleHistory.length > 0) {
+    for (const seg of task.scheduleHistory) {
+      if (seg.endDate < fromStr) continue;
+      let probe = fromStr > seg.startDate ? fromStr : seg.startDate;
+      for (let guard = 0; guard < 100 && probe <= seg.endDate; guard++) {
+        const hit = nextScheduleMatchInSegment(seg.recurrence, seg.startDate, probe);
+        if (!hit || hit > seg.endDate) break;
+        if (baseScheduleMatchesDate(task, hit)) {
+          pickEarlier(hit);
+          break;
+        }
+        const shadow = task.scheduleHistory.find((s) => hit >= s.startDate && hit <= s.endDate);
+        const jumpBase = shadow ? shadow.endDate : hit;
+        const nextProbe = formatDate(addDays(parseDate(jumpBase), 1));
+        probe = nextProbe > hit ? nextProbe : formatDate(addDays(parseDate(hit), 1));
+      }
+    }
+  }
+
+  const anchorStr = getRecurrenceAnchor(task);
+  let probe = fromStr > anchorStr ? fromStr : anchorStr;
+  for (let guard = 0; guard < 100; guard++) {
+    const hit = nextScheduleMatchInSegment(rule, anchorStr, probe);
+    if (!hit) break;
+    const shadow = task.scheduleHistory?.find((s) => hit >= s.startDate && hit <= s.endDate);
+    if (!shadow) {
+      pickEarlier(hit);
+      break;
+    }
+    const nextProbe = formatDate(addDays(parseDate(shadow.endDate), 1));
+    probe = nextProbe > hit ? nextProbe : formatDate(addDays(parseDate(hit), 1));
+  }
+
+  return best;
+}
+
 function passesEndAfterCount(
   task: Pick<
     Task,
@@ -1580,6 +1783,7 @@ function passesEndAfterCount(
     | 'recurrence'
     | 'completionHistory'
     | 'createdAt'
+    | 'skippedDates'
     | 'rescheduledDates'
     | 'scheduleHistory'
   >,
@@ -1596,6 +1800,8 @@ function passesEndAfterCount(
   const earliestStart = getEarliestBaseStart(task);
   const history = task.completionHistory;
   const historyLength = history?.length ?? 0;
+  const skippedDates = task.skippedDates;
+  const skippedLength = skippedDates?.length ?? 0;
   const scheduleHistory = task.scheduleHistory;
   const rescheduledDates = task.rescheduledDates;
 
@@ -1609,7 +1815,9 @@ function passesEndAfterCount(
     entry.scheduleHistory !== scheduleHistory ||
     entry.rescheduledDates !== rescheduledDates ||
     entry.history !== history ||
-    entry.historyLength !== historyLength
+    entry.historyLength !== historyLength ||
+    entry.skippedDates !== skippedDates ||
+    entry.skippedLength !== skippedLength
   ) {
     entry = {
       rule,
@@ -1620,6 +1828,8 @@ function passesEndAfterCount(
       rescheduledDates,
       history,
       historyLength,
+      skippedDates,
+      skippedLength,
       scannedThrough: null,
       uncompletedCount: 0,
       cutoffDateStr: null,
@@ -1634,24 +1844,32 @@ function passesEndAfterCount(
     return true;
   }
 
-  const targetDate = parseDate(baseDateStr);
-  let cursor = entry.scannedThrough
-    ? addDays(parseDate(entry.scannedThrough), 1)
-    : parseDate(earliestStart);
-  while (cursor <= targetDate) {
-    const dStr = formatDate(cursor);
+  const skippedSet = getSkippedDateSet(task);
+  let probeStr = entry.scannedThrough
+    ? formatDate(addDays(parseDate(entry.scannedThrough), 1))
+    : earliestStart;
+
+  for (let steps = 0; steps < 100_000 && probeStr <= baseDateStr; steps++) {
+    const dStr = nextBaseScheduleDateOnOrAfter(task, probeStr);
+    if (!dStr || dStr > baseDateStr) {
+      entry.scannedThrough = baseDateStr;
+      break;
+    }
     entry.scannedThrough = dStr;
-    if (baseScheduleMatchesDate(task, dStr)) {
-      const effectiveDate = rescheduledDates?.[dStr] ?? dStr;
-      if (!completedDates.has(dStr) && !completedDates.has(effectiveDate)) {
-        entry.uncompletedCount++;
-        if (entry.uncompletedCount === remaining) {
-          entry.cutoffDateStr = dStr;
-          return baseDateStr <= dStr;
-        }
+    const effectiveDate = rescheduledDates?.[dStr] ?? dStr;
+    if (
+      !completedDates.has(dStr) &&
+      !completedDates.has(effectiveDate) &&
+      !skippedSet.has(dStr) &&
+      !skippedSet.has(effectiveDate)
+    ) {
+      entry.uncompletedCount++;
+      if (entry.uncompletedCount === remaining) {
+        entry.cutoffDateStr = dStr;
+        return baseDateStr <= dStr;
       }
     }
-    cursor = addDays(cursor, 1);
+    probeStr = formatDate(addDays(parseDate(dStr), 1));
   }
 
   return true;
@@ -1663,7 +1881,7 @@ function passesEndAfterCount(
  */
 export function taskOccursOnDate(
   task: Pick<Task, 'startDate' | 'dueAt' | 'recurrence' | 'completionHistory' | 'createdAt' | 'deletedAt'> &
-    Partial<Pick<Task, 'rescheduledDates' | 'scheduleHistory'>>,
+    Partial<Pick<Task, 'skippedDates' | 'rescheduledDates' | 'scheduleHistory'>>,
   dateStr: string
 ): boolean {
   if (task.deletedAt) return false;
@@ -1741,22 +1959,69 @@ export function projectTaskForDate(task: Task, dateStr: string): Task {
 
 function findNextUncompletedForward(
   task: Task,
-  startDate: Date,
-  maxDays: number = 1100
+  startDate: Date
 ): string | null {
+  const rule = task.recurrence;
+  if (!rule) return null;
+
+  const startStr = formatDate(startDate);
   const effectiveEnd = getEffectiveEndOnDate(task);
-  for (let i = 0; i <= maxDays; i++) {
-    const dStr = formatDate(addDays(startDate, i));
-    if (effectiveEnd && dStr > effectiveEnd) return null;
-    if (
-      !isCompletedOnDate(task, dStr) &&
-      !isSkippedOnDate(task, dStr) &&
-      taskOccursOnDate(task, dStr)
-    ) {
-      return dStr;
+
+  let bestRescheduled: string | null = null;
+  if (task.rescheduledDates) {
+    const targets = Array.from(
+      new Set(
+        Object.entries(task.rescheduledDates)
+          .filter(
+            ([orig, target]) =>
+              orig !== target &&
+              target >= startStr &&
+              (!effectiveEnd || target <= effectiveEnd)
+          )
+          .map(([, target]) => target)
+      )
+    ).sort();
+    for (const target of targets) {
+      if (
+        !isCompletedOnDate(task, target) &&
+        !isSkippedOnDate(task, target) &&
+        taskOccursOnDate(task, target)
+      ) {
+        bestRescheduled = target;
+        break;
+      }
     }
   }
-  return null;
+
+  let bestBase: string | null = null;
+  let probeStr = startStr;
+  for (let steps = 0; steps < 5000; steps++) {
+    const dStr = nextBaseScheduleDateOnOrAfter(task, probeStr);
+    if (!dStr) break;
+    if (rule.endOnDate && dStr > rule.endOnDate) break;
+    if (effectiveEnd && dStr > effectiveEnd) break;
+    if (bestRescheduled && dStr >= bestRescheduled) break;
+
+    const movedTo = task.rescheduledDates?.[dStr];
+    if (movedTo && movedTo !== dStr) {
+      probeStr = formatDate(addDays(parseDate(dStr), 1));
+      continue;
+    }
+    if (isCompletedOnDate(task, dStr) || isSkippedOnDate(task, dStr)) {
+      probeStr = formatDate(addDays(parseDate(dStr), 1));
+      continue;
+    }
+    if (taskOccursOnDate(task, dStr)) {
+      bestBase = dStr;
+      break;
+    }
+    break;
+  }
+
+  if (bestRescheduled && bestBase) {
+    return bestRescheduled < bestBase ? bestRescheduled : bestBase;
+  }
+  return bestRescheduled ?? bestBase;
 }
 
 /**
@@ -1838,27 +2103,27 @@ export function getSkipOccurrenceDate(
   const fromDate = parseDate(curDateStr);
   const time = task.dueAt && hasDueTime(task.dueAt) ? splitDueAt(task.dueAt).time : null;
 
+  const origDate = findRescheduledOrigin(task, curDateStr);
+  const skipKey = origDate ?? curDateStr;
+  let nextRescheduled = task.rescheduledDates ? { ...task.rescheduledDates } : undefined;
+  if (origDate && nextRescheduled) {
+    delete nextRescheduled[origDate];
+    if (Object.keys(nextRescheduled).length === 0) {
+      nextRescheduled = undefined;
+    }
+  }
+  const existingSkipped = task.skippedDates ?? [];
+  const taskWithSkip: Task = {
+    ...task,
+    skippedDates: existingSkipped.includes(skipKey)
+      ? existingSkipped
+      : [...existingSkipped, skipKey],
+    rescheduledDates: nextRescheduled,
+  };
+
   // Search forward strictly after curDateStr
   const startForward = addDays(fromDate, 1);
-  const nextForward = findNextUncompletedForward(task, startForward);
-  if (nextForward) {
-    return combineDueAt(nextForward, time);
-  }
-  const effectiveEnd = getEffectiveEndOnDate(task);
-  if (effectiveEnd && formatDate(addDays(startForward, 1100)) > effectiveEnd) {
-    return null;
-  }
-
-  // Fallback for long-interval schedules beyond the 1100-day forward scan
-  try {
-    const rawNext = computeRawNextDue({ ...task, recurrence: task.recurrence }, fromDate);
-    const rawStr = formatDate(rawNext);
-    if (task.recurrence.endOnDate && rawStr > task.recurrence.endOnDate) {
-      return null;
-    }
-    return combineDueAt(rawStr, time);
-  } catch {
-    return null;
-  }
+  const nextForward = findNextUncompletedForward(taskWithSkip, startForward);
+  return nextForward ? combineDueAt(nextForward, time) : null;
 }
 

@@ -22,8 +22,9 @@ export function TaskGroupHeader({
   return (
     <button
       type="button"
+      aria-expanded={!collapsed}
       onClick={onToggle}
-      className={`w-full flex items-center gap-1.5 px-3 sm:px-4 py-2 text-left ${bgClassName} ${
+      className={`w-full flex items-center gap-1.5 px-3 sm:px-4 py-2 text-left rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tt-blue ${bgClassName} ${
         sticky ? 'sticky top-0 z-10' : ''
       } cursor-pointer`}
     >

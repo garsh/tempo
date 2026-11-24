@@ -177,7 +177,7 @@ describe('storage cleanup & database repair', () => {
     expect(Array.from(listStore.keys())).toEqual([INBOX_LIST_ID]);
     expect(Array.from(folderStore.keys())).toEqual([]);
 
-    // Signed in: purges >30d expired tombstones, preserves recent <30d tombstones
+    // Signed in: stages >30d expired tombstones and advances watermark so Drive sync deletes remotely first
     vi.spyOn(googleAccount, 'getGoogleAccount').mockReturnValue({ email: 'donna@example.com' });
     const expiredAt = now - TOMBSTONE_TTL_MS - 10_000;
     const recentAt = now - 5_000;
@@ -186,7 +186,7 @@ describe('storage cleanup & database repair', () => {
 
     const signedInRepair = await repairAndDeduplicateDatabase();
     expect(signedInRepair.purgedTombstones).toBe(1);
-    expect(Array.from(taskStore.keys())).toEqual(['active', 'recent-del']);
+    expect(Array.from(taskStore.keys())).toEqual(['active', 'expired-del', 'recent-del']);
     expect(getTombstonesPrunedBefore()).toBe(now - TOMBSTONE_TTL_MS);
   });
 });

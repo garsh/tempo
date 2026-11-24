@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { Task } from '../types/task';
 import {
@@ -11,9 +11,11 @@ import {
   isRecurrenceFinished,
   isWindowPeriodic,
   isWindowStopped,
+  parseDate,
   projectTaskForDate,
 } from '../domain/recurrence';
 import { sortRecurringByDueProximity, type RecurringSortEntry } from '../domain/sorting';
+import { useTodayKey } from '../hooks/useTodayKey';
 import { TaskCard } from './TaskCard';
 
 type RecurringFilter = 'all' | 'fixed' | 'approx' | 'annual';
@@ -62,9 +64,10 @@ export function RecurringTasksView({
   onRequestDelete,
 }: RecurringTasksViewProps) {
   const [filter, setFilter] = useState<RecurringFilter>('all');
+  const todayKey = useTodayKey();
 
   const entries = useMemo(() => {
-    const now = new Date();
+    const now = parseDate(todayKey);
     const items: RecurringSortEntry[] = [];
 
     for (const t of tasks) {
@@ -95,7 +98,17 @@ export function RecurringTasksView({
     }
 
     return sortRecurringByDueProximity(items, now);
-  }, [tasks]);
+  }, [tasks, todayKey]);
+
+  const rawByIdRef = useRef<Map<string, Task>>(new Map());
+  rawByIdRef.current = new Map(entries.map((entry) => [entry.raw.id, entry.raw]));
+
+  const handleDeleteRaw = useCallback(
+    (task: Task) => {
+      onRequestDelete?.(rawByIdRef.current.get(task.id) ?? task);
+    },
+    [onRequestDelete]
+  );
 
   const filteredEntries = useMemo(() => {
     if (filter === 'all') return entries;
@@ -109,7 +122,7 @@ export function RecurringTasksView({
   return (
     <>
       <header className="shrink-0 flex items-center justify-between gap-2 h-14 sm:h-16 compact-landscape:h-12 desktop:h-14 px-2.5 sm:px-5 bg-tt-bg desktop:bg-tt-surface border-b border-tt-border text-tt-text z-20">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 shrink-0">
           {!embedded && (
             <button
               type="button"
@@ -135,7 +148,7 @@ export function RecurringTasksView({
           <div
             role="group"
             aria-label="Filter recurring tasks"
-            className="flex items-center gap-1 overflow-x-auto shrink-0"
+            className="flex items-center gap-1 overflow-x-auto min-w-0"
           >
             {FILTER_OPTIONS.map((opt) => {
               const active = filter === opt.id;
@@ -145,9 +158,9 @@ export function RecurringTasksView({
                   type="button"
                   aria-pressed={active}
                   onClick={() => setFilter(opt.id)}
-                  className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  className={`shrink-0 whitespace-nowrap px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                     active
-                      ? 'bg-tt-blue-soft text-tt-blue'
+                      ? 'bg-tt-blue-soft text-tt-blue dark:text-blue-300'
                       : 'text-tt-secondary hover:text-tt-text hover:bg-tt-hover'
                   }`}
                 >
@@ -178,13 +191,13 @@ export function RecurringTasksView({
                       selected={selectedTaskId === entry.raw.id}
                       showDetails={showDetails}
                       subtitle={entry.subtitle}
-                      onSelect={() => onEdit(entry.raw)}
+                      onSelect={onEdit}
                       onComplete={onComplete}
                       onUncomplete={onUncomplete}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onRequestLogDate={onRequestLogDate}
-                      onRequestDelete={onRequestDelete}
+                      onRequestDelete={onRequestDelete ? handleDeleteRaw : undefined}
                     />
                   ) : (
                     <TaskCard
@@ -194,14 +207,14 @@ export function RecurringTasksView({
                       showDetails={showDetails}
                       subtitle={entry.subtitle}
                       occurrenceDateStr={entry.nextDate ?? undefined}
-                      onSelect={() => onEdit(entry.projected)}
+                      onSelect={onEdit}
                       onComplete={onComplete}
                       onUncomplete={onUncomplete}
-                      onEdit={() => onEdit(entry.projected)}
+                      onEdit={onEdit}
                       onDelete={onDelete}
                       onRequestChangeDate={onRequestChangeDate}
                       onRequestSkipOccurrence={onRequestSkipOccurrence}
-                      onRequestDelete={() => onRequestDelete?.(entry.raw)}
+                      onRequestDelete={onRequestDelete ? handleDeleteRaw : undefined}
                     />
                   )
                 )

@@ -1,5 +1,6 @@
+import { useId, useRef } from 'react';
 import { Keyboard, X } from 'lucide-react';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { ModalDialog } from '../ui/ModalDialog';
 
 interface ShortcutsHelpDialogProps {
   open: boolean;
@@ -20,28 +21,29 @@ const SHORTCUTS: readonly [string, string][] = [
  * Keyboard shortcuts reference modal.
  */
 export function ShortcutsHelpDialog({ open, onClose }: ShortcutsHelpDialogProps) {
-  useEscapeKey(open, onClose, { capture: true, stopPropagation: true });
-
-  if (!open) return null;
+  const headingId = useId();
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div
-      className="fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <ModalDialog
+      open={open}
+      onClose={onClose}
+      ariaLabelledBy={headingId}
+      initialFocusRef={closeBtnRef}
+      className="m-auto p-0 w-[min(calc(100dvw-2rem),28rem)] max-w-none max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl shadow-2xl text-tt-text"
     >
-      <div className="w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-tt-elevated border border-tt-border rounded-3xl p-6 compact-landscape:p-4 shadow-2xl">
+      <div className="p-6 compact-landscape:p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
+          <h3 id={headingId} className="text-lg font-bold text-tt-text inline-flex items-center gap-2">
             <Keyboard className="w-5 h-5 text-tt-blue" />
             Shortcuts
           </h3>
           <button
+            ref={closeBtnRef}
             type="button"
             onClick={onClose}
             aria-label="Close shortcuts"
-            className="p-1.5 text-tt-secondary hover:text-tt-text"
+            className="p-1.5 rounded-lg text-tt-secondary hover:text-tt-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -57,6 +59,6 @@ export function ShortcutsHelpDialog({ open, onClose }: ShortcutsHelpDialogProps)
           ))}
         </ul>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

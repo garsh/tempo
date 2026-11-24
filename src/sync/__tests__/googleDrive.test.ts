@@ -39,7 +39,7 @@ import {
   SIMPLE_UPLOAD_MAX_BYTES,
   syncWithGoogleDrive,
 } from '../googleDrive';
-import { compactSyncData, utf8ByteLength } from '../../domain/syncPayload';
+import { compactSyncData, SyncPayloadError, utf8ByteLength } from '../../domain/syncPayload';
 
 function createMockStorage(initial: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(initial));
@@ -255,7 +255,7 @@ describe('googleDrive', () => {
       expect(result.etag).toBe('"etag-version-1"');
       expect(mockFetch).toHaveBeenCalledWith(
         'https://www.googleapis.com/drive/v3/files/file-123?alt=media',
-        { headers: { Authorization: 'Bearer token-abc' } }
+        expect.objectContaining({ headers: { Authorization: 'Bearer token-abc' } })
       );
     });
 
@@ -287,7 +287,7 @@ describe('googleDrive', () => {
       expect(result.etag).toBe('"empty"');
     });
 
-    it('returns null data when payload is invalid/corrupted JSON', async () => {
+    it('rejects corrupted JSON instead of treating the backup as empty', async () => {
       const mockHeaders = new Headers({ ETag: '"corrupt"' });
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -297,9 +297,7 @@ describe('googleDrive', () => {
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const result = await downloadDriveBackup('file-123', 'token-abc');
-      expect(result.data).toBeNull();
-      expect(result.etag).toBe('"corrupt"');
+      await expect(downloadDriveBackup('file-123', 'token-abc')).rejects.toThrow(SyncPayloadError);
     });
 
     it('throws error when response status is non-ok and not 404', async () => {
@@ -313,7 +311,7 @@ describe('googleDrive', () => {
       vi.stubGlobal('fetch', mockFetch);
 
       await expect(downloadDriveBackup('file-123', 'token-abc')).rejects.toThrow(
-        'Failed to download backup: Server Error'
+        'Failed to download backup: 500 Server Error'
       );
     });
 
@@ -648,6 +646,18 @@ describe('googleDrive', () => {
 
   describe('syncWithGoogleDrive', () => {
     it('runs full sync flow: gets fileId, downloads backup, merges, and uploads with ETag', async () => {
+      wireMockDbTables({
+        tasks: [
+          {
+            id: 'local-1',
+            title: 'Local task',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        ],
+      });
       const mockFetch = vi
         .fn()
         // 1. getOrCreateAppDataFile search
@@ -679,11 +689,73 @@ describe('googleDrive', () => {
 
       const result = await syncWithGoogleDrive('token-123');
       expect(result.success).toBe(true);
-      expect(result.tasksCount).toBe(0);
+      expect(result.tasksCount).toBe(1);
       expect(result.syncedAt).toBeGreaterThan(0);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('skips uploadDriveBackup when remote and merged content signatures match', async () => {
+      wireMockDbTables({
+        tasks: [
+          {
+            id: 'same-1',
+            title: 'Same task',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        ],
+      });
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () =>
+            JSON.stringify({
+              version: 4,
+              exportedAt: 100,
+              tasks: [
+                {
+                  id: 'same-1',
+                  title: 'Same task',
+                  listId: 'inbox',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 20,
+                },
+              ],
+              lists: [],
+              folders: [],
+            }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.success).toBe(true);
+      expect(result.tasksCount).toBe(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
 
     it('retries once when upload encounters DriveConflictError (412)', async () => {
+      wireMockDbTables({
+        tasks: [
+          {
+            id: 'local-conflict',
+            title: 'Local task',
+            listId: 'inbox',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: 20,
+          },
+        ],
+      });
       const mockFetch = vi
         .fn()
         // 1. getOrCreateAppDataFile search
@@ -722,6 +794,7 @@ describe('googleDrive', () => {
 
       const result = await syncWithGoogleDrive('token-123');
       expect(result.success).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(5);
     });
 
     it('automatically prunes tombstones older than 30 days across tasks, lists, and folders and updates local DB and watermark', async () => {

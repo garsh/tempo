@@ -17,6 +17,7 @@ import {
   stopRecurringTask,
   uncompleteTask,
   undoCompleteUndatedTask,
+  unskipTaskOccurrence,
 } from './db/db';
 import type { Task, TaskInput } from './types/task';
 import {
@@ -29,6 +30,7 @@ import {
   isFixedRecurring,
   isUndatedOneTime,
   isWindowPeriodic,
+  parseDate,
   projectTaskForDate,
   type WindowProgress,
 } from './domain/recurrence';
@@ -59,6 +61,7 @@ import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useCalendarPullGesture } from './hooks/useCalendarPullGesture';
 import { useLayoutMode } from './hooks/useLayoutMode';
+import { useTodayKey } from './hooks/useTodayKey';
 import { useUndoToast } from './hooks/useUndoToast';
 import { TaskCard } from './components/TaskCard';
 import { ReorderableTaskList } from './components/ReorderableTaskList';
@@ -131,12 +134,25 @@ export function App() {
   const [isRecurringOpen, setIsRecurringOpen] = useState(false);
   const { undoToast, showUndoToast, dismissUndoToast } = useUndoToast();
 
-  const now = new Date();
-  const [calYear, setCalYear] = useState(now.getFullYear());
-  const [calMonth, setCalMonth] = useState(now.getMonth());
-  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(formatDate(now));
+  const todayKey = useTodayKey();
+  const todayDate = useMemo(() => parseDate(todayKey), [todayKey]);
+  const [calYear, setCalYear] = useState(() => parseDate(todayKey).getFullYear());
+  const [calMonth, setCalMonth] = useState(() => parseDate(todayKey).getMonth());
+  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(todayKey);
   const [calExpanded, setCalExpanded] = useState<boolean>(readStoredCalendarExpanded);
   const [isMonthYearPickerOpen, setIsMonthYearPickerOpen] = useState(false);
+
+  const prevTodayKeyRef = useRef(todayKey);
+  useEffect(() => {
+    const prevKey = prevTodayKeyRef.current;
+    if (prevKey === todayKey) return;
+    prevTodayKeyRef.current = todayKey;
+    const prevDate = parseDate(prevKey);
+    const nextDate = parseDate(todayKey);
+    setCalSelectedDate((cur) => (cur === prevKey ? todayKey : cur));
+    setCalYear((y) => (y === prevDate.getFullYear() && calMonth === prevDate.getMonth() ? nextDate.getFullYear() : y));
+    setCalMonth((m) => (calYear === prevDate.getFullYear() && m === prevDate.getMonth() ? nextDate.getMonth() : m));
+  }, [todayKey, calYear, calMonth]);
 
   const effectiveExpanded = layout.isSplit ? true : calExpanded;
   const calendarRowHeight = layout.isCompactLandscape ? 32 : layout.isDesktop ? 42 : undefined;
@@ -245,16 +261,12 @@ export function App() {
     setIsSettingsModalOpen(true);
   }, []);
 
-  const [initialTasks, setInitialTasks] = useState<Task[] | null>(null);
-
   useEffect(() => {
     initDiagnostics();
     void (async () => {
       try {
         await initDatabase();
-        const idbTasks = await db.tasks.toArray();
-        setInitialTasks(idbTasks);
-        recordDiagEvent('db_init', `idbTasks=${idbTasks.length}`);
+        recordDiagEvent('db_init', 'ready');
       } catch (err) {
         recordDiagEvent('db_init_error', err instanceof Error ? err.message : String(err));
       }
@@ -288,7 +300,7 @@ export function App() {
   }, []);
 
   const liveTasks = useLiveQuery(() => db.tasks.toArray(), []);
-  const allTasks = liveTasks ?? initialTasks ?? EMPTY_TASKS;
+  const allTasks = liveTasks ?? EMPTY_TASKS;
 
   const {
     status: syncStatus,
@@ -313,18 +325,16 @@ export function App() {
 
   const calOverdueTasks = useMemo(() => {
     if (!prefs.showOverdue) return [];
-    const refNow = new Date();
-    const todayStr = formatDate(refNow);
-    if (calSelectedDate !== todayStr) return [];
+    if (calSelectedDate !== todayKey) return [];
     const overdue: Task[] = [];
     for (const t of activeTasks) {
       if (t.deletedAt || isCompleted(t)) continue;
       if (isFixedRecurring(t)) {
-        const nextDate = getNextUncompletedOccurrenceDate(t, refNow);
-        if (nextDate && nextDate < todayStr) {
+        const nextDate = getNextUncompletedOccurrenceDate(t, todayDate);
+        if (nextDate && nextDate < todayKey) {
           overdue.push(projectTaskForDate(t, nextDate));
         }
-      } else if (!t.recurrence && t.dueAt && getDueDatePart(t.dueAt) < todayStr) {
+      } else if (!t.recurrence && t.dueAt && getDueDatePart(t.dueAt) < todayKey) {
         overdue.push(t);
       }
     }
@@ -332,10 +342,9 @@ export function App() {
     return sortTasksForDailyView(
       overdue.filter((t) => !displayedKeys.has(`${t.id}:${t.dueAt || ''}`))
     );
-  }, [prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks]);
+  }, [prefs.showOverdue, calSelectedDate, activeTasks, displayedTasks, todayDate, todayKey]);
 
   const { visiblePeriodicTasks, tasksDotTone, undatedOneTimeTasks } = useMemo(() => {
-    const refNow = new Date();
     const periodic: Task[] = [];
     const progressById = new Map<string, WindowProgress | null>();
     const oneTime: Task[] = [];
@@ -346,7 +355,7 @@ export function App() {
     for (const t of activeTasks) {
       if (t.deletedAt) continue;
       if (isWindowPeriodic(t)) {
-        const prog = getWindowProgress(t, refNow);
+        const prog = getWindowProgress(t, todayDate);
         if (prog?.visibleInTasks) {
           periodic.push(t);
           progressById.set(t.id, prog);
@@ -364,7 +373,7 @@ export function App() {
     }
 
     return {
-      visiblePeriodicTasks: sortWindowTasks(periodic, refNow, progressById),
+      visiblePeriodicTasks: sortWindowTasks(periodic, todayDate, progressById),
       tasksDotTone: hasOverdue
         ? ('overdue' as const)
         : hasAmber
@@ -374,14 +383,12 @@ export function App() {
             : null,
       undatedOneTimeTasks: sortUndatedOneTimeTasks(oneTime),
     };
-  }, [activeTasks]);
+  }, [activeTasks, todayDate]);
 
   const formatCalendarDayHeading = (dateStr: string): string => {
-    const today = new Date();
-    const todayStr = formatDate(today);
-    if (dateStr === todayStr) return 'Today';
-    if (dateStr === formatDate(addDays(today, 1))) return 'Tomorrow';
-    if (dateStr === formatDate(addDays(today, -1))) return 'Yesterday';
+    if (dateStr === todayKey) return 'Today';
+    if (dateStr === formatDate(addDays(todayDate, 1))) return 'Tomorrow';
+    if (dateStr === formatDate(addDays(todayDate, -1))) return 'Yesterday';
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d).toLocaleDateString(undefined, {
       weekday: 'short',
@@ -451,23 +458,48 @@ export function App() {
     setCaptureDefaultDueAt(undefined);
   }, []);
 
+  const activeTasksRef = useRef(activeTasks);
+  activeTasksRef.current = activeTasks;
+  const todayKeyRef = useRef(todayKey);
+  todayKeyRef.current = todayKey;
+  const hideCompletedRef = useRef(prefs.hideCompleted);
+  hideCompletedRef.current = prefs.hideCompleted;
+  const isRecurringOpenRef = useRef(isRecurringOpen);
+  isRecurringOpenRef.current = isRecurringOpen;
+  const isSearchOpenRef = useRef(isSearchOpen);
+  isSearchOpenRef.current = isSearchOpen;
+
   const handleComplete = useCallback(async (id: string, dateStr?: string) => {
-    const target = activeTasks.find((t) => t.id === id) ?? (await db.tasks.get(id));
+    const target = activeTasksRef.current.find((t) => t.id === id) ?? (await db.tasks.get(id));
     await completeTask(id, dateStr);
     scheduleSync();
-    if (target && isUndatedOneTime(target)) {
+    if (!target) return;
+    if (isUndatedOneTime(target)) {
       showUndoToast(`Completed "${target.title}"`, async () => {
         await undoCompleteUndatedTask(id);
         scheduleSync();
       });
-    } else if (target && isWindowPeriodic(target)) {
-      const targetDate = dateStr ?? formatDate(new Date());
+    } else if (isWindowPeriodic(target)) {
+      const targetDate = dateStr ?? todayKeyRef.current;
       showUndoToast(`Logged "${target.title}"`, async () => {
         await uncompleteTask(id, targetDate);
         scheduleSync();
       });
+    } else {
+      const currentTodayKey = todayKeyRef.current;
+      const targetDate = dateStr ?? (target.dueAt ? getDueDatePart(target.dueAt) : currentTodayKey);
+      const isOverdue = Boolean(
+        (dateStr && dateStr < currentTodayKey) ||
+          (!dateStr && target.dueAt && getDueDatePart(target.dueAt) < currentTodayKey)
+      );
+      if (hideCompletedRef.current || isRecurringOpenRef.current || isSearchOpenRef.current || isOverdue) {
+        showUndoToast(`Completed "${target.title}"`, async () => {
+          await uncompleteTask(id, targetDate);
+          scheduleSync();
+        });
+      }
     }
-  }, [activeTasks, scheduleSync, showUndoToast]);
+  }, [scheduleSync, showUndoToast]);
 
   const handleUncomplete = useCallback(async (id: string, dateStr?: string) => {
     await uncompleteTask(id, dateStr);
@@ -481,9 +513,24 @@ export function App() {
   }, []);
 
   const handleDelete = useCallback(async (id: string) => {
+    const previousTask = activeTasksRef.current.find((t) => t.id === id) ?? (await db.tasks.get(id));
     await softDeleteTask(id);
     scheduleSync();
-  }, [scheduleSync]);
+    if (previousTask) {
+      showUndoToast(`Deleted "${previousTask.title}"`, async () => {
+        await restoreTaskSnapshot(previousTask);
+        scheduleSync();
+      });
+    }
+  }, [scheduleSync, showUndoToast]);
+
+  const handleReorder = useCallback(
+    (taskIds: string[]) => {
+      void reorderTasks(taskIds);
+      scheduleSync();
+    },
+    [scheduleSync]
+  );
 
   const handleStopRepeating = useCallback(async (task: Task) => {
     if (editingTask?.id === task.id) {
@@ -666,10 +713,22 @@ export function App() {
   }, [scheduleSync]);
 
   const handleConfirmSkipOccurrence = async (task: Task, dateToSkip: string) => {
-    await skipTaskOccurrence(task.id, dateToSkip);
+    const previousTask = activeTasks.find((t) => t.id === task.id) ?? (await db.tasks.get(task.id));
+    const updated = await skipTaskOccurrence(task.id, dateToSkip);
     scheduleSync();
     setSkipOccurrenceTask(null);
+    if (previousTask && updated) {
+      showUndoToast(`Skipped "${task.title}"`, async () => {
+        await restoreTaskSnapshot(previousTask, updated);
+        scheduleSync();
+      });
+    }
   };
+
+  const handleUnskipOccurrence = useCallback(async (taskId: string, dateStr: string) => {
+    await unskipTaskOccurrence(taskId, dateStr);
+    scheduleSync();
+  }, [scheduleSync]);
 
   const handleConfirmDelete = async (taskId: string) => {
     setDeleteConfirmTask(null);
@@ -695,7 +754,7 @@ export function App() {
 
   useKeyboardShortcuts(
     {
-      onCapture: () => openCapture(),
+      onCapture: !hasBlockingModal ? () => openCapture() : undefined,
       onSearch: canOpenSearch ? openSearch : undefined,
       onViewCalendar: canUseNavShortcuts
         ? () => {
@@ -766,7 +825,7 @@ export function App() {
           return;
         }
       },
-      onOpenHelp: () => setShowShortcutsHelp(true),
+      onOpenHelp: !hasBlockingModal ? () => setShowShortcutsHelp(true) : undefined,
     },
     !isMonthYearPickerOpen && !pendingMove
   );
@@ -775,11 +834,11 @@ export function App() {
     setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const todayDateStr = formatDate(now);
+  const todayDateStr = todayKey;
   const isOnToday =
     calSelectedDate === todayDateStr &&
-    calYear === now.getFullYear() &&
-    calMonth === now.getMonth();
+    calYear === todayDate.getFullYear() &&
+    calMonth === todayDate.getMonth();
   const calFocusStr = calSelectedDate || todayDateStr;
   const prevTitleTarget = effectiveExpanded
     ? shiftMonth(calYear, calMonth, -1)
@@ -815,10 +874,7 @@ export function App() {
         tasks={tasks}
         enabled={reorderEnabled}
         onDragActiveChange={handleDragActiveChange}
-        onReorder={(taskIds) => {
-          void reorderTasks(taskIds);
-          scheduleSync();
-        }}
+        onReorder={handleReorder}
         renderRow={(t, dragProps) => (
           <TaskCard
             key={`${t.id}-${t.dueAt ?? ''}`}
@@ -842,13 +898,17 @@ export function App() {
     );
   };
 
-  const formatSelectedDaySubtitle = (dateStr: string): string => {
+  const formatSelectedDaySubtitle = (dateStr: string): string | null => {
     const [y, m, d] = dateStr.split('-').map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    const formatted = new Date(y, m - 1, d).toLocaleDateString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
     });
+    if (formatted === formatCalendarDayHeading(dateStr)) {
+      return y !== todayDate.getFullYear() ? String(y) : null;
+    }
+    return formatted;
   };
 
   const renderCalendarNavButtons = (includeOverflow = false) => (
@@ -864,7 +924,7 @@ export function App() {
             : 'text-tt-blue hover:bg-tt-blue-soft'
         }`}
       >
-        <TodayCalendarIcon day={now.getDate()} />
+        <TodayCalendarIcon day={todayDate.getDate()} />
       </button>
       <button
         type="button"
@@ -910,7 +970,14 @@ export function App() {
         nextTitle={nextCalHeaderTitle}
         canSwipePrev={canSwipePrevTitle}
         canSwipeNext={canSwipeNextTitle}
-        expanded={effectiveExpanded}
+        expanded={layout.isSplit ? isMonthYearPickerOpen : effectiveExpanded}
+        title={
+          layout.isSplit
+            ? 'Choose month and year'
+            : effectiveExpanded
+              ? 'Collapse to week view'
+              : 'Expand to month view'
+        }
         onClick={() =>
           layout.isSplit
             ? setIsMonthYearPickerOpen(true)
@@ -1027,29 +1094,35 @@ export function App() {
             setCalMonth(m);
           }}
         />
-        {calSelectedDate && (
-          <div className="rounded-xl border border-tt-border bg-tt-sidebar/60 px-3.5 py-2.5 text-xs text-tt-secondary space-y-1">
-            <div className="font-semibold text-tt-text text-[13px]">
-              {formatCalendarDayHeading(calSelectedDate)} · {formatSelectedDaySubtitle(calSelectedDate)}
+        {calSelectedDate && (() => {
+          const daySubtitle = formatSelectedDaySubtitle(calSelectedDate);
+          return (
+            <div className="rounded-xl border border-tt-border bg-tt-sidebar/60 px-3.5 py-2.5 text-xs text-tt-secondary space-y-1">
+              <div className="font-semibold text-tt-text text-[13px]">
+                {formatCalendarDayHeading(calSelectedDate)}
+                {daySubtitle ? ` · ${daySubtitle}` : ''}
+              </div>
+              <div className="tabular-nums">
+                {calOverdueTasks.length > 0 && (
+                  <span className="text-tt-overdue font-medium">{calOverdueTasks.length} overdue · </span>
+                )}
+                <span>
+                  {displayedTasks.length} {displayedTasks.length === 1 ? 'task' : 'tasks'} scheduled
+                </span>
+                {calCompletedTasks.length > 0 && (
+                  <span> · {calCompletedTasks.length} completed</span>
+                )}
+              </div>
             </div>
-            <div className="tabular-nums">
-              {calOverdueTasks.length > 0 && (
-                <span className="text-tt-overdue font-medium">{calOverdueTasks.length} overdue · </span>
-              )}
-              <span>
-                {displayedTasks.length} {displayedTasks.length === 1 ? 'task' : 'tasks'} scheduled
-              </span>
-              {calCompletedTasks.length > 0 && (
-                <span> · {calCompletedTasks.length} completed</span>
-              )}
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </section>
   );
 
-  const renderDesktopSelectedDayPane = (className: string) => (
+  const renderDesktopSelectedDayPane = (className: string) => {
+    const selectedSubtitle = calSelectedDate ? formatSelectedDaySubtitle(calSelectedDate) : null;
+    return (
     <section
       aria-label="Selected day tasks"
       className={`flex-1 min-w-0 flex flex-col min-h-0 bg-tt-surface ${className}`}
@@ -1059,9 +1132,9 @@ export function App() {
           <h1 className="text-[18px] font-bold tracking-tight text-tt-text truncate">
             {calSelectedDate ? formatCalendarDayHeading(calSelectedDate) : 'Calendar'}
           </h1>
-          {calSelectedDate && (
+          {selectedSubtitle && (
             <span className="text-[13px] text-tt-secondary truncate">
-              {formatSelectedDaySubtitle(calSelectedDate)}
+              {selectedSubtitle}
             </span>
           )}
         </div>
@@ -1100,7 +1173,8 @@ export function App() {
         </div>
       )}
     </section>
-  );
+    );
+  };
 
   const tasksCount = visiblePeriodicTasks.length + undatedOneTimeTasks.length;
   const resolvedDefaultDueAt =
@@ -1455,10 +1529,7 @@ export function App() {
                           surfaceClassName="bg-transparent"
                           onToggleGroup={toggleGroup}
                           onDragActiveChange={handleDragActiveChange}
-                          onReorderOneTime={(taskIds) => {
-                            void reorderTasks(taskIds);
-                            scheduleSync();
-                          }}
+                          onReorderOneTime={handleReorder}
                           onSelect={handleEdit}
                           onComplete={handleComplete}
                           onUncomplete={handleUncomplete}
@@ -1572,6 +1643,7 @@ export function App() {
             onRequestDelete={setDeleteConfirmTask}
             onLogCompletionDate={handleConfirmLogDate}
             onRemoveCompletionTimestamp={handleRemoveCompletionTimestamp}
+            onUnskipOccurrence={handleUnskipOccurrence}
           />
         )}
       </div>
@@ -1609,8 +1681,10 @@ export function App() {
           onSave={handleSave}
           initialTask={editingTask}
           defaultDueAt={resolvedDefaultDueAt}
+          onRequestDelete={setDeleteConfirmTask}
           onLogCompletionDate={handleConfirmLogDate}
           onRemoveCompletionTimestamp={handleRemoveCompletionTimestamp}
+          onUnskipOccurrence={handleUnskipOccurrence}
         />
       )}
 
@@ -1623,6 +1697,7 @@ export function App() {
         syncStatus={syncStatus}
         onSyncStatusChange={() => refreshSyncStatus()}
         onShowShortcuts={() => setShowShortcutsHelp(true)}
+        suppressEscape={showShortcutsHelp}
         diagnosticsContext={{
           calSelectedDate,
           collapsedGroups,
@@ -1663,6 +1738,7 @@ export function App() {
         ref={logDatePickerRef}
         maxDate={todayDateStr}
         ariaLabel="Log completion date"
+        testId="log-date-native-input"
         onSave={handleConfirmLogDate}
       />
 
@@ -1696,7 +1772,7 @@ export function App() {
         isOpen={isMonthYearPickerOpen}
         year={calYear}
         monthIndex={calMonth}
-        today={now}
+        today={todayDate}
         onSelect={handleSelectMonthYear}
         onJumpToToday={handleJumpToToday}
         onClose={() => setIsMonthYearPickerOpen(false)}

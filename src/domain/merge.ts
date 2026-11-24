@@ -174,31 +174,68 @@ export function mergeTasks(
           .sort((a, b) => a - b)
       );
 
-      const allRemovedSkipped = capTail(
-        Array.from(
-          new Set([...(local.removedSkippedDates || []), ...(remote.removedSkippedDates || [])])
-        ).sort()
-      );
-      const removedSkippedSet = new Set(allRemovedSkipped);
+      const localSkippedSet = new Set(local.skippedDates || []);
+      const remoteSkippedSet = new Set(remote.skippedDates || []);
+      const localRemovedSkippedSet = new Set(local.removedSkippedDates || []);
+      const remoteRemovedSkippedSet = new Set(remote.removedSkippedDates || []);
+      const allSkipDateKeys = Array.from(
+        new Set([
+          ...localSkippedSet,
+          ...remoteSkippedSet,
+          ...localRemovedSkippedSet,
+          ...remoteRemovedSkippedSet,
+        ])
+      ).sort();
 
-      const allSkipped = capTail(
-        Array.from(new Set([...(local.skippedDates || []), ...(remote.skippedDates || [])]))
-          .filter((d) => !removedSkippedSet.has(d))
-          .sort()
-      );
+      const skippedList: string[] = [];
+      const removedSkippedList: string[] = [];
+      const mergedSkippedUpdatedAtEntries: [string, number][] = [];
+
+      for (const d of allSkipDateKeys) {
+        const lTs = local.skippedDateUpdatedAt?.[d] ?? 0;
+        const rTs = remote.skippedDateUpdatedAt?.[d] ?? 0;
+        const maxTs = Math.max(lTs, rTs);
+        let isSkipped: boolean;
+
+        if (lTs > rTs) {
+          isSkipped = localSkippedSet.has(d);
+        } else if (rTs > lTs) {
+          isSkipped = remoteSkippedSet.has(d);
+        } else {
+          // Equal or absent per-date timestamps (legacy data): tombstones win.
+          const isRemoved = localRemovedSkippedSet.has(d) || remoteRemovedSkippedSet.has(d);
+          isSkipped = !isRemoved && (localSkippedSet.has(d) || remoteSkippedSet.has(d));
+        }
+
+        if (isSkipped) {
+          skippedList.push(d);
+        } else if (localRemovedSkippedSet.has(d) || remoteRemovedSkippedSet.has(d)) {
+          removedSkippedList.push(d);
+        }
+        if (maxTs > 0) {
+          mergedSkippedUpdatedAtEntries.push([d, maxTs]);
+        }
+      }
+
+      const allSkipped = capTail(skippedList);
+      const allRemovedSkipped = capTail(removedSkippedList);
+      const cappedSkippedUpdatedAt = capTail(mergedSkippedUpdatedAtEntries);
 
       const isWindow = isWindowPeriodic(winner);
       const isFixed = !isWindow && !!winner.recurrence;
 
       return {
         ...winner,
-        startDate: isWindow ? null : winner.startDate || local.startDate || remote.startDate || null,
+        startDate: isFixed ? winner.startDate || local.startDate || remote.startDate || null : null,
         completionHistory: allCompletions,
         ...(allRemoved.length > 0 ? { removedCompletions: allRemoved } : { removedCompletions: undefined }),
         skippedDates: allSkipped,
         ...(isWindow || allRemovedSkipped.length === 0
           ? { removedSkippedDates: undefined }
           : { removedSkippedDates: allRemovedSkipped }),
+        ...(isWindow || cappedSkippedUpdatedAt.length === 0
+          ? { skippedDateUpdatedAt: undefined }
+          : { skippedDateUpdatedAt: Object.fromEntries(cappedSkippedUpdatedAt) }),
         ...(isFixed && winner.rescheduledDates
           ? { rescheduledDates: winner.rescheduledDates }
           : { rescheduledDates: undefined }),
@@ -209,10 +246,6 @@ export function mergeTasks(
     },
     options
   );
-}
-
-export function resolveTaskConflict(local: Task, remote: Task): Task {
-  return mergeTasks([local], [remote])[0];
 }
 
 export function mergeLists(
@@ -226,10 +259,6 @@ export function mergeLists(
     ...options,
     protectedIds,
   });
-}
-
-export function resolveListConflict(local: TaskList, remote: TaskList): TaskList {
-  return mergeLists([local], [remote])[0];
 }
 
 export function mergeFolders(

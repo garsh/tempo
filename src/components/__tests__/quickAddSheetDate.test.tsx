@@ -74,6 +74,12 @@ describe('dateChoiceMenuPosition', () => {
     const pos = dateChoiceMenuPosition({ top: 100, bottom: 140, left: 360 }, viewport);
     expect(pos.left).toBe(400 - 188 - 8);
   });
+
+  it('does not double-add visualViewport offsetTop/offsetLeft to fixed anchor rects (Item N)', () => {
+    const scrolledViewport = { width: 390, height: 420, offsetTop: 120, offsetLeft: 20 };
+    const pos = dateChoiceMenuPosition({ top: 200, bottom: 240, left: 48 }, scrolledViewport);
+    expect(pos).toEqual({ top: 246, left: 48 });
+  });
 });
 
 describe('QuickAddSheet date menu', () => {
@@ -236,6 +242,49 @@ describe('QuickAddSheet date menu', () => {
     });
     expect(view.container.querySelector('#date-choice-menu')).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
+
+    view.unmount();
+  });
+
+  it('uses a native button for "Select" that calls showPicker() and supports ArrowDown navigation (Item N)', () => {
+    const view = mount(
+      <QuickAddSheet
+        isOpen={true}
+        onSave={vi.fn()}
+        onClose={vi.fn()}
+        defaultDueAt="2026-11-23"
+      />
+    );
+
+    openDateMenu(view.container);
+
+    const menu = view.container.querySelector<HTMLElement>('#date-choice-menu')!;
+    expect(menu).not.toBeNull();
+    expect(menu.querySelector('label[role="menuitem"]')).toBeNull();
+
+    const items = Array.from(
+      menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"], [role="menuitem"]')
+    );
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    const selectBtn = items.find((btn) => btn.textContent?.includes('Select'));
+    expect(selectBtn).toBeDefined();
+    expect(selectBtn!.getAttribute('role')).toBe('menuitem');
+
+    const dateInput = menu.querySelector<HTMLInputElement>('input[type="date"]')!;
+    expect(dateInput).not.toBeNull();
+    const showPickerSpy = vi.fn();
+    dateInput.showPicker = showPickerSpy;
+
+    act(() => {
+      items[0].focus();
+      items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(items[1]);
+
+    act(() => {
+      selectBtn!.click();
+    });
+    expect(showPickerSpy).toHaveBeenCalledTimes(1);
 
     view.unmount();
   });

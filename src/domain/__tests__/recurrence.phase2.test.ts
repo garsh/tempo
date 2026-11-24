@@ -123,4 +123,37 @@ describe('Phase 2 richer recurrence', () => {
       })
     ).toContain('day 1');
   });
+
+  it('keeps multi-week Sat+Sun aligned with calculateNextDueDate and preserves single-weekday 2-week jumps (Item J)', () => {
+    const start = new Date(2026, 9, 3); // Sat Oct 3 2026
+    const sun1 = nextWeekdayAfter(start, [6, 0], 2, start);
+    expect(sun1.getFullYear()).toBe(2026);
+    expect(sun1.getMonth()).toBe(9);
+    expect(sun1.getDate()).toBe(4); // Sun Oct 4
+
+    const sat2 = nextWeekdayAfter(sun1, [6, 0], 2, start);
+    expect(sat2.getMonth()).toBe(9);
+    expect(sat2.getDate()).toBe(17); // Sat Oct 17
+
+    const sun2 = nextWeekdayAfter(sat2, [6, 0], 2, start);
+    expect(sun2.getMonth()).toBe(9);
+    expect(sun2.getDate()).toBe(18); // Sun Oct 18
+
+    const rule = {
+      type: 'fixed_interval' as const,
+      intervalValue: 2,
+      intervalUnit: 'weeks' as const,
+      weekdays: [6, 0] as const,
+    };
+    const r = { ...rule, weekdays: [...rule.weekdays] };
+    expect(calculateNextDueDate({ recurrence: r, startDate: '2026-10-03', dueAt: '2026-10-03' }, start)).toBe('2026-10-04');
+    expect(calculateNextDueDate({ recurrence: r, startDate: '2026-10-03', dueAt: '2026-10-04' }, sun1)).toBe('2026-10-17');
+    expect(calculateNextDueDate({ recurrence: r, startDate: '2026-10-03', dueAt: '2026-10-17' }, sat2)).toBe('2026-10-18');
+
+    // Single-weekday 2-week step
+    const mon = new Date(2026, 9, 5); // Mon Oct 5 2026
+    const nextMon = nextWeekdayAfter(mon, [1], 2);
+    expect(nextMon.getMonth()).toBe(9);
+    expect(nextMon.getDate()).toBe(19);
+  });
 });

@@ -15,6 +15,7 @@ export interface ChangeDatePickerProps {
   onSaveTask?: (task: Task, newDueAt: string | null) => Promise<void> | void;
   maxDate?: string;
   ariaLabel?: string;
+  testId?: string;
 }
 
 const VIEWPORT_MARGIN = 8;
@@ -29,6 +30,7 @@ export function ChangeDatePicker({
   onSaveTask,
   maxDate,
   ariaLabel = 'Change date',
+  testId = 'change-date-native-input',
 }: ChangeDatePickerProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef<{ id: string; task: Task; existingTime: string | null } | null>(null);
@@ -120,8 +122,9 @@ export function ChangeDatePicker({
       type="date"
       max={maxDate}
       tabIndex={-1}
+      aria-hidden="true"
       aria-label={ariaLabel}
-      data-testid="change-date-native-input"
+      data-testid={testId}
       style={{
         position: 'fixed',
         top: 0,

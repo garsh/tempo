@@ -132,3 +132,20 @@ describe('Calendar recurring tasks', () => {
     expect(tasksDueOnDate(tasks, '2026-10-07').map((t) => t.id)).toEqual(['daily-skipped-cal']);
   });
 });
+
+describe('Overdue one-off task completed on a later date', () => {
+  it('shows completed overdue one-off task on its completion day while preserving original dueAt', () => {
+    const completedTodayMs = new Date(2026, 10, 24, 10, 30, 0).getTime();
+    const overdueCompleted = task({
+      id: 'overdue-done',
+      title: 'Pay electric bill',
+      dueAt: '2026-11-20',
+      completedAt: completedTodayMs,
+      completionHistory: [completionTimestampForDate('2026-11-20'), completedTodayMs],
+    });
+
+    const todayDone = completedTasksOnDate([overdueCompleted], '2026-11-24');
+    expect(todayDone.map((t) => t.id)).toEqual(['overdue-done']);
+    expect(todayDone[0].dueAt).toBe('2026-11-20');
+  });
+});

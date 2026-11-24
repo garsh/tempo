@@ -552,6 +552,10 @@ describe('Annual time-of-year db persistence', () => {
 
   beforeEach(() => {
     store = new Map();
+    vi.spyOn(db, 'transaction').mockImplementation((async (...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }) as never);
     vi.spyOn(db.tasks, 'get').mockImplementation(((id: string) =>
       Promise.resolve(store.get(id))) as never);
     vi.spyOn(db.tasks, 'put').mockImplementation(((t: Task) => {

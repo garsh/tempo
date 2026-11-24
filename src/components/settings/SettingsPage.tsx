@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { useLayoutMode } from '../../hooks/useLayoutMode';
 import {
@@ -40,6 +40,7 @@ import {
   signOutGoogleSession,
 } from '../../sync/googleAuth';
 import {
+  cancelPendingAutoSync,
   clearSyncAuthPrompt,
   clearSyncError,
   formatSyncErrorMessage,
@@ -56,7 +57,6 @@ import {
   type Hemisphere,
   type NewTaskPosition,
   type ThemePref,
-  type TimeFormat,
   type WeekStart,
 } from '../../prefs/prefs';
 import { ConfirmDialog, Switch } from '../ui/Sheet';
@@ -98,6 +98,7 @@ interface SettingsPageProps {
   onSyncStatusChange: () => void;
   onShowShortcuts: () => void;
   diagnosticsContext?: Record<string, unknown>;
+  suppressEscape?: boolean;
 }
 
 type Status = { type: 'success' | 'error'; message: string } | null;
@@ -110,14 +111,21 @@ type Status = { type: 'success' | 'error'; message: string } | null;
  * to live in the old Settings & Sync modal.
  */
 export function SettingsPage(props: SettingsPageProps) {
-  const { isOpen, initialPage = 'root', onClose } = props;
+  const { isOpen, initialPage = 'root', onClose, suppressEscape = false } = props;
   const layout = useLayoutMode();
   const isTwoPane = layout.isSplit;
   const [page, setPage] = useState<SettingsPageId>(initialPage);
   const [status, setStatus] = useState<Status>(null);
+  const [hasChildDialog, setHasChildDialog] = useState(false);
+
+  const activePage: SettingsPageId = isTwoPane && page === 'root' ? 'general' : page;
+
+  useEffect(() => {
+    setHasChildDialog(false);
+  }, [activePage]);
 
   useEscapeKey(
-    isOpen,
+    isOpen && !suppressEscape && !hasChildDialog,
     () => {
       if (isTwoPane || page === 'root' || page === initialPage) onClose();
       else setPage('root');
@@ -126,8 +134,6 @@ export function SettingsPage(props: SettingsPageProps) {
   );
 
   if (!isOpen) return null;
-
-  const activePage: SettingsPageId = isTwoPane && page === 'root' ? 'general' : page;
 
   const go = (p: SettingsPageId) => {
     setStatus(null);
@@ -141,13 +147,20 @@ export function SettingsPage(props: SettingsPageProps) {
       body = <RootPage {...props} go={go} />;
       break;
     case 'account':
-      body = <AccountPage {...props} setStatus={setStatus} suppressLastErrorBanner={status?.type === 'error'} />;
+      body = (
+        <AccountPage
+          {...props}
+          setStatus={setStatus}
+          onChildDialogChange={setHasChildDialog}
+          suppressLastErrorBanner={status?.type === 'error'}
+        />
+      );
       break;
     case 'general':
       body = <GeneralPage {...props} />;
       break;
     case 'data':
-      body = <DataDiagnosticsPage {...props} setStatus={setStatus} />;
+      body = <DataDiagnosticsPage {...props} setStatus={setStatus} onChildDialogChange={setHasChildDialog} />;
       break;
   }
 
@@ -155,7 +168,7 @@ export function SettingsPage(props: SettingsPageProps) {
     <div
       role="status"
       className={`mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] ${
-        status.type === 'success' ? 'bg-tt-success/10 text-tt-success' : 'bg-tt-overdue/10 text-tt-overdue'
+        status.type === 'success' ? 'bg-tt-success/10 text-tt-success-text' : 'bg-tt-overdue/10 text-tt-overdue'
       }`}
     >
       {status.type === 'success' ? (
@@ -186,8 +199,7 @@ export function SettingsPage(props: SettingsPageProps) {
           role="dialog"
           aria-modal="true"
           aria-label={TITLES[activePage]}
-          className="w-full max-w-[820px] h-[min(680px,86dvh)] rounded-2xl shadow-2xl border border-tt-border bg-tt-bg flex flex-col overflow-hidden compact-landscape:max-w-none compact-landscape:h-full compact-landscape:rounded-none compact-landscape:border-0 tt-safe-x"
-          style={{ paddingTop: 'env(safe-area-inset-top)' }}
+          className="w-full max-w-[820px] h-[min(680px,86dvh)] rounded-2xl shadow-2xl border border-tt-border bg-tt-bg flex flex-col overflow-hidden compact-landscape:max-w-none compact-landscape:h-full compact-landscape:rounded-none compact-landscape:border-0 compact-landscape:pt-[env(safe-area-inset-top)] tt-safe-x"
         >
           <header className="shrink-0 h-14 compact-landscape:h-12 px-5 border-b border-tt-border bg-tt-surface flex items-center justify-between">
             <h1 className="text-[19px] font-bold text-tt-text">Settings</h1>
@@ -216,7 +228,7 @@ export function SettingsPage(props: SettingsPageProps) {
                     aria-current={selected ? 'page' : undefined}
                     className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[14px] text-left transition-colors cursor-pointer ${
                       selected
-                        ? 'bg-tt-blue-soft text-tt-blue font-semibold'
+                        ? 'bg-tt-blue-soft text-tt-blue dark:text-blue-300 font-semibold'
                         : 'text-tt-text hover:bg-tt-hover font-medium'
                     }`}
                   >
@@ -287,11 +299,21 @@ function AccountPage({
   syncStatus,
   onSyncStatusChange,
   setStatus,
+  onChildDialogChange,
   suppressLastErrorBanner = false,
-}: SettingsPageProps & { setStatus: (s: Status) => void; suppressLastErrorBanner?: boolean }) {
+}: SettingsPageProps & {
+  setStatus: (s: Status) => void;
+  onChildDialogChange?: (open: boolean) => void;
+  suppressLastErrorBanner?: boolean;
+}) {
   const [customClientId, setCustomClientId] = useState(() => getCustomClientId());
   const [isSyncing, setIsSyncing] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
+
+  useEffect(() => {
+    onChildDialogChange?.(confirmSignOut);
+    return () => onChildDialogChange?.(false);
+  }, [confirmSignOut, onChildDialogChange]);
   const activeClientId = getStoredClientId();
   const defaultClientId = getDefaultClientId();
   const hasCustomClientId = Boolean(getCustomClientId());
@@ -378,6 +400,7 @@ function AccountPage({
 
   const handleSignOut = () => {
     void signOutGoogleSession();
+    cancelPendingAutoSync();
     setGoogleAccount(null);
     clearSyncWatermarkState();
     clearSyncAuthPrompt();
@@ -391,16 +414,16 @@ function AccountPage({
       <div className="flex flex-col items-center pt-2 pb-5">
         <Avatar account={syncStatus.account} size={74} />
         <div className="mt-3 text-[19px] font-bold text-tt-text">{summary.title}</div>
-        <div className={`text-[13px] ${summary.warn ? 'text-tt-icon-amber' : 'text-tt-secondary'}`}>{summary.subtitle}</div>
+        <div className={`text-[13px] ${summary.warn ? 'text-tt-warning-text' : 'text-tt-secondary'}`}>{summary.subtitle}</div>
         {hasCustomClientId && (
-          <div className="mt-1 text-[12px] text-tt-icon-amber">Using a custom OAuth client on this device.</div>
+          <div className="mt-1 text-[12px] text-tt-warning-text">Using a custom OAuth client on this device.</div>
         )}
       </div>
 
       {!hasActiveClientId && (
         <Card className="p-4 space-y-2 border border-amber-500/30 bg-amber-500/5 mb-3">
           <div className="flex items-start gap-2.5">
-            <Key className="w-4 h-4 text-tt-icon-amber shrink-0 mt-0.5" />
+            <Key className="w-4 h-4 text-tt-warning-text shrink-0 mt-0.5" />
             <div className="text-[13px] text-tt-text font-medium">Google Sign-In Setup Required</div>
           </div>
           <p className="text-[12px] text-tt-secondary leading-relaxed">
@@ -423,7 +446,7 @@ function AccountPage({
       {syncStatus.authPrompt && !syncStatus.lastError && !isSyncing && !suppressLastErrorBanner && (
         <div
           role="status"
-          className="mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] border border-amber-500/30 bg-amber-500/10 text-tt-icon-amber"
+          className="mx-4 mb-4 p-3 rounded-xl flex items-start gap-2.5 text-[13px] border border-amber-500/30 bg-amber-500/10 text-tt-warning-text"
         >
           <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
           <span className="flex-1 break-words">
@@ -555,7 +578,7 @@ function AccountPage({
             <code className="text-tt-secondary font-mono select-all">
               {activeClientId ? `${activeClientId.slice(0, 14)}…${activeClientId.slice(-20)}` : 'None'}
             </code>
-            {hasCustomClientId && <span className="ml-2 text-tt-icon-amber">(custom override)</span>}
+            {hasCustomClientId && <span className="ml-2 text-tt-warning-text">(custom override)</span>}
           </div>
           <details className="text-[12px] text-tt-secondary">
             <summary className="cursor-pointer font-medium flex items-center gap-1 hover:text-tt-text">
@@ -607,11 +630,6 @@ const WEEK_START_OPTIONS: ReadonlyArray<{ value: `${WeekStart}`; label: string }
   { value: '6', label: 'Saturday' },
 ];
 
-const TIME_FORMAT_OPTIONS: ReadonlyArray<{ value: TimeFormat; label: string }> = [
-  { value: '12h', label: '12-hour (5:30 PM)' },
-  { value: '24h', label: '24-hour (17:30)' },
-];
-
 const HEMISPHERE_OPTIONS: ReadonlyArray<{ value: Hemisphere; label: string }> = [
   { value: 'north', label: 'Northern hemisphere' },
   { value: 'south', label: 'Southern hemisphere' },
@@ -642,12 +660,6 @@ function PreferencesSections() {
           value={String(prefs.weekStart) as `${WeekStart}`}
           options={WEEK_START_OPTIONS}
           onChange={(v) => update({ weekStart: Number(v) as WeekStart })}
-        />
-        <SelectRow
-          label="Time format"
-          value={prefs.timeFormat}
-          options={TIME_FORMAT_OPTIONS}
-          onChange={(timeFormat) => update({ timeFormat })}
         />
         <SelectRow
           label="Seasons"
@@ -689,7 +701,7 @@ function FileRow({
 }) {
   return (
     <label
-      className={`w-full min-h-[50px] flex items-center pl-4 pr-[18px] gap-3 ${
+      className={`w-full min-h-[50px] flex items-center pl-4 pr-[18px] gap-3 focus-within:ring-2 focus-within:ring-inset focus-within:ring-tt-blue focus-within:bg-tt-hover ${
         disabled ? 'opacity-50 pointer-events-none' : 'cursor-pointer hover:bg-tt-hover'
       }`}
     >
@@ -717,7 +729,11 @@ function DataDiagnosticsPage({
   onSyncStatusChange,
   diagnosticsContext,
   setStatus,
-}: SettingsPageProps & { setStatus: (s: Status) => void }) {
+  onChildDialogChange,
+}: SettingsPageProps & {
+  setStatus: (s: Status) => void;
+  onChildDialogChange?: (open: boolean) => void;
+}) {
   const [clearPreview, setClearPreview] = useState<ClearAllDataPreview | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<StorageCleanupPreview | null>(null);
   const [autoSync, setAutoSync] = useState(() => isAutoSyncEnabled());
@@ -728,6 +744,13 @@ function DataDiagnosticsPage({
     preview: JsonImportPreview;
   } | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const anyDialogOpen =
+    pendingImport !== null || clearPreview !== null || cleanupPreview !== null;
+
+  useEffect(() => {
+    onChildDialogChange?.(anyDialogOpen);
+    return () => onChildDialogChange?.(false);
+  }, [anyDialogOpen, onChildDialogChange]);
   const diag = buildDiagnosticsSummary(tasks, [], diagnosticsContext);
   const importedCompletedCount = useMemo(() => findImportedCompletedTaskIds(tasks).length, [tasks]);
   const hasSampleTasks = useMemo(() => tasks.some((t) => isSampleId(t.id) && !t.deletedAt), [tasks]);
@@ -1092,7 +1115,9 @@ function DataDiagnosticsPage({
         <NavRow
           icon={
             <RefreshCw
-              className={`w-[18px] h-[18px] text-tt-blue ${busyLabel ? 'animate-spin' : ''}`}
+              className={`w-[18px] h-[18px] text-tt-blue ${
+                busyLabel === 'Repairing & deduplicating tasks…' ? 'animate-spin' : ''
+              }`}
               strokeWidth={1.8}
             />
           }

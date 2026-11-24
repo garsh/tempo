@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { WindowProgress } from '../domain/recurrence';
 
@@ -135,7 +135,9 @@ export function RadialProgressRingWithTooltip({ progress, size = 20 }: RadialPro
     const top = placeAbove ? rect.top - 8 : rect.bottom + 8;
     const viewportW = window.innerWidth || 375;
     const anchorRight = rect.right || rect.left + rect.width;
-    const right = Math.max(12, viewportW - anchorRight);
+    const maxTooltipW = Math.min(280, viewportW - 24);
+    const maxRight = Math.max(12, viewportW - maxTooltipW - 12);
+    const right = Math.min(maxRight, Math.max(12, viewportW - anchorRight));
     return { top, right, placeAbove };
   }, []);
 
@@ -192,14 +194,30 @@ export function RadialProgressRingWithTooltip({ progress, size = 20 }: RadialPro
     if (useNativeInterest || !isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         clearCloseTimer();
         setDesktopOpen(false);
         setMobileOpen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [useNativeInterest, isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen || !tooltipPos || !tooltipRef.current) return;
+    const rect = tooltipRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    if (rect.left < 12) {
+      const shiftRight = Math.ceil(12 - rect.left);
+      const adjustedRight = Math.max(12, tooltipPos.right - shiftRight);
+      if (adjustedRight < tooltipPos.right) {
+        setTooltipPos((prev) => (prev ? { ...prev, right: adjustedRight } : prev));
+      }
+    }
+  }, [isOpen, tooltipPos]);
 
   const scheduleFallbackClose = () => {
     clearCloseTimer();
@@ -375,6 +393,7 @@ export function RadialProgressRingWithTooltip({ progress, size = 20 }: RadialPro
         <div
           id={tooltipId}
           ref={popoverRef}
+          role="tooltip"
           {...({ popover: 'hint' } as Record<string, unknown>)}
           data-testid="ring-progress-tooltip"
           className="tt-ring-tooltip"
@@ -422,6 +441,7 @@ export function RadialProgressRingWithTooltip({ progress, size = 20 }: RadialPro
               position: 'fixed',
               top: `${tooltipPos.top}px`,
               right: `${tooltipPos.right}px`,
+              maxWidth: 'calc(100dvw - 24px)',
               transform: tooltipPos.placeAbove ? 'translateY(-100%)' : 'translateY(0)',
               zIndex: 99999,
             }}

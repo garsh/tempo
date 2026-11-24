@@ -36,11 +36,22 @@ export function useCalendarPullGesture({
   active,
 }: UseCalendarPullGestureOptions) {
   const gestureRef = useRef<PullGestureState | null>(null);
+  const pointerCleanupRef = useRef<(() => void) | null>(null);
   const isTaskReorderingRef = useRef(false);
   const calExpandedRef = useRef(calExpanded);
   calExpandedRef.current = calExpanded;
   const setCalExpandedRef = useRef(setCalExpanded);
   setCalExpandedRef.current = setCalExpanded;
+
+  const stopWindowTracking = useCallback(() => {
+    const cleanup = pointerCleanupRef.current;
+    if (cleanup) {
+      pointerCleanupRef.current = null;
+      cleanup();
+    }
+  }, []);
+
+  useEffect(() => stopWindowTracking, [stopWindowTracking]);
 
   const startPull = useCallback((clientX: number, clientY: number) => {
     if (isTaskReorderingRef.current) return;
@@ -106,13 +117,15 @@ export function useCalendarPullGesture({
   }, [monthViewRef]);
 
   const cancelPull = useCallback(() => {
+    stopWindowTracking();
     gestureRef.current = null;
-  }, []);
+  }, [stopWindowTracking]);
 
   const handleDragActiveChange = useCallback(
     (dragActive: boolean) => {
       isTaskReorderingRef.current = dragActive;
       if (dragActive) {
+        stopWindowTracking();
         const g = gestureRef.current;
         gestureRef.current = null;
         if (g && g.mode === 'drag') {
@@ -120,7 +133,7 @@ export function useCalendarPullGesture({
         }
       }
     },
-    [monthViewRef],
+    [monthViewRef, stopWindowTracking],
   );
 
   useEffect(() => {
@@ -153,26 +166,48 @@ export function useCalendarPullGesture({
 
   const onPointerDown = useCallback(
     (e: PointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === 'touch') return;
+      if (e.pointerType === 'touch' || e.button !== 0) return;
+      stopWindowTracking();
       startPull(e.clientX, e.clientY);
-    },
-    [startPull],
-  );
+      if (typeof window === 'undefined') return;
 
-  const onPointerMove = useCallback(
-    (e: PointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === 'touch') return;
-      movePull(e.clientX, e.clientY, e.target);
-    },
-    [movePull],
-  );
+      const onWinMove = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerType === 'touch') return;
+        if ((ev.buttons & 1) === 0) {
+          stopWindowTracking();
+          endPull();
+          return;
+        }
+        movePull(ev.clientX, ev.clientY, ev.target);
+      };
 
-  const onPointerUp = useCallback(
-    (e: PointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === 'touch') return;
-      endPull();
+      const onWinEnd = (ev: globalThis.PointerEvent) => {
+        if (ev.pointerType === 'touch') return;
+        stopWindowTracking();
+        endPull();
+      };
+
+      const onWinCancel = () => {
+        stopWindowTracking();
+        const g = gestureRef.current;
+        gestureRef.current = null;
+        if (g && g.mode === 'drag') {
+          monthViewRef.current?.releasePull(() => {});
+        }
+      };
+
+      window.addEventListener('pointermove', onWinMove);
+      window.addEventListener('pointerup', onWinEnd);
+      window.addEventListener('pointercancel', onWinCancel);
+      window.addEventListener('blur', onWinCancel);
+      pointerCleanupRef.current = () => {
+        window.removeEventListener('pointermove', onWinMove);
+        window.removeEventListener('pointerup', onWinEnd);
+        window.removeEventListener('pointercancel', onWinCancel);
+        window.removeEventListener('blur', onWinCancel);
+      };
     },
-    [endPull],
+    [startPull, movePull, endPull, monthViewRef, stopWindowTracking],
   );
 
   return {
@@ -180,8 +215,6 @@ export function useCalendarPullGesture({
     cancelPull,
     areaPointerProps: {
       onPointerDown,
-      onPointerMove,
-      onPointerUp,
     },
   };
 }

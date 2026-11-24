@@ -37,12 +37,16 @@ const SIGNOUT_CHANNEL = 'tempo-auth-signout';
 
 /** Skew so we refresh slightly before real expiry. */
 const EXPIRY_SKEW_MS = 60_000;
+const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
+const GIS_SCRIPT_LOAD_TIMEOUT_MS = 15_000;
+const SILENT_AUTH_TIMEOUT_MS = 20_000;
 
 type CachedToken = { token: string; expiresAt: number };
 
 /** In-memory only. A reload uses silent GIS refresh instead of reading storage. */
 let cachedToken: CachedToken | null = null;
 let authGeneration = 0;
+let loadScriptPromise: Promise<void> | null = null;
 
 export class AuthOfflineError extends Error {
   constructor() {
@@ -87,10 +91,12 @@ export function setStoredClientId(clientId: string): boolean {
   try {
     if (!trimmed) {
       localStorage.removeItem(CLIENT_ID_KEY);
+      clearStoredToken();
       return true;
     }
     if (!isValidGoogleClientId(trimmed)) return false;
     localStorage.setItem(CLIENT_ID_KEY, trimmed);
+    clearStoredToken();
     return true;
   } catch {
     return false;
@@ -131,31 +137,66 @@ export function getCachedAccessToken(): string | null {
 }
 
 export function loadGoogleScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') {
-      resolve();
-      return;
-    }
-    if (window.google?.accounts?.oauth2) {
-      resolve();
-      return;
-    }
-    const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', (e) => reject(e));
-      // Script may already be loaded
-      if (window.google?.accounts?.oauth2) resolve();
-      return;
-    }
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+  if (isGoogleScriptLoaded()) {
+    return Promise.resolve();
+  }
+  if (loadScriptPromise) {
+    return loadScriptPromise;
+  }
+
+  const existing = document.querySelector(`script[src="${GIS_SCRIPT_URL}"]`);
+  existing?.remove();
+
+  loadScriptPromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
+    script.src = GIS_SCRIPT_URL;
     script.async = true;
     script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = (e) => reject(e);
+
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      script.onload = null;
+      script.onerror = null;
+    };
+
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      script.remove();
+      loadScriptPromise = null;
+      reject(new Error(message));
+    };
+
+    const timer = setTimeout(() => {
+      fail('Timed out loading Google Sign-In script');
+    }, GIS_SCRIPT_LOAD_TIMEOUT_MS);
+
+    script.onload = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      loadScriptPromise = null;
+      if (isGoogleScriptLoaded()) {
+        resolve();
+      } else {
+        script.remove();
+        reject(new Error('Google Sign-In script loaded without OAuth client'));
+      }
+    };
+
+    script.onerror = () => {
+      fail('Failed to load Google Sign-In script');
+    };
+
     document.head.appendChild(script);
   });
+
+  return loadScriptPromise;
 }
 
 export type TokenRequestMode = 'interactive' | 'silent';
@@ -218,14 +259,42 @@ export function requestGoogleAccessToken(
       return;
     }
 
+    const startGeneration = authGeneration;
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const finishResolve = (token: string) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      resolve(token);
+    };
+
+    const finishReject = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      reject(err);
+    };
+
+    if (mode === 'silent') {
+      timeoutId = setTimeout(() => {
+        finishReject(new GoogleAuthError('Silent sign-in timed out', 'interaction_required'));
+      }, SILENT_AUTH_TIMEOUT_MS);
+    }
+
     try {
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: SCOPES,
         callback: (resp) => {
+          if (authGeneration !== startGeneration) {
+            finishReject(new Error('Signed out'));
+            return;
+          }
           if (resp.error) {
             clearStoredToken();
-            reject(
+            finishReject(
               new GoogleAuthError(
                 resp.error,
                 INTERACTION_ERROR_RE.test(resp.error) ? 'interaction_required' : 'unknown'
@@ -233,24 +302,24 @@ export function requestGoogleAccessToken(
             );
           } else if (resp.access_token) {
             storeAccessToken(resp.access_token, resp.expires_in);
-            resolve(resp.access_token);
+            finishResolve(resp.access_token);
           } else {
-            reject(new Error('No access token returned from Google Sign-In.'));
+            finishReject(new Error('No access token returned from Google Sign-In.'));
           }
         },
         error_callback: (err) => {
           const rawMessage = err?.message || err?.type || 'Token request failed';
           if (err?.type === 'popup_failed_to_open' || POPUP_BLOCKED_RE.test(rawMessage)) {
-            reject(
+            finishReject(
               new GoogleAuthError(
                 err?.message || 'Failed to open popup window',
                 'popup_failed_to_open'
               )
             );
           } else if (err?.type === 'popup_closed') {
-            reject(new GoogleAuthError(rawMessage, 'popup_closed'));
+            finishReject(new GoogleAuthError(rawMessage, 'popup_closed'));
           } else {
-            reject(new GoogleAuthError(rawMessage, 'unknown'));
+            finishReject(new GoogleAuthError(rawMessage, 'unknown'));
           }
         },
       });
@@ -263,7 +332,7 @@ export function requestGoogleAccessToken(
         client.requestAccessToken();
       }
     } catch (err) {
-      reject(err);
+      finishReject(err);
     }
   });
 }

@@ -4,7 +4,6 @@ import { buildMonthGrid, shiftMonth, weekdayLabels, type CalendarDayCell } from 
 import { buildWeekCells, defaultDateForMonth, shiftMonthView, shiftWeek, type CalendarSwipeEvent } from '../domain/calendarUi';
 import { usePrefs } from '../prefs/prefs';
 import {
-  formatDate,
   getCompletedDateSet,
   getDueDatePart,
   getEarliestOccurrenceBound,
@@ -13,8 +12,10 @@ import {
   isCompletedOnDate,
   isFixedRecurring,
   isSkippedOnDate,
+  parseDate,
   taskOccursOnDate,
 } from '../domain/recurrence';
+import { useTodayKey } from '../hooks/useTodayKey';
 
 export const CALENDAR_ROW_HEIGHT = 36;
 export const CALENDAR_WEEK_COUNT = 6;
@@ -70,7 +71,8 @@ export function CalendarMonthView({
   const effectiveExpanded = collapsible ? expanded : true;
   const expandDelta = rowHeight * (CALENDAR_WEEK_COUNT - 1);
   const [{ weekStart, showOverdue }] = usePrefs();
-  const todayStr = formatDate(new Date());
+  const todayStr = useTodayKey();
+  const todayDate = useMemo(() => parseDate(todayStr), [todayStr]);
   const focusStr = selectedDateStr || todayStr;
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,6 +100,17 @@ export function CalendarMonthView({
   const pointerStartYRef = useRef(0);
   const pointerStartTimeRef = useRef(0);
   const pointerDirectionRef = useRef<'none' | 'horizontal' | 'vertical'>('none');
+  const pointerCleanupRef = useRef<(() => void) | null>(null);
+
+  const stopWindowSwipeTracking = useCallback(() => {
+    const cleanup = pointerCleanupRef.current;
+    if (cleanup) {
+      pointerCleanupRef.current = null;
+      cleanup();
+    }
+  }, []);
+
+  useEffect(() => stopWindowSwipeTracking, [stopWindowSwipeTracking]);
 
   const dow = useMemo(() => weekdayLabels(weekStart), [weekStart]);
 
@@ -105,16 +118,16 @@ export function CalendarMonthView({
   const nextMonth = useMemo(() => shiftMonth(year, monthIndex, 1), [year, monthIndex]);
 
   const prevMonthGrid = useMemo(
-    () => buildMonthGrid(prevMonth.year, prevMonth.monthIndex, new Date(), weekStart),
-    [prevMonth.year, prevMonth.monthIndex, weekStart]
+    () => buildMonthGrid(prevMonth.year, prevMonth.monthIndex, todayDate, weekStart),
+    [prevMonth.year, prevMonth.monthIndex, todayDate, weekStart]
   );
   const currentMonthGrid = useMemo(
-    () => buildMonthGrid(year, monthIndex, new Date(), weekStart),
-    [year, monthIndex, weekStart]
+    () => buildMonthGrid(year, monthIndex, todayDate, weekStart),
+    [year, monthIndex, todayDate, weekStart]
   );
   const nextMonthGrid = useMemo(
-    () => buildMonthGrid(nextMonth.year, nextMonth.monthIndex, new Date(), weekStart),
-    [nextMonth.year, nextMonth.monthIndex, weekStart]
+    () => buildMonthGrid(nextMonth.year, nextMonth.monthIndex, todayDate, weekStart),
+    [nextMonth.year, nextMonth.monthIndex, todayDate, weekStart]
   );
 
   const prevWeek = useMemo(() => shiftWeek(focusStr, -1), [focusStr]);
@@ -137,16 +150,16 @@ export function CalendarMonthView({
   const prevHighlightStr = useMemo(
     () =>
       effectiveExpanded
-        ? defaultDateForMonth(prevMonth.year, prevMonth.monthIndex)
+        ? defaultDateForMonth(prevMonth.year, prevMonth.monthIndex, todayDate)
         : prevWeek.dateStr,
-    [effectiveExpanded, prevMonth.year, prevMonth.monthIndex, prevWeek.dateStr]
+    [effectiveExpanded, prevMonth.year, prevMonth.monthIndex, todayDate, prevWeek.dateStr]
   );
   const nextHighlightStr = useMemo(
     () =>
       effectiveExpanded
-        ? defaultDateForMonth(nextMonth.year, nextMonth.monthIndex)
+        ? defaultDateForMonth(nextMonth.year, nextMonth.monthIndex, todayDate)
         : nextWeek.dateStr,
-    [effectiveExpanded, nextMonth.year, nextMonth.monthIndex, nextWeek.dateStr]
+    [effectiveExpanded, nextMonth.year, nextMonth.monthIndex, todayDate, nextWeek.dateStr]
   );
 
   const dueDateSet = useMemo(() => {
@@ -365,52 +378,68 @@ export function CalendarMonthView({
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || isSnappingRef.current || e.button !== 0) return;
+    stopWindowSwipeTracking();
     pointerStartXRef.current = e.clientX;
     pointerStartYRef.current = e.clientY;
     pointerStartTimeRef.current = Date.now();
     pointerDirectionRef.current = 'none';
-  };
+    if (typeof window === 'undefined') return;
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (e.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
-    if ((e.buttons & 1) === 0) {
+    const onWinMove = (ev: PointerEvent) => {
+      if (ev.pointerType === 'touch' || isSnappingRef.current || pointerDirectionRef.current === 'vertical') return;
+      if ((ev.buttons & 1) === 0) {
+        stopWindowSwipeTracking();
+        if (pointerDirectionRef.current === 'horizontal') {
+          resetHorizontalTrack(true);
+        }
+        pointerDirectionRef.current = 'none';
+        return;
+      }
+      const dx = ev.clientX - pointerStartXRef.current;
+      const dy = ev.clientY - pointerStartYRef.current;
+
+      if (pointerDirectionRef.current === 'none') {
+        if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+          pointerDirectionRef.current = 'horizontal';
+        } else if (Math.abs(dy) > 6) {
+          pointerDirectionRef.current = 'vertical';
+        }
+      }
+
+      if (pointerDirectionRef.current === 'horizontal') {
+        applyHorizontalDrag(dx);
+      }
+    };
+
+    const onWinUp = (ev: PointerEvent) => {
+      if (ev.pointerType === 'touch') return;
+      stopWindowSwipeTracking();
+      if (pointerDirectionRef.current === 'horizontal') {
+        const dx = ev.clientX - pointerStartXRef.current;
+        const dt = Math.max(1, Date.now() - pointerStartTimeRef.current);
+        finishSwipe(dx, dt);
+      }
+      pointerDirectionRef.current = 'none';
+    };
+
+    const onWinCancel = () => {
+      stopWindowSwipeTracking();
       if (pointerDirectionRef.current === 'horizontal') {
         resetHorizontalTrack(true);
       }
       pointerDirectionRef.current = 'none';
-      return;
-    }
-    const dx = e.clientX - pointerStartXRef.current;
-    const dy = e.clientY - pointerStartYRef.current;
+    };
 
-    if (pointerDirectionRef.current === 'none') {
-      if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
-        pointerDirectionRef.current = 'horizontal';
-      } else if (Math.abs(dy) > 6) {
-        pointerDirectionRef.current = 'vertical';
-      }
-    }
-
-    if (pointerDirectionRef.current === 'horizontal') {
-      applyHorizontalDrag(dx);
-    }
-  };
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    if (e.pointerType === 'touch') return;
-    if (pointerDirectionRef.current === 'horizontal') {
-      const dx = e.clientX - pointerStartXRef.current;
-      const dt = Math.max(1, Date.now() - pointerStartTimeRef.current);
-      finishSwipe(dx, dt);
-    }
-    pointerDirectionRef.current = 'none';
-  };
-
-  const onPointerCancel = () => {
-    if (pointerDirectionRef.current === 'horizontal') {
-      resetHorizontalTrack(true);
-    }
-    pointerDirectionRef.current = 'none';
+    window.addEventListener('pointermove', onWinMove);
+    window.addEventListener('pointerup', onWinUp);
+    window.addEventListener('pointercancel', onWinCancel);
+    window.addEventListener('blur', onWinCancel);
+    pointerCleanupRef.current = () => {
+      window.removeEventListener('pointermove', onWinMove);
+      window.removeEventListener('pointerup', onWinUp);
+      window.removeEventListener('pointercancel', onWinCancel);
+      window.removeEventListener('blur', onWinCancel);
+    };
   };
 
   const progress = effectiveExpanded ? 1 : 0;
@@ -487,6 +516,7 @@ export function CalendarMonthView({
       releaseFrameRef.current = outer;
     },
     cancelPendingSwipe() {
+      stopWindowSwipeTracking();
       if (snapTimerRef.current) {
         clearTimeout(snapTimerRef.current);
         snapTimerRef.current = null;
@@ -522,12 +552,25 @@ export function CalendarMonthView({
           const isOverduePast = showOverdue && cell.dateStr < todayStr && hasTasks;
           const rowIdx = Math.floor(idx / 7);
           const muted = (progress > 0.05 || (isCurrentPage && rowIdx !== selectedWeekIndex)) && !cell.inCurrentMonth;
+          const isHiddenCollapsedRow = isCurrentPage && !effectiveExpanded && rowIdx !== selectedWeekIndex;
+          const isInteractiveCell = isCurrentPage && !isHiddenCollapsedRow;
+          const fullDateLabel = isInteractiveCell
+            ? `${cell.date.toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              })}${isOverduePast ? ', overdue tasks' : hasTasks ? ', tasks scheduled' : ''}`
+            : undefined;
           return (
             <button
               key={`${gridKey}-${cell.dateStr}`}
               data-date={isCurrentPage ? cell.dateStr : undefined}
-              tabIndex={isCurrentPage ? undefined : -1}
-              aria-current={isCurrentPage && isToday ? 'date' : undefined}
+              tabIndex={isInteractiveCell ? undefined : -1}
+              aria-hidden={isInteractiveCell ? undefined : true}
+              aria-current={isInteractiveCell && isToday ? 'date' : undefined}
+              aria-pressed={isInteractiveCell ? selected : undefined}
+              aria-label={fullDateLabel}
               type="button"
               style={{ height: `${rowHeight}px` }}
               onClick={() => {
@@ -540,7 +583,7 @@ export function CalendarMonthView({
                   onMonthChange(cell.date.getFullYear(), cell.date.getMonth());
                 }
               }}
-              className="flex flex-col items-center justify-center rounded-xl hover:bg-tt-sidebar/60 transition-colors cursor-pointer"
+              className="flex flex-col items-center justify-center rounded-xl hover:bg-tt-sidebar/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tt-blue transition-colors cursor-pointer"
             >
               <span
                 className={`${
@@ -558,6 +601,7 @@ export function CalendarMonthView({
                 {cell.date.getDate()}
               </span>
               <span
+                aria-hidden="true"
                 className={`w-1 h-1 rounded-full -mt-1 ${
                   hasTasks
                     ? isOverduePast
@@ -583,9 +627,6 @@ export function CalendarMonthView({
       className="select-none touch-pan-y"
       style={{ touchAction: 'pan-y' }}
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
     >
       <div className="grid grid-cols-7 text-[13px] font-medium text-tt-muted">
         {dow.map((d) => (

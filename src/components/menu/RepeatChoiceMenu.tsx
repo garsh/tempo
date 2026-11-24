@@ -116,7 +116,7 @@ export function RepeatChoiceMenu({
             <button
               type="button"
               role="menuitem"
-              className="w-full h-[40px] flex items-center pl-[18px] pr-[16px] text-left text-[15px] font-medium text-tt-secondary hover:text-red-500 hover:bg-tt-hover outline-none cursor-pointer"
+              className="w-full h-[40px] flex items-center pl-[18px] pr-[16px] text-left text-[15px] font-medium text-tt-secondary hover:text-red-500 hover:bg-tt-hover focus-visible:bg-tt-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tt-blue outline-none cursor-pointer"
               onClick={choose(onClearRepeat)}
             >
               No repeat

@@ -21,8 +21,6 @@ const dbMocks = vi.hoisted(() => ({
     openTasks: 3,
     completedTasks: 5,
     activeTasks: 8,
-    customLists: 2,
-    folders: 1,
   })),
   getStorageCleanupPreview: vi.fn(async () => ({
     importedCompletedTasks: 12,
@@ -58,8 +56,6 @@ const dataTransferMocks = vi.hoisted(() => ({
     incomingRecurringTasks: 1,
     incomingTombstonedTasks: 3,
     skippedPrunedTombstones: 1,
-    incomingActiveLists: 1,
-    incomingActiveFolders: 0,
     newTasksToAdd: 1,
     existingTasksToUpdate: 1,
     existingLocalTasksKept: 4,
@@ -305,6 +301,50 @@ describe('SettingsPage Backup & Diagnostics', () => {
     });
     await flushUi();
     expect(dbMocks.cleanupImportedAndTombstones).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+  });
+
+  it('closes only an open ConfirmDialog on Escape without closing SettingsPage (Item M)', async () => {
+    const onClose = vi.fn();
+    const view = mount(
+      <SettingsPage
+        isOpen={true}
+        initialPage="data"
+        onClose={onClose}
+        tasks={[]}
+        syncStatus={{
+          phase: 'idle',
+          lastSyncedAt: null,
+          lastError: null,
+          autoSyncEnabled: false,
+          account: null,
+        }}
+        onSyncStatusChange={vi.fn()}
+        onShowShortcuts={vi.fn()}
+      />
+    );
+
+    const clearBtn = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
+      b.textContent?.includes('Clear all current data')
+    )!;
+    expect(clearBtn).toBeTruthy();
+
+    await act(async () => {
+      clearBtn.click();
+    });
+    expect(view.container.textContent).toContain('Clear all current data?');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(view.container.textContent).not.toContain('Clear all current data?');
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
 
     view.unmount();
   });

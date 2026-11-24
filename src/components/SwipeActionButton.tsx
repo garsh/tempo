@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useId, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface SwipeActionButtonProps {
@@ -18,6 +18,7 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
   onClick,
   disabled = false,
 }) => {
+  const tooltipId = useId();
   const [isHovered, setIsHovered] = useState(false);
   const [showMobileTooltip, setShowMobileTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; placeAbove: boolean } | null>(null);
@@ -181,11 +182,25 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
         ref={buttonRef}
         type="button"
         aria-label={label}
-        title={explanation}
+        aria-description={explanation}
+        aria-describedby={showTooltip ? tooltipId : undefined}
         disabled={disabled}
         onClick={handleClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onFocus={() => {
+          updateTooltipPosition();
+          setIsHovered(true);
+        }}
+        onBlur={() => setIsHovered(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && showTooltip) {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsHovered(false);
+            setShowMobileTooltip(false);
+          }
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -211,7 +226,7 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
         onTouchCancel={endLongPress}
         onContextMenu={(e) => e.preventDefault()}
         style={{ touchAction: 'none', WebkitTouchCallout: 'none' }}
-        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 select-none ${
+        className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-tt-elevated select-none ${
           disabled
             ? 'bg-zinc-600/40 text-white/40 cursor-not-allowed opacity-40 shadow-none'
             : colorClasses
@@ -225,6 +240,7 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
         typeof document !== 'undefined' &&
         createPortal(
           <div
+            id={tooltipId}
             role="tooltip"
             data-testid="swipe-action-tooltip"
             style={{
@@ -235,15 +251,15 @@ export const SwipeActionButton: React.FC<SwipeActionButtonProps> = ({
               zIndex: 99999,
               pointerEvents: 'none',
             }}
-            className="animate-in fade-in zoom-in-95 duration-150 select-none"
+            className="select-none"
           >
-            <div className="relative bg-zinc-900/98 dark:bg-zinc-850/98 text-white text-[16px] sm:text-[18px] font-semibold px-5 py-3 rounded-2xl shadow-2xl border border-white/25 max-w-[340px] text-center leading-snug backdrop-blur-md">
+            <div className="relative bg-zinc-900/95 dark:bg-zinc-800/95 text-white text-[16px] sm:text-[18px] font-semibold px-5 py-3 rounded-2xl shadow-2xl border border-white/25 max-w-[340px] text-center leading-snug backdrop-blur-md">
               {explanation}
               <div
                 className={`absolute left-1/2 -translate-x-1/2 border-[6px] border-transparent ${
                   tooltipPos.placeAbove
-                    ? 'top-full -mt-px border-t-zinc-900/98 dark:border-t-zinc-850/98'
-                    : 'bottom-full -mb-px border-b-zinc-900/98 dark:border-b-zinc-850/98'
+                    ? 'top-full -mt-px border-t-zinc-900/95 dark:border-t-zinc-800/95'
+                    : 'bottom-full -mb-px border-b-zinc-900/95 dark:border-b-zinc-800/95'
                 }`}
               />
             </div>

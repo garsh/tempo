@@ -9,6 +9,7 @@ import {
 import {
   formatRecurrenceLabel,
   formatRecurringDueSubtitle,
+  getNextUncompletedOccurrenceDate,
   getWindowProgress,
 } from '../recurrence';
 import type { Task } from '../../types/task';
@@ -509,5 +510,35 @@ describe('sortRecurringByDueProximity', () => {
     expect(
       sortRecurringByDueProximity([dailyOver1, weeklyOver7], now).map((e) => e.raw.id)
     ).toEqual(['weekly-over-7', 'daily-over-1']);
+  });
+
+  it('keeps multi-year (>3y) recurring tasks sorted ahead of undated fallbacks (Item I)', () => {
+    const now = new Date(2026, 5, 15, 12, 0);
+    const passport = task({
+      id: 'passport-10y',
+      title: 'Renew passport',
+      startDate: '2026-06-15',
+      dueAt: '2036-06-15',
+      createdAt: 1,
+      recurrence: { type: 'fixed_interval', intervalValue: 10, intervalUnit: 'years' },
+      completionHistory: [new Date(2026, 5, 15, 9, 0).getTime()],
+    });
+    const nextDate = getNextUncompletedOccurrenceDate(passport, now);
+    expect(nextDate).toBe('2036-06-15');
+
+    const tenYearEntry = fixedEntry(passport, nextDate);
+    const undatedFallback = fixedEntry(
+      task({
+        id: 'ended-null',
+        title: 'Undated fallback',
+        createdAt: 2,
+        recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks' },
+      }),
+      null
+    );
+
+    expect(
+      sortRecurringByDueProximity([undatedFallback, tenYearEntry], now).map((e) => e.raw.id)
+    ).toEqual(['passport-10y', 'ended-null']);
   });
 });

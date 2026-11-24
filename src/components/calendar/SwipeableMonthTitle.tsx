@@ -16,6 +16,7 @@ interface SwipeableMonthTitleProps {
   canSwipePrev: boolean;
   canSwipeNext: boolean;
   expanded: boolean;
+  title?: string;
   onClick: () => void;
   ref?: Ref<SwipeableMonthTitleHandle>;
 }
@@ -31,6 +32,7 @@ export function SwipeableMonthTitle({
   canSwipePrev,
   canSwipeNext,
   expanded,
+  title,
   onClick,
   ref,
 }: SwipeableMonthTitleProps) {
@@ -97,8 +99,8 @@ export function SwipeableMonthTitle({
       type="button"
       onClick={onClick}
       aria-expanded={expanded}
-      title="Click to expand/collapse month"
-      className="block min-w-0 max-w-full overflow-hidden text-left text-[19px] sm:text-[25px] font-bold tracking-[-0.01em] text-tt-text cursor-pointer hover:opacity-80 transition-opacity"
+      title={title ?? (expanded ? 'Collapse to week view' : 'Expand to month view')}
+      className="block min-w-0 max-w-full overflow-hidden text-left text-[19px] sm:text-[25px] font-bold tracking-[-0.01em] text-tt-text rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tt-blue cursor-pointer hover:opacity-80 transition-opacity"
     >
       <span
         ref={trackRef}

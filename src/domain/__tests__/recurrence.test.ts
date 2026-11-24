@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  addDays,
   calculateNextDueDate,
   combineDueAt,
   completionTimestampForDate,
@@ -15,6 +16,7 @@ import {
   hasDueTime,
   isCompleted,
   isCompletedOnDate,
+  isRecurrenceFinished,
   isRecurring,
   isSkippedOnDate,
   parseDate,
@@ -453,6 +455,170 @@ describe('Per-day recurrence occurrences & completion', () => {
       // getNextUncompletedOccurrenceDate skips Nov 18 if checking on Nov 18
       const nextFrom18 = getNextUncompletedOccurrenceDate(task, new Date(2026, 10, 18, 9, 0));
       expect(nextFrom18).toBe('2026-11-19');
+    });
+  });
+
+  describe('Multi-year fixed schedules & edge cases (Items I & J)', () => {
+    it('finds 5-year and 10-year next occurrences and checks endOnDate accurately (Item I)', () => {
+      const fiveYear = recurringTask({
+        id: '5y',
+        title: 'Eye exam',
+        startDate: '2026-06-15',
+        dueAt: '2026-06-15',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 5,
+          intervalUnit: 'years',
+          endOnDate: '2040-01-01',
+        },
+        completionHistory: [completionTimestampForDate('2026-06-15')],
+      });
+      expect(getNextUncompletedOccurrenceDate(fiveYear, new Date(2026, 5, 15, 9, 0))).toBe('2031-06-15');
+      expect(isRecurrenceFinished(fiveYear, new Date(2026, 5, 15, 9, 0))).toBe(false);
+      expect(getSkipOccurrenceDate(fiveYear, '2026-06-15')).toBe('2031-06-15');
+
+      const endedBeforeNext = {
+        ...fiveYear,
+        recurrence: { ...fiveYear.recurrence!, endOnDate: '2030-01-01' },
+      };
+      expect(getNextUncompletedOccurrenceDate(endedBeforeNext, new Date(2026, 5, 15, 9, 0))).toBeNull();
+      expect(isRecurrenceFinished(endedBeforeNext, new Date(2026, 5, 15, 9, 0))).toBe(true);
+
+      const tenYear = recurringTask({
+        id: '10y',
+        title: 'Renew passport',
+        startDate: '2026-06-15',
+        dueAt: '2026-06-15',
+        recurrence: { type: 'fixed_interval', intervalValue: 10, intervalUnit: 'years' },
+        completionHistory: [completionTimestampForDate('2026-06-15')],
+      });
+      expect(getNextUncompletedOccurrenceDate(tenYear, new Date(2026, 5, 15, 9, 0))).toBe('2036-06-15');
+      expect(getSkipOccurrenceDate(tenYear, '2026-06-15')).toBe('2036-06-15');
+
+      const leapFourYear = recurringTask({
+        id: 'leap-4y',
+        title: 'Leap day check',
+        startDate: '2024-02-29',
+        dueAt: '2024-02-29',
+        recurrence: { type: 'fixed_interval', intervalValue: 4, intervalUnit: 'years' },
+        completionHistory: [completionTimestampForDate('2024-02-29')],
+      });
+      expect(getNextUncompletedOccurrenceDate(leapFourYear, new Date(2024, 1, 29, 9, 0))).toBe('2028-02-29');
+
+      const fortyEightMonths = recurringTask({
+        id: '48m',
+        title: 'Quadrennial filter',
+        startDate: '2026-01-15',
+        dueAt: '2026-01-15',
+        recurrence: { type: 'fixed_interval', intervalValue: 48, intervalUnit: 'months' },
+        completionHistory: [completionTimestampForDate('2026-01-15')],
+      });
+      expect(getNextUncompletedOccurrenceDate(fortyEightMonths, new Date(2026, 0, 15, 9, 0))).toBe('2030-01-15');
+
+      const twoHundredWeeks = recurringTask({
+        id: '200w',
+        title: 'Long weekly cycle',
+        startDate: '2026-01-05',
+        dueAt: '2026-01-05',
+        recurrence: { type: 'fixed_interval', intervalValue: 200, intervalUnit: 'weeks' },
+        completionHistory: [completionTimestampForDate('2026-01-05')],
+      });
+      const expected200w = formatDate(addDays(parseDate('2026-01-05'), 200 * 7));
+      expect(getNextUncompletedOccurrenceDate(twoHundredWeeks, new Date(2026, 0, 5, 9, 0))).toBe(expected200w);
+
+      const rescheduledEarlier = recurringTask({
+        ...tenYear,
+        id: '10y-resched',
+        completionHistory: [],
+        rescheduledDates: { '2026-06-15': '2027-03-01' },
+      });
+      expect(getNextUncompletedOccurrenceDate(rescheduledEarlier, new Date(2026, 5, 16, 9, 0))).toBe('2027-03-01');
+    });
+
+    it('excludes skippedDates from endAfterCount budget, invalidates cache, and steps long queries fast (Item J)', () => {
+      const series = recurringTask({
+        id: 'count-with-skip',
+        title: 'Five sessions',
+        startDate: '2026-01-01',
+        dueAt: '2026-01-01',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 1,
+          intervalUnit: 'days',
+          endAfterCount: 5,
+        },
+        skippedDates: ['2026-01-02'],
+      });
+
+      // Jan 1 (#1), Jan 2 (skipped), Jan 3 (#2), Jan 4 (#3), Jan 5 (#4), Jan 6 (#5), Jan 7 (ended)
+      expect(taskOccursOnDate(series, '2026-01-01')).toBe(true);
+      expect(taskOccursOnDate(series, '2026-01-03')).toBe(true);
+      expect(taskOccursOnDate(series, '2026-01-06')).toBe(true);
+      expect(taskOccursOnDate(series, '2026-01-07')).toBe(false);
+
+      // Skipping the 5th actionable date pushes the 5th slot to Jan 7
+      expect(getSkipOccurrenceDate(series, '2026-01-06')).toBe('2026-01-07');
+
+      // Mutating skippedDates in place and by replacement invalidates progressive cache
+      series.skippedDates!.push('2026-01-03');
+      expect(taskOccursOnDate(series, '2026-01-07')).toBe(true);
+      expect(taskOccursOnDate(series, '2026-01-08')).toBe(false);
+
+      const replaced = { ...series, skippedDates: ['2026-01-02', '2026-01-03', '2026-01-04'] };
+      expect(taskOccursOnDate(replaced, '2026-01-08')).toBe(true);
+      expect(taskOccursOnDate(replaced, '2026-01-09')).toBe(false);
+
+      // Far-future query on monthly endAfterCount completes rapidly
+      const monthly = recurringTask({
+        id: 'monthly-count',
+        title: 'Trimestral',
+        startDate: '2026-01-01',
+        dueAt: '2026-01-01',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 1,
+          intervalUnit: 'months',
+          endAfterCount: 3,
+        },
+      });
+      expect(taskOccursOnDate(monthly, '2036-01-01')).toBe(false);
+    });
+
+    it('keeps multi-week Sat+Sun occurrences paired in the same active week and honors monthly monthDay anchor (Item J)', () => {
+      const biweeklyWeekend = recurringTask({
+        id: 'weekend-2w',
+        title: 'Biweekly weekend',
+        startDate: '2026-10-03', // Saturday
+        dueAt: '2026-10-03',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 2,
+          intervalUnit: 'weeks',
+          weekdays: [6, 0], // Sat, Sun
+        },
+      });
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-03')).toBe(true);
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-04')).toBe(true);
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-10')).toBe(false);
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-11')).toBe(false);
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-17')).toBe(true);
+      expect(taskOccursOnDate(biweeklyWeekend, '2026-10-18')).toBe(true);
+
+      const monthlyDay1 = recurringTask({
+        id: 'monthly-d1',
+        title: 'Pay rent',
+        startDate: '2026-11-23',
+        dueAt: '2026-12-01',
+        recurrence: {
+          type: 'fixed_interval',
+          intervalValue: 1,
+          intervalUnit: 'months',
+          monthDay: 1,
+        },
+      });
+      expect(taskOccursOnDate(monthlyDay1, '2026-11-23')).toBe(false);
+      expect(taskOccursOnDate(monthlyDay1, '2026-12-01')).toBe(true);
+      expect(getNextUncompletedOccurrenceDate(monthlyDay1, new Date(2026, 10, 23, 9, 0))).toBe('2026-12-01');
     });
   });
 });

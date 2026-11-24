@@ -307,4 +307,25 @@ describe('domain/search', () => {
 
     spy.mockRestore();
   });
+
+  it('keeps a 10-year recurring task completed today in active search results (Item I)', () => {
+    const passport = makeTask({
+      id: 'rec-10y',
+      title: 'Renew passport',
+      startDate: '2026-11-19',
+      dueAt: '2036-11-19',
+      recurrence: {
+        type: 'fixed_interval',
+        intervalValue: 10,
+        intervalUnit: 'years',
+      },
+      completionHistory: [new Date(2026, 10, 19, 9, 0, 0).getTime()],
+    });
+
+    const result = searchTasks([passport], 'passport', now);
+    expect(result.active).toHaveLength(1);
+    expect(result.completed).toHaveLength(0);
+    expect(result.active[0]?.id).toBe('rec-10y');
+    expect(result.active[0]?.jumpDateStr).toBe('2036-11-19');
+  });
 });

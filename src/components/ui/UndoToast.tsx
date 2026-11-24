@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import type { UndoToastState } from '../../hooks/useUndoToast';
+import { useBottomBannerSlot } from '../../domain/bottomBannerCoordinator';
 
 interface UndoToastProps {
   toast: UndoToastState | null;
@@ -12,10 +13,11 @@ interface UndoToastProps {
  */
 export function UndoToast({ toast, onDismiss }: UndoToastProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
+  const bannerAllowed = useBottomBannerSlot('undo', Boolean(toast));
 
   useLayoutEffect(() => {
     const el = popoverRef.current;
-    if (!el || !toast) return;
+    if (!el || !toast || !bannerAllowed) return;
     if (typeof el.showPopover === 'function') {
       try {
         if (!el.matches(':popover-open')) {
@@ -25,9 +27,9 @@ export function UndoToast({ toast, onDismiss }: UndoToastProps) {
         // Ignore environments without popover support
       }
     }
-  }, [toast]);
+  }, [toast, bannerAllowed]);
 
-  if (!toast) return null;
+  if (!toast || !bannerAllowed) return null;
 
   return (
     <div
@@ -39,7 +41,7 @@ export function UndoToast({ toast, onDismiss }: UndoToastProps) {
       {...(typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype
         ? { popover: 'manual' as const }
         : {})}
-      className="fixed top-auto left-4 right-20 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 m-0 p-0 border-0 bg-transparent z-50"
+      className="fixed top-auto left-4 right-20 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 max-w-[calc(100dvw-2rem)] sm:max-w-[min(420px,calc(100dvw-11rem))] desktop:max-w-[min(480px,calc(100dvw-2rem))] m-0 p-0 border-0 bg-transparent z-50"
       style={{ bottom: 'calc(20px + env(safe-area-inset-bottom))' }}
     >
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-tt-rail text-white shadow-xl border border-white/10">

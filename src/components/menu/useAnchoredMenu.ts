@@ -22,26 +22,25 @@ export function dateChoiceMenuPosition(
 ): { top: number; left: number } {
   if (!anchor) return { top: MENU_MARGIN, left: MENU_MARGIN };
 
-  const anchorTop = anchor.top + viewport.offsetTop;
-  const anchorBottom = anchor.bottom + viewport.offsetTop;
-  const anchorLeft = anchor.left + viewport.offsetLeft;
-  const visibleBottom = viewport.offsetTop + viewport.height;
-  const visibleRight = viewport.offsetLeft + viewport.width;
+  const visibleTop = viewport.offsetTop;
+  const visibleLeft = viewport.offsetLeft;
+  const visibleBottom = visibleTop + viewport.height;
+  const visibleRight = visibleLeft + viewport.width;
 
-  const spaceBelow = visibleBottom - anchorBottom;
-  const spaceAbove = anchorTop - viewport.offsetTop;
-  let top = anchorBottom + GAP;
+  const spaceBelow = visibleBottom - anchor.bottom;
+  const spaceAbove = anchor.top - visibleTop;
+  let top = anchor.bottom + GAP;
   if (spaceBelow < menuHeight + MENU_MARGIN && spaceAbove > spaceBelow) {
-    top = anchorTop - menuHeight - GAP;
+    top = anchor.top - menuHeight - GAP;
   }
   top = Math.max(
-    viewport.offsetTop + MENU_MARGIN,
+    visibleTop + MENU_MARGIN,
     Math.min(top, visibleBottom - menuHeight - MENU_MARGIN),
   );
 
   const left = Math.max(
-    viewport.offsetLeft + MENU_MARGIN,
-    Math.min(anchorLeft, visibleRight - menuWidth - MENU_MARGIN),
+    visibleLeft + MENU_MARGIN,
+    Math.min(anchor.left, visibleRight - menuWidth - MENU_MARGIN),
   );
   return { top, left };
 }

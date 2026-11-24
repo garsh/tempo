@@ -38,7 +38,7 @@ export function Avatar({ account, size }: { account: GoogleAccount | null; size:
 export function SettingsHeader({ title, onBack, backLabel = 'Back' }: { title: string; onBack: () => void; backLabel?: string }) {
   return (
     <header className="shrink-0 flex items-center h-[72px] pt-[9px] pl-[14px] pr-4">
-      <button type="button" onClick={onBack} aria-label={backLabel} className="w-[44px] h-[44px] -ml-[4px] flex items-center justify-center text-tt-text">
+      <button type="button" onClick={onBack} aria-label={backLabel} className="w-[44px] h-[44px] -ml-[4px] flex items-center justify-center text-tt-text cursor-pointer">
         <ArrowLeft className="w-6 h-6" strokeWidth={1.9} />
       </button>
       <h1 className="ml-[16px] text-[21px] font-bold text-tt-text truncate">{title}</h1>
@@ -94,7 +94,7 @@ export function NavRow({
     );
   }
   return (
-    <button type="button" onClick={onClick} className={`${rowBase} active:bg-tt-hover hover:bg-tt-hover`}>
+    <button type="button" onClick={onClick} className={`${rowBase} active:bg-tt-hover hover:bg-tt-hover cursor-pointer`}>
       {inner}
     </button>
   );
