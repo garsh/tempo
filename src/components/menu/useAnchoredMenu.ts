@@ -63,7 +63,7 @@ export function handleMenuArrowKeyDown(
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
   const items = Array.from(
     container.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]')
-  );
+  ).filter((el) => !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true');
   if (items.length === 0) return;
   e.preventDefault();
   const curIdx = items.indexOf(document.activeElement as HTMLElement);

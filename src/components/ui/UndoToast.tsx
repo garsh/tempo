@@ -6,12 +6,13 @@ import { useBottomBannerSlot } from '../../domain/bottomBannerCoordinator';
 interface UndoToastProps {
   toast: UndoToastState | null;
   onDismiss: () => void;
+  onUndo?: () => void;
 }
 
 /**
  * Floating bottom-aligned status toast with Undo action (promoted to top-layer popover when supported).
  */
-export function UndoToast({ toast, onDismiss }: UndoToastProps) {
+export function UndoToast({ toast, onDismiss, onUndo }: UndoToastProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const bannerAllowed = useBottomBannerSlot('undo', Boolean(toast));
 
@@ -47,17 +48,17 @@ export function UndoToast({ toast, onDismiss }: UndoToastProps) {
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-tt-rail text-white shadow-xl border border-white/10">
         <span className="text-sm font-medium truncate">{toast.message}</span>
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              const fn = toast.onUndo;
-              onDismiss();
-              void fn();
-            }}
-            className="px-2.5 py-1 text-sm font-bold text-blue-300 hover:text-blue-200 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-          >
-            Undo
-          </button>
+          {toast.offerUndo && onUndo && (
+            <button
+              type="button"
+              onClick={() => {
+                void onUndo();
+              }}
+              className="px-2.5 py-1 text-sm font-bold text-blue-300 hover:text-blue-200 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              Undo
+            </button>
+          )}
           <button
             type="button"
             onClick={onDismiss}

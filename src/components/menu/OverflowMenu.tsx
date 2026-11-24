@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { RefreshCw, Search, Settings } from 'lucide-react';
+import { RefreshCw, Search, Settings, Undo2 } from 'lucide-react';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { handleMenuArrowKeyDown } from './useAnchoredMenu';
 
@@ -70,12 +70,15 @@ interface OverflowMenuProps {
   onRecurring?: () => void;
   onSettings: () => void;
   onUpdateApp?: () => void;
+  /** Toast message for the last undo. Absent or empty greys the Undo row out. */
+  undoLabel?: string | null;
+  onUndo?: () => void;
 }
 
 /**
  * Three-dot "⋮" menu: rounded card anchored to the button.
  * Show/Hide Details · Hide/Show Completed · Show/Hide Overdue ·
- * Group & Sort · Select · Update App · Settings.
+ * Undo · Update App · Settings.
  */
 export function OverflowMenu(props: OverflowMenuProps) {
   const { open, anchor, onClose } = props;
@@ -105,7 +108,7 @@ export function OverflowMenu(props: OverflowMenuProps) {
           returnFocusRef.current = active;
         }
       }
-      cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+      cardRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')?.focus({ preventScroll: true });
     }
   }, [open]);
 
@@ -118,6 +121,8 @@ export function OverflowMenu(props: OverflowMenuProps) {
   };
   const row =
     'w-full h-[43px] flex items-center pl-[20px] pr-[18px] gap-[12px] text-left text-[18px] leading-none text-tt-text outline-none cursor-pointer hover:bg-tt-hover focus-visible:bg-tt-hover active:bg-tt-hover';
+  const undoEnabled = Boolean(props.undoLabel && props.onUndo);
+  const undoText = undoEnabled ? `Undo · ${props.undoLabel}` : 'Undo';
 
   return (
     <div className="fixed inset-0 z-[65]" onClick={handleDismiss} data-testid="overflow-menu-layer">
@@ -163,6 +168,23 @@ export function OverflowMenu(props: OverflowMenuProps) {
           </>
         )}
         <div className="mx-[24px] my-[10px] h-px bg-tt-menu-divider" role="separator" />
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="overflow-undo"
+          className={
+            undoEnabled
+              ? row
+              : 'w-full h-[43px] flex items-center pl-[20px] pr-[18px] gap-[12px] text-left text-[18px] leading-none text-tt-muted opacity-50 outline-none cursor-default'
+          }
+          disabled={!undoEnabled}
+          aria-disabled={undoEnabled ? undefined : true}
+          title={undoEnabled ? undoText : 'Nothing to undo'}
+          onClick={undoEnabled ? act(props.onUndo) : undefined}
+        >
+          <Undo2 className="w-5 h-5 shrink-0" strokeWidth={1.8} />
+          <span className="truncate min-w-0">{undoText}</span>
+        </button>
         <button type="button" role="menuitem" className={row} onClick={act(props.onUpdateApp)}>
           <UpdateAppIcon />
           Update App

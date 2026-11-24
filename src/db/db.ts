@@ -1404,18 +1404,20 @@ export async function setTaskEndOnDate(
   });
 }
 
-export async function softDeleteTask(id: string): Promise<void> {
-  await db.transaction('rw', db.tasks, async () => {
+export async function softDeleteTask(id: string): Promise<Task | null> {
+  return db.transaction('rw', db.tasks, async () => {
     const task = await db.tasks.get(id);
-    if (!task) return;
+    if (!task) return null;
 
     const now = Date.now();
-    await db.tasks.put({
+    const updated: Task = {
       ...task,
       deletedAt: now,
       updatedAt: now,
-    });
+    };
+    await db.tasks.put(updated);
     recordDiagEvent('delete_task', `id=${id} title=${task.title.slice(0, 30)}`);
+    return updated;
   });
 }
 

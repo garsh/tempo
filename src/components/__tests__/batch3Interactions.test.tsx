@@ -677,7 +677,11 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
     const menu = view.container.querySelector<HTMLElement>('[role="menu"]')!;
     expect(menu.style.maxHeight).toBeTruthy();
     const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    const undoItem = items.find((item) => item.dataset.testid === 'overflow-undo');
+    expect(undoItem?.disabled).toBe(true);
+    expect(undoItem?.textContent).toBe('Undo');
     expect(document.activeElement).toBe(items[0]);
+    expect(document.activeElement).not.toBe(undoItem);
 
     act(() => {
       items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
@@ -708,6 +712,43 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
     expect(document.activeElement).toBe(anchorBtn);
   });
 
+  it('enables the More menu Undo row when a label is set', () => {
+    const onUndo = vi.fn();
+    const onClose = vi.fn();
+    const view = mount(
+      <OverflowMenu
+        open={true}
+        anchor={new DOMRect(100, 100, 32, 32)}
+        showDetails={false}
+        hideCompleted={false}
+        showOverdue={false}
+        showCalendarToggles={false}
+        onClose={onClose}
+        onToggleDetails={vi.fn()}
+        onToggleHideCompleted={vi.fn()}
+        onToggleShowOverdue={vi.fn()}
+        onUpdateApp={vi.fn()}
+        onSettings={vi.fn()}
+        undoLabel='Deleted "Buy milk"'
+        onUndo={onUndo}
+      />
+    );
+    mounted.push(view.unmount);
+
+    const items = Array.from(view.container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    const undoItem = items.find((item) => item.dataset.testid === 'overflow-undo')!;
+    const updateIdx = items.findIndex((item) => item.textContent?.includes('Update App'));
+    expect(undoItem.disabled).toBe(false);
+    expect(undoItem.textContent).toBe('Undo · Deleted "Buy milk"');
+    expect(items.indexOf(undoItem)).toBe(updateIdx - 1);
+
+    act(() => {
+      undoItem.click();
+    });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('Item O: bottomBannerCoordinator yields lower-priority banners in strict order (undo > pwa-update > sync-reconnect > install)', () => {
     function MockPwaBanner({ active }: { active: boolean }) {
       const allowed = useBottomBannerSlot('pwa-update', active);
@@ -718,7 +759,7 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
       return (
         <div>
           <UndoToast
-            toast={props.showUndo ? { id: 1, message: 'Completed task', onUndo: vi.fn() } : null}
+            toast={props.showUndo ? { id: 1, message: 'Completed task', offerUndo: true } : null}
             onDismiss={vi.fn()}
           />
           <MockPwaBanner active={props.showPwa} />
@@ -765,6 +806,78 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
     // Drop SyncReconnect -> Install wins
     view.rerender(<BannerStack showUndo={false} showPwa={false} showSync={false} />);
     expect(view.container.textContent).toContain('Install Tempo');
+  });
+
+  it('keeps More-menu Undo after the toast hides, and refuses it after a later edit', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 11, 28, 12, 0, 0));
+    stubDesktopMatchMedia();
+
+    dbMocks.tasks = [
+      makeTask('one-1', 'Buy milk', { dueAt: '2026-12-28' }),
+      makeTask('one-2', 'Buy eggs', { dueAt: '2026-12-28' }),
+    ];
+
+    const view = mount(<App />);
+    mounted.push(view.unmount);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const moreButton = () => view.container.querySelector<HTMLButtonElement>('button[aria-label="More options"]')!;
+    act(() => moreButton().click());
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="overflow-undo"]')?.disabled).toBe(true);
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    const confirmDelete = async (title: string) => {
+      const card = Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="task-card"]')).find((c) =>
+        c.textContent?.includes(title)
+      );
+      expect(card).toBeTruthy();
+      act(() => {
+        card!.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')!.click();
+      });
+      const confirmDelBtn = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(
+        (b) => b.textContent?.trim() === 'Delete' && !b.getAttribute('aria-label')
+      );
+      expect(confirmDelBtn).toBeTruthy();
+      await act(async () => {
+        confirmDelBtn!.click();
+      });
+    };
+
+    await confirmDelete('Buy milk');
+    expect(document.body.querySelector('[data-testid="undo-toast"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(document.body.querySelector('[data-testid="undo-toast"]')).toBeNull();
+
+    act(() => moreButton().click());
+    const milkUndo = document.body.querySelector<HTMLButtonElement>('[data-testid="overflow-undo"]')!;
+    expect(milkUndo.disabled).toBe(false);
+    expect(milkUndo.textContent).toContain('Deleted "Buy milk"');
+    await act(async () => {
+      milkUndo.click();
+    });
+    expect(dbMocks.restoreTaskSnapshot).toHaveBeenCalledTimes(1);
+
+    await confirmDelete('Buy eggs');
+    const eggsIdx = dbMocks.tasks.findIndex((t) => t.id === 'one-2');
+    dbMocks.tasks[eggsIdx] = { ...dbMocks.tasks[eggsIdx], updatedAt: dbMocks.tasks[eggsIdx].updatedAt + 50 };
+    act(() => moreButton().click());
+    const eggsUndo = document.body.querySelector<HTMLButtonElement>('[data-testid="overflow-undo"]')!;
+    expect(eggsUndo.disabled).toBe(false);
+    expect(eggsUndo.textContent).toContain('Deleted "Buy eggs"');
+    await act(async () => {
+      eggsUndo.click();
+    });
+    expect(dbMocks.restoreTaskSnapshot).toHaveBeenCalledTimes(1);
+    const info = document.body.querySelector<HTMLElement>('[data-testid="undo-toast"]');
+    expect(info?.textContent).toContain('Can\'t undo; "Buy eggs" changed');
+    expect(Array.from(info?.querySelectorAll('button') ?? []).some((b) => b.textContent?.trim() === 'Undo')).toBe(false);
   });
 
   it('Item T: theme-init.js syncs theme-color metas early while preserving data-media so applyTheme("system") restores them', () => {

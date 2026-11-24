@@ -131,7 +131,15 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeView, setActiveView] = useState<ActiveMainView>(readStoredActiveView);
   const [isRecurringOpen, setIsRecurringOpen] = useState(false);
-  const { undoToast, showUndoToast, dismissUndoToast } = useUndoToast();
+  const {
+    undoToast,
+    pendingUndo,
+    showUndoToast,
+    showInfoToast,
+    hideUndoToast,
+    takePendingUndo,
+    endUndoConsume,
+  } = useUndoToast();
 
   const todayKey = useTodayKey();
   const todayDate = useMemo(() => parseDate(todayKey), [todayKey]);
@@ -470,20 +478,25 @@ export function App() {
 
   const handleComplete = useCallback(async (id: string, dateStr?: string) => {
     const target = activeTasksRef.current.find((t) => t.id === id) ?? (await db.tasks.get(id));
-    await completeTask(id, dateStr);
+    const written = await completeTask(id, dateStr);
     scheduleSync();
-    if (!target) return;
+    if (!target || !written) return;
+    const meta = {
+      taskId: target.id,
+      title: target.title,
+      baselineUpdatedAt: written.updatedAt,
+    };
     if (isUndatedOneTime(target)) {
       showUndoToast(`Completed "${target.title}"`, async () => {
         await undoCompleteUndatedTask(id);
         scheduleSync();
-      });
+      }, meta);
     } else if (isWindowPeriodic(target)) {
       const targetDate = dateStr ?? todayKeyRef.current;
       showUndoToast(`Logged "${target.title}"`, async () => {
         await uncompleteTask(id, targetDate);
         scheduleSync();
-      });
+      }, meta);
     } else {
       const currentTodayKey = todayKeyRef.current;
       const targetDate = dateStr ?? (target.dueAt ? getDueDatePart(target.dueAt) : currentTodayKey);
@@ -495,7 +508,7 @@ export function App() {
         showUndoToast(`Completed "${target.title}"`, async () => {
           await uncompleteTask(id, targetDate);
           scheduleSync();
-        });
+        }, meta);
       }
     }
   }, [scheduleSync, showUndoToast]);
@@ -513,14 +526,19 @@ export function App() {
 
   const handleDelete = useCallback(async (id: string) => {
     const previousTask = activeTasksRef.current.find((t) => t.id === id) ?? (await db.tasks.get(id));
-    await softDeleteTask(id);
+    const written = await softDeleteTask(id);
     scheduleSync();
-    if (previousTask) {
-      showUndoToast(`Deleted "${previousTask.title}"`, async () => {
-        await restoreTaskSnapshot(previousTask);
-        scheduleSync();
-      });
-    }
+    if (!previousTask) return;
+    const liveAfter = written ?? (await db.tasks.get(id));
+    if (!liveAfter) return;
+    showUndoToast(`Deleted "${previousTask.title}"`, async () => {
+      await restoreTaskSnapshot(previousTask);
+      scheduleSync();
+    }, {
+      taskId: previousTask.id,
+      title: previousTask.title,
+      baselineUpdatedAt: liveAfter.updatedAt,
+    });
   }, [scheduleSync, showUndoToast]);
 
   const handleReorder = useCallback(
@@ -541,6 +559,10 @@ export function App() {
       showUndoToast(`Stopped "${task.title}"`, async () => {
         await setTaskEndOnDate(task.id, res.previousEndOnDate);
         scheduleSync();
+      }, {
+        taskId: task.id,
+        title: task.title,
+        baselineUpdatedAt: res.task.updatedAt,
       });
     }
   }, [closeTaskEditor, editingTask?.id, scheduleSync, showUndoToast]);
@@ -593,6 +615,10 @@ export function App() {
           showUndoToast(`Moved "${res.task.title}"`, async () => {
             await restoreTaskSnapshot(res.previousTask, res.task);
             scheduleSync();
+          }, {
+            taskId: res.task.id,
+            title: res.task.title,
+            baselineUpdatedAt: res.task.updatedAt,
           });
         }
         return true;
@@ -668,6 +694,10 @@ export function App() {
     showUndoToast(`Moved occurrence of "${res.task.title}"`, async () => {
       await restoreTaskSnapshot(res.previousTask, res.task);
       scheduleSync();
+    }, {
+      taskId: res.task.id,
+      title: res.task.title,
+      baselineUpdatedAt: res.task.updatedAt,
     });
   }, [pendingMove, scheduleSync, showUndoToast]);
 
@@ -691,6 +721,10 @@ export function App() {
     showUndoToast(`Moved recurring task "${res.task.title}"`, async () => {
       await restoreTaskSnapshot(res.previousTask, res.task);
       scheduleSync();
+    }, {
+      taskId: res.task.id,
+      title: res.task.title,
+      baselineUpdatedAt: res.task.updatedAt,
     });
   }, [pendingMove, scheduleSync, showUndoToast]);
 
@@ -714,6 +748,10 @@ export function App() {
       showUndoToast(`Skipped "${task.title}"`, async () => {
         await restoreTaskSnapshot(previousTask, updated);
         scheduleSync();
+      }, {
+        taskId: task.id,
+        title: task.title,
+        baselineUpdatedAt: updated.updatedAt,
       });
     }
   };
@@ -730,6 +768,21 @@ export function App() {
     }
     await handleDelete(taskId);
   };
+
+  const handleConsumeUndo = useCallback(async () => {
+    const pending = takePendingUndo();
+    if (!pending) return;
+    try {
+      const live = await db.tasks.get(pending.taskId);
+      if (!live || live.updatedAt !== pending.baselineUpdatedAt) {
+        showInfoToast(`Can't undo; "${pending.title}" changed`);
+        return;
+      }
+      await pending.onUndo();
+    } finally {
+      endUndoConsume();
+    }
+  }, [endUndoConsume, showInfoToast, takePendingUndo]);
 
   const hasBlockingModal =
     isTaskModalOpen ||
@@ -1641,7 +1694,11 @@ export function App() {
         )}
       </div>
 
-      <UndoToast toast={undoToast} onDismiss={dismissUndoToast} />
+      <UndoToast
+        toast={undoToast}
+        onDismiss={hideUndoToast}
+        onUndo={() => { void handleConsumeUndo(); }}
+      />
       <SyncReconnectPrompt
         authPrompt={syncStatus.authPrompt}
         hidden={isSettingsModalOpen || Boolean(undoToast)}
@@ -1716,6 +1773,8 @@ export function App() {
         onToggleShowOverdue={() => updatePrefs({ showOverdue: !prefs.showOverdue })}
         onSettings={() => openSettings('root')}
         onUpdateApp={triggerAppUpdate}
+        undoLabel={pendingUndo?.message}
+        onUndo={pendingUndo ? () => { void handleConsumeUndo(); } : undefined}
       />
 
       <InstallPrompt />
