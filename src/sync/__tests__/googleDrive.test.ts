@@ -899,6 +899,260 @@ describe('googleDrive', () => {
       expect(Array.from(stores.tasks.keys())).toEqual(['kept-task', 'offline-edit']);
     });
 
+    it('replaces local tasks with the Drive snapshot when this file was last synced at least 30 days ago', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      const lastSyncAt = now - TOMBSTONE_TTL_MS;
+      vi.stubGlobal(
+        'localStorage',
+        createMockStorage({
+          tempo_last_synced_at: String(lastSyncAt),
+          tempo_last_synced_file_id: 'drive-file-123',
+        })
+      );
+
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'shared',
+            title: 'Local edit',
+            notes: 'offline note',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+          {
+            id: 'local-only',
+            title: 'Only on this device',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () =>
+            JSON.stringify({
+              version: 4,
+              exportedAt: lastSyncAt,
+              tasks: [
+                {
+                  id: 'shared',
+                  title: 'From Drive',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 50,
+                },
+                {
+                  id: 'remote-only',
+                  title: 'Remote',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 60,
+                },
+              ],
+            }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.success).toBe(true);
+      expect(result.tasksCount).toBe(2);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(stores.tasks.get('shared')).toMatchObject({ title: 'From Drive', updatedAt: 50 });
+      expect(stores.tasks.get('shared')?.notes).toBeUndefined();
+      expect(stores.tasks.has('local-only')).toBe(false);
+      expect(stores.tasks.get('remote-only')?.title).toBe('Remote');
+    });
+
+    it('keeps item merge when the last sync of this file is just under 30 days ago', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      const lastSyncAt = now - TOMBSTONE_TTL_MS + 1;
+      vi.stubGlobal(
+        'localStorage',
+        createMockStorage({
+          tempo_last_synced_at: String(lastSyncAt),
+          tempo_last_synced_file_id: 'drive-file-123',
+        })
+      );
+
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'shared',
+            title: 'Local edit',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+          {
+            id: 'local-only',
+            title: 'Only on this device',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () =>
+            JSON.stringify({
+              version: 4,
+              exportedAt: lastSyncAt,
+              tasks: [
+                {
+                  id: 'shared',
+                  title: 'From Drive',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 50,
+                },
+                {
+                  id: 'remote-only',
+                  title: 'Remote',
+                  completionHistory: [],
+                  createdAt: 10,
+                  updatedAt: 60,
+                },
+              ],
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v2"' }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const result = await syncWithGoogleDrive('token-123');
+      expect(result.success).toBe(true);
+      expect(stores.tasks.get('shared')?.title).toBe('Local edit');
+      expect(stores.tasks.get('local-only')?.title).toBe('Only on this device');
+      expect(stores.tasks.get('remote-only')?.title).toBe('Remote');
+
+      const uploadedBody = JSON.parse(String((mockFetch.mock.calls[2]?.[1] as RequestInit).body));
+      expect(uploadedBody.tasks.map((t: Task) => t.id).sort()).toEqual([
+        'local-only',
+        'remote-only',
+        'shared',
+      ]);
+    });
+
+    it('does not replace local tasks when the last sync was for a different Drive file', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      vi.stubGlobal(
+        'localStorage',
+        createMockStorage({
+          tempo_last_synced_at: String(now - TOMBSTONE_TTL_MS - 1000),
+          tempo_last_synced_file_id: 'other-file',
+        })
+      );
+
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'local-only',
+            title: 'Only on this device',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v1"' }),
+          text: async () => JSON.stringify({ version: 4, exportedAt: 100, tasks: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ ETag: '"v2"' }),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      await syncWithGoogleDrive('token-123');
+      expect(stores.tasks.get('local-only')?.title).toBe('Only on this device');
+      const uploadedBody = JSON.parse(String((mockFetch.mock.calls[2]?.[1] as RequestInit).body));
+      expect(uploadedBody.tasks.map((t: Task) => t.id)).toEqual(['local-only']);
+    });
+
+    it('leaves local tasks in place when a 30-day sync cannot download the Drive file', async () => {
+      const now = 1_795_461_688_588;
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      vi.stubGlobal(
+        'localStorage',
+        createMockStorage({
+          tempo_last_synced_at: String(now - TOMBSTONE_TTL_MS),
+          tempo_last_synced_file_id: 'drive-file-123',
+        })
+      );
+
+      const stores = wireMockDbTables({
+        tasks: [
+          {
+            id: 'local-only',
+            title: 'Only on this device',
+            completionHistory: [],
+            createdAt: 10,
+            updatedAt: now - 1000,
+          },
+        ],
+      });
+
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ files: [{ id: 'drive-file-123' }] }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Server Error',
+          headers: new Headers(),
+        });
+      vi.stubGlobal('fetch', mockFetch);
+
+      await expect(syncWithGoogleDrive('token-123')).rejects.toThrow(/Failed to download backup/);
+      expect(stores.tasks.get('local-only')?.title).toBe('Only on this device');
+      expect(db.tasks.bulkDelete).not.toHaveBeenCalled();
+    });
+
     it('waits until uploadDriveBackup succeeds before bulkDeleting pruned tombstones on 412 retry', async () => {
       const now = 1_795_461_688_588;
       vi.useFakeTimers();

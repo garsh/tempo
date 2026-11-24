@@ -394,6 +394,8 @@ interface MergedSyncResult {
   tasks: Task[];
   tombstonesPrunedBefore: number;
   prunedIds: PrunedEntityIds;
+  /** Last sync is at least the tombstone window old; write `tasks` only after the Drive upload succeeds. */
+  replaceLocal?: boolean;
 }
 
 function collectPrunedIds<T extends { id: string }>(localItems: T[], mergedItems: T[]): string[] {
@@ -430,6 +432,20 @@ async function deleteStillPrunableRows<
   }
 }
 
+/** Local snapshot is older than the deletion-marker window for this Drive file. */
+function isLocalSnapshotStale(lastSyncedAt: number | null, now: number): boolean {
+  return lastSyncedAt != null && now - lastSyncedAt >= TOMBSTONE_TTL_MS;
+}
+
+async function replaceLocalTasks(remoteTasks: Task[], removeIds: string[]): Promise<void> {
+  await db.transaction('rw', db.tasks, async () => {
+    if (remoteTasks.length > 0) await db.tasks.bulkPut(remoteTasks);
+    if (removeIds.length > 0 && typeof db.tasks.bulkDelete === 'function') {
+      await db.tasks.bulkDelete(removeIds);
+    }
+  });
+}
+
 async function deletePrunedEntities(prunedIds: PrunedEntityIds, cutoff: number): Promise<void> {
   if (prunedIds.tasks.length === 0) return;
 
@@ -460,6 +476,23 @@ async function mergeRemoteIntoLocal(
     const localTasks = await db.tasks.toArray();
 
     if (isCancelled?.()) throw new SyncCancelledError();
+
+    // A device that has not synced this file for 30 days adopts the downloaded snapshot.
+    // Writes wait until the upload succeeds, so a failed sync keeps the local tasks.
+    if (remoteData !== null && isLocalSnapshotStale(localSyncedBefore, now)) {
+      const remoteIds = new Set(remoteTasks.map((task) => task.id));
+      const dropIds = localTasks.filter((task) => !remoteIds.has(task.id)).map((task) => task.id);
+      recordDiagEvent(
+        'drive_sync_stale_replace',
+        `local=${localTasks.length} remote=${remoteTasks.length} drop=${dropIds.length}`
+      );
+      return {
+        tasks: remoteTasks,
+        tombstonesPrunedBefore: remoteData.tombstonesPrunedBefore ?? 0,
+        prunedIds: { tasks: dropIds },
+        replaceLocal: true,
+      };
+    }
 
     const autoCutoff = now - TOMBSTONE_TTL_MS;
     if (
@@ -550,7 +583,11 @@ export async function syncWithGoogleDrive(
     }
 
     assertNotCancelled();
-    await deletePrunedEntities(merged.prunedIds, merged.tombstonesPrunedBefore);
+    if (merged.replaceLocal) {
+      await replaceLocalTasks(merged.tasks, merged.prunedIds.tasks);
+    } else {
+      await deletePrunedEntities(merged.prunedIds, merged.tombstonesPrunedBefore);
+    }
     assertNotCancelled();
     recordSyncedFile(fileId);
     if (merged.tombstonesPrunedBefore > 0) {
