@@ -122,7 +122,7 @@ vi.mock('../PwaUpdatePrompt', () => ({
 
 import { App } from '../../App';
 import { type CalendarMonthHandle } from '../CalendarMonthView';
-import { TaskCard } from '../TaskCard';
+import { SWIPE_DRAWER_WIDTH_WITH_SKIP, TaskCard } from '../TaskCard';
 import { RadialProgressRingWithTooltip } from '../RadialProgressRing';
 import { OverflowMenu } from '../menu/OverflowMenu';
 import { UndoToast } from '../ui/UndoToast';
@@ -333,14 +333,19 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
     );
     mounted.push(view.unmount);
 
-    const rows = Array.from(view.container.querySelectorAll<HTMLElement>('[style*="translateX"]'));
-    expect(rows).toHaveLength(2);
+    const bodies = Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="task-card-body"]'));
+    const drawers = Array.from(
+      view.container.querySelectorAll<HTMLElement>('[data-testid="task-action-drawer"]')
+    );
+    expect(bodies).toHaveLength(2);
+    expect(drawers).toHaveLength(2);
 
-    // Swipe open card 1 via touch
-    dispatchTouch(rows[0], 'touchstart', 180, 40);
-    dispatchTouch(rows[0], 'touchmove', 100, 42);
-    dispatchTouch(rows[0], 'touchend', 100, 42);
-    expect(rows[0].style.transform).toBe('translateX(-160px)');
+    // Swipe open card 1 via touch. The row stays put; the tray covers the right side.
+    dispatchTouch(bodies[0], 'touchstart', 180, 40);
+    dispatchTouch(bodies[0], 'touchmove', 100, 42);
+    dispatchTouch(bodies[0], 'touchend', 100, 42);
+    expect(bodies[0].style.transform || '').toBe('');
+    expect(drawers[0].style.transform).toBe('translateX(0px)');
 
     // Second card is completed: Skip button is disabled with clear explanation
     const cards = Array.from(view.container.querySelectorAll<HTMLElement>('[data-testid="task-card"]'));
@@ -353,7 +358,8 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
       <TaskCard task={shared} occurrenceDateStr="2026-11-23" onComplete={vi.fn()} />
     );
     mounted.push(editableView.unmount);
-    const row3 = editableView.container.querySelector<HTMLElement>('[style*="translateX"]')!;
+    const row3 = editableView.container.querySelector<HTMLElement>('[data-testid="task-card-body"]')!;
+    const drawer3 = editableView.container.querySelector<HTMLElement>('[data-testid="task-action-drawer"]')!;
 
     act(() => {
       row3.dispatchEvent(
@@ -378,7 +384,8 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
         })
       );
     });
-    expect(row3.style.transform).toBe('translateX(-80px)');
+    expect(row3.style.transform || '').toBe('');
+    expect(drawer3.style.transform).toBe(`translateX(${SWIPE_DRAWER_WIDTH_WITH_SKIP - 80}px)`);
     // Because each card registers its own useId() key, opening another card closes card 1 even with identical task.id
     act(() => {
       window.dispatchEvent(
@@ -392,8 +399,9 @@ describe('Batch 3 interactions (Items L, M, O, T)', () => {
         })
       );
     });
-    expect(row3.style.transform).toBe('translateX(-160px)');
-    expect(rows[0].style.transform).toBe('translateX(0px)');
+    expect(row3.style.transform || '').toBe('');
+    expect(drawer3.style.transform).toBe('translateX(0px)');
+    expect(drawers[0].style.transform).toBe(`translateX(${SWIPE_DRAWER_WIDTH_WITH_SKIP}px)`);
 
     // Mouse pointermove with buttons === 0 clears stuck drag cleanly
     act(() => {

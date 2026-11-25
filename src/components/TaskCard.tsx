@@ -25,6 +25,13 @@ import { SwipeActionButton } from './SwipeActionButton';
 import { globalSwipeCoordinator } from '../domain/swipeCoordinator';
 import { splitHighlightSegments } from '../domain/search';
 
+const SWIPE_EASE = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+
+/** Date + Skip + Delete. Sized for the sm button (40px) plus padding and gaps. */
+export const SWIPE_DRAWER_WIDTH_WITH_SKIP = 160;
+/** Date + Delete. Non-recurring rows do not reserve a Skip slot. */
+export const SWIPE_DRAWER_WIDTH_WITHOUT_SKIP = 112;
+
 interface TaskCardProps {
   task: Task;
   selected?: boolean;
@@ -176,12 +183,20 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   const contentOpacityClass = completed ? 'opacity-60' : justCompleted ? 'opacity-50' : '';
 
   // --- Swipe-to-reveal gesture logic ---
-  const DRAWER_WIDTH = 160;
+  // Negative offsets open the tray. It slides in from the right over the row;
+  // the checkbox and title stay put and may be partly covered.
+  const showSkipAction = recurring;
+  const drawerWidth = showSkipAction
+    ? SWIPE_DRAWER_WIDTH_WITH_SKIP
+    : SWIPE_DRAWER_WIDTH_WITHOUT_SKIP;
+  const drawerWidthRef = useRef(drawerWidth);
+  drawerWidthRef.current = drawerWidth;
+
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const isOpenRef = useRef(false);
   const currentOffsetRef = useRef(0);
-  const slidingRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; initialOffset: number } | null>(null);
   const mouseStartRef = useRef<{
@@ -215,16 +230,21 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     drawerRef.current.style.pointerEvents = interactive ? 'auto' : 'none';
   };
 
+  const placeDrawer = (offset: number, animate: boolean) => {
+    const drawer = drawerRef.current;
+    if (!drawer) return;
+    drawer.style.transition = animate ? SWIPE_EASE : 'none';
+    drawer.style.transform = `translateX(${drawerWidthRef.current + offset}px)`;
+  };
+
   const openSwipe = () => {
+    const width = drawerWidthRef.current;
     isOpenRef.current = true;
-    currentOffsetRef.current = -DRAWER_WIDTH;
-    if (slidingRef.current) {
-      slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
-      slidingRef.current.style.transform = `translateX(${-DRAWER_WIDTH}px)`;
-    }
+    currentOffsetRef.current = -width;
+    placeDrawer(-width, true);
     setDrawerVisibility(true, true);
     setIsOpen(true);
-    setSwipeOffset(-DRAWER_WIDTH);
+    setSwipeOffset(-width);
     globalSwipeCoordinator.notifyOpened(cardInstanceId);
     onSwipeChangeRef.current?.(task.id, true);
   };
@@ -233,10 +253,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     const wasOpen = isOpenRef.current;
     isOpenRef.current = false;
     currentOffsetRef.current = 0;
-    if (slidingRef.current) {
-      slidingRef.current.style.transition = 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)';
-      slidingRef.current.style.transform = 'translateX(0px)';
-    }
+    placeDrawer(0, true);
     setDrawerVisibility(false, false);
     setIsOpen(false);
     setSwipeOffset(0);
@@ -266,12 +283,10 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   }, [isSwipedOpen]);
 
   const applySwipeOffset = (initialOffset: number, dx: number) => {
-    const next = Math.min(0, Math.max(-DRAWER_WIDTH - 25, initialOffset + dx));
+    const width = drawerWidthRef.current;
+    const next = Math.min(0, Math.max(-width - 25, initialOffset + dx));
     currentOffsetRef.current = next;
-    if (slidingRef.current) {
-      slidingRef.current.style.transition = 'none';
-      slidingRef.current.style.transform = `translateX(${next}px)`;
-    }
+    placeDrawer(next, false);
     setDrawerVisibility(next < 0, false);
   };
 
@@ -282,7 +297,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         suppressClickRef.current = false;
       }, 220);
 
-      if (currentOffsetRef.current < -DRAWER_WIDTH * 0.35) {
+      if (currentOffsetRef.current < -drawerWidthRef.current * 0.35) {
         openSwipe();
       } else {
         closeSwipe();
@@ -293,7 +308,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   };
 
   useEffect(() => {
-    const el = slidingRef.current;
+    const el = bodyRef.current;
     if (isDragging) {
       touchStartRef.current = null;
       mouseStartRef.current = null;
@@ -314,7 +329,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       touchStartRef.current = {
         x: touch.clientX,
         y: touch.clientY,
-        initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
+        initialOffset: isOpenRef.current ? -drawerWidthRef.current : 0,
       };
       swipeDirectionRef.current = null;
     };
@@ -362,7 +377,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         setDrawerVisibility(false, false);
         if (currentOffsetRef.current !== 0) {
           currentOffsetRef.current = 0;
-          el.style.transform = 'translateX(0px)';
+          placeDrawer(0, false);
         }
       }
     };
@@ -376,7 +391,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       mouseStartRef.current = {
         x: e.clientX,
         y: e.clientY,
-        initialOffset: isOpenRef.current ? -DRAWER_WIDTH : 0,
+        initialOffset: isOpenRef.current ? -drawerWidthRef.current : 0,
         didSwipe: false,
       };
       if (typeof window === 'undefined') return;
@@ -494,14 +509,18 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           : `transition-colors ${reorderEnabled ? 'select-none hover-pointer:select-text' : ''}`
       }`}
     >
-      {/* Revealed Swipe Action Buttons on the Right */}
+      {/* Swipe actions slide in from the right and cover the end of the row. */}
       <div
         ref={drawerRef}
         data-testid="task-action-drawer"
-        className={`absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 bg-tt-elevated/95 z-[1] ${
+        className={`absolute right-0 inset-y-0 flex items-center justify-end px-3 gap-2 border-l border-tt-border bg-tt-elevated z-20 ${
           !isOpen && swipeOffset === 0 ? 'invisible pointer-events-none' : ''
         }`}
-        style={{ width: `${DRAWER_WIDTH}px` }}
+        style={{
+          width: `${drawerWidth}px`,
+          transform: `translateX(${drawerWidth + swipeOffset}px)`,
+          transition: SWIPE_EASE,
+        }}
         onPointerDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
@@ -530,27 +549,27 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
             }}
           />
         )}
-        <SwipeActionButton
-          icon={<SkipForward className="w-4 h-4" />}
-          label="Skip Occurrence"
-          explanation={
-            canSkip
-              ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
-              : windowPeriodic
-                ? 'Skip Occurrence: Not used for approximate window routines'
-                : fixedRecurring && completed
-                  ? 'Skip Occurrence: Already completed for this date'
-                  : recurring
-                    ? 'Skip Occurrence: Not available for ended series'
-                    : 'Skip Occurrence: Only available for recurring tasks'
-          }
-          disabled={!canSkip}
-          colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
-          onClick={() => {
-            closeSwipe();
-            onRequestSkipOccurrence?.(task);
-          }}
-        />
+        {showSkipAction && (
+          <SwipeActionButton
+            icon={<SkipForward className="w-4 h-4" />}
+            label="Skip Occurrence"
+            explanation={
+              canSkip
+                ? "Skip Occurrence: Skip today's repeat and move to next occurrence"
+                : windowPeriodic
+                  ? 'Skip Occurrence: Not used for approximate window routines'
+                  : fixedRecurring && completed
+                    ? 'Skip Occurrence: Already completed for this date'
+                    : 'Skip Occurrence: Not available for ended series'
+            }
+            disabled={!canSkip}
+            colorClasses="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white"
+            onClick={() => {
+              closeSwipe();
+              onRequestSkipOccurrence?.(task);
+            }}
+          />
+        )}
         <SwipeActionButton
           icon={<Trash2 className="w-4 h-4" />}
           label="Delete"
@@ -567,14 +586,11 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         />
       </div>
 
-      {/* Sliding Foreground Card */}
+      {/* Row content stays put while the action tray covers the right side. */}
       <div
-        ref={slidingRef}
-        style={{
-          transform: `translateX(${swipeOffset}px)`,
-          transition: 'transform 200ms cubic-bezier(0.16, 1, 0.3, 1)',
-          touchAction: 'pan-y',
-        }}
+        ref={bodyRef}
+        data-testid="task-card-body"
+        style={{ touchAction: 'pan-y' }}
         className={`relative z-10 w-full flex items-start gap-3 desktop:gap-2.5 px-3 sm:px-4 ${
           selected
             ? 'bg-tt-blue-soft'

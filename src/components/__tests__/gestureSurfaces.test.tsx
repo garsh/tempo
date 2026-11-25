@@ -13,7 +13,7 @@ import {
   type SwipeableMonthTitleHandle,
 } from '../calendar/SwipeableMonthTitle';
 import { ReorderableTaskList } from '../ReorderableTaskList';
-import { TaskCard } from '../TaskCard';
+import { SWIPE_DRAWER_WIDTH_WITHOUT_SKIP, SWIPE_DRAWER_WIDTH_WITH_SKIP, TaskCard } from '../TaskCard';
 import {
   calendarHeaderTitle,
   shiftMonth,
@@ -98,10 +98,14 @@ function pointer(
   });
 }
 
-function slidingRow(container: HTMLElement): HTMLElement {
-  const el = container.querySelector<HTMLElement>('[style*="translateX"]');
-  if (!el) throw new Error('sliding row not found');
+function cardBody(container: HTMLElement): HTMLElement {
+  const el = container.querySelector<HTMLElement>('[data-testid="task-card-body"]');
+  if (!el) throw new Error('card body not found');
   return el;
+}
+
+function expectRowStaysPut(body: HTMLElement) {
+  expect(body.style.transform || '').toBe('');
 }
 
 function actionDrawer(container: HTMLElement): HTMLElement {
@@ -135,34 +139,43 @@ afterEach(() => {
 });
 
 describe('TaskCard swipe', () => {
+  const closedDrawer = `translateX(${SWIPE_DRAWER_WIDTH_WITHOUT_SKIP}px)`;
+
   it('leaves the card closed when the finger moves vertically', () => {
     const onSelect = vi.fn();
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={onSelect} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
+    const drawer = actionDrawer(view.container);
     const move = dispatchTouch(row, 'touchstart', 100, 40);
     expect(move.defaultPrevented).toBe(false);
     const vertical = dispatchTouch(row, 'touchmove', 100, 80);
     dispatchTouch(row, 'touchend', 100, 80);
 
     expect(vertical.defaultPrevented).toBe(false);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     view.unmount();
   });
 
-  it('opens the action drawer after a left swipe past the threshold', () => {
+  it('opens the action drawer over a stationary row after a left swipe past the threshold', () => {
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
+    const drawer = actionDrawer(view.container);
+    expect(view.container.querySelector('button[aria-label="Skip Occurrence"]')).toBeNull();
+    expect(drawer.style.width).toBe(`${SWIPE_DRAWER_WIDTH_WITHOUT_SKIP}px`);
     dispatchTouch(row, 'touchstart', 180, 40);
     const horizontal = dispatchTouch(row, 'touchmove', 100, 42);
     expect(horizontal.defaultPrevented).toBe(false);
     expect(row.style.touchAction).toBe('pan-y');
-    expect(row.style.transform).toBe('translateX(-80px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe('translateX(32px)');
     dispatchTouch(row, 'touchend', 100, 42);
-    expect(row.style.transform).toBe('translateX(-160px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe('translateX(0px)');
     view.unmount();
   });
 
@@ -170,11 +183,13 @@ describe('TaskCard swipe', () => {
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
+    const drawer = actionDrawer(view.container);
     dispatchTouch(row, 'touchstart', 80, 40);
     dispatchTouch(row, 'touchmove', 50, 40);
     dispatchTouch(row, 'touchend', 50, 40);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     view.unmount();
   });
 
@@ -186,7 +201,7 @@ describe('TaskCard swipe', () => {
         onSelect={vi.fn()}
       />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
     const drawer = actionDrawer(view.container);
 
     expect(row.classList.contains('opacity-60')).toBe(false);
@@ -200,12 +215,14 @@ describe('TaskCard swipe', () => {
     expect(isDrawerHidden(drawer)).toBe(true);
     dispatchTouch(row, 'touchmove', 100, 40);
     expect(isDrawerHidden(drawer)).toBe(true);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     act(() => {
       dispatchTouch(row, 'touchend', 100, 40);
     });
     expect(isDrawerHidden(drawer)).toBe(true);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     view.unmount();
   });
 
@@ -213,7 +230,7 @@ describe('TaskCard swipe', () => {
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
     const drawer = actionDrawer(view.container);
 
     expect(isDrawerHidden(drawer)).toBe(true);
@@ -221,20 +238,22 @@ describe('TaskCard swipe', () => {
     expect(isDrawerHidden(drawer)).toBe(true);
     dispatchTouch(row, 'touchmove', 160, 40);
     expect(isDrawerHidden(drawer)).toBe(true);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     act(() => {
       dispatchTouch(row, 'touchend', 160, 40);
     });
     expect(isDrawerHidden(drawer)).toBe(true);
-    expect(row.style.transform).toBe('translateX(0px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe(closedDrawer);
     view.unmount();
   });
 
-  it('reveals the action drawer only once a left swipe moves the card and toggles pointerEvents properly', () => {
+  it('reveals the action drawer only once a left swipe starts and toggles pointerEvents properly', () => {
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
     const drawer = actionDrawer(view.container);
 
     dispatchTouch(row, 'touchstart', 180, 40);
@@ -242,11 +261,12 @@ describe('TaskCard swipe', () => {
     dispatchTouch(row, 'touchmove', 150, 40);
     expect(drawer.style.visibility).toBe('visible');
     expect(drawer.style.pointerEvents).toBe('none');
-    expect(row.style.transform).toBe('translateX(-30px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe('translateX(82px)');
     act(() => {
       dispatchTouch(row, 'touchend', 150, 40);
     });
-    expect(row.style.transform).toBe('translateX(0px)');
+    expect(drawer.style.transform).toBe(closedDrawer);
     expect(isDrawerHidden(drawer)).toBe(true);
     expect(drawer.style.pointerEvents).toBe('none');
 
@@ -258,7 +278,8 @@ describe('TaskCard swipe', () => {
     act(() => {
       dispatchTouch(row, 'touchend', 100, 40);
     });
-    expect(row.style.transform).toBe('translateX(-160px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe('translateX(0px)');
     expect(drawer.style.visibility).toBe('visible');
     expect(drawer.style.pointerEvents).toBe('auto');
     view.unmount();
@@ -268,7 +289,7 @@ describe('TaskCard swipe', () => {
     const view = mount(
       <TaskCard task={task({ id: 'a', title: 'Dishes' })} onComplete={vi.fn()} onSelect={vi.fn()} />
     );
-    const row = slidingRow(view.container);
+    const row = cardBody(view.container);
     const drawer = actionDrawer(view.container);
 
     act(() => {
@@ -287,13 +308,51 @@ describe('TaskCard swipe', () => {
       row.dispatchEvent(pointer('pointermove', 140, 40, 1));
     });
     expect(drawer.style.visibility).toBe('visible');
-    expect(row.style.transform).toBe('translateX(-40px)');
+    expectRowStaysPut(row);
+    expect(drawer.style.transform).toBe('translateX(72px)');
     act(() => {
       row.dispatchEvent(pointer('pointercancel', 140, 40, 0));
     });
-    expect(row.style.transform).toBe('translateX(0px)');
+    expect(drawer.style.transform).toBe(closedDrawer);
     expect(isDrawerHidden(drawer)).toBe(true);
     view.unmount();
+  });
+
+  it('keeps a Skip slot only on recurring tasks', () => {
+    const plain = mount(
+      <TaskCard task={task({ id: 'plain', title: 'Dishes' })} onComplete={vi.fn()} />
+    );
+    expect(plain.container.querySelector('button[aria-label="Skip Occurrence"]')).toBeNull();
+    expect(actionDrawer(plain.container).style.width).toBe(`${SWIPE_DRAWER_WIDTH_WITHOUT_SKIP}px`);
+    plain.unmount();
+
+    const recurring = mount(
+      <TaskCard
+        task={task({
+          id: 'rec',
+          title: 'Trash',
+          recurrence: {
+            type: 'fixed_interval',
+            intervalValue: 1,
+            intervalUnit: 'weeks',
+            weekdays: [1],
+          },
+        })}
+        onComplete={vi.fn()}
+        onRequestSkipOccurrence={vi.fn()}
+      />
+    );
+    const body = cardBody(recurring.container);
+    const drawer = actionDrawer(recurring.container);
+    expect(recurring.container.querySelector('button[aria-label="Skip Occurrence"]')).not.toBeNull();
+    expect(drawer.style.width).toBe(`${SWIPE_DRAWER_WIDTH_WITH_SKIP}px`);
+    dispatchTouch(body, 'touchstart', 200, 40);
+    dispatchTouch(body, 'touchmove', 40, 42);
+    dispatchTouch(body, 'touchend', 40, 42);
+    expectRowStaysPut(body);
+    expect(drawer.style.transform).toBe('translateX(0px)');
+    expect(recurring.container.querySelector('[data-testid="task-title"]')?.textContent).toBe('Trash');
+    recurring.unmount();
   });
 });
 
