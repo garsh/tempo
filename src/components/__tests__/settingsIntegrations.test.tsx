@@ -82,11 +82,11 @@ async function flushUi() {
   });
 }
 
-function renderDataPage(accountEmail?: string) {
+function renderDataPage(accountEmail?: string, initialPage: 'backup' | 'diagnostics' = 'backup') {
   return mount(
     <SettingsPage
       isOpen={true}
-      initialPage="data"
+      initialPage={initialPage}
       onClose={vi.fn()}
       tasks={[] as Task[]}
       syncStatus={{
@@ -97,7 +97,6 @@ function renderDataPage(accountEmail?: string) {
         account: accountEmail ? { email: accountEmail } : null,
       }}
       onSyncStatusChange={vi.fn()}
-      onShowShortcuts={vi.fn()}
     />
   );
 }
@@ -113,24 +112,22 @@ describe('SettingsPage Backup & Diagnostics', () => {
     document.body.replaceChildren();
   });
 
-  it('removes TickTick/CSV import, groups JSON Backup together, and places Clear and Sample tasks in Diagnostics & Repair', async () => {
-    const view = renderDataPage();
-    const text = view.container.textContent ?? '';
+  it('removes TickTick/CSV import, keeps JSON Backup on its own page, and places Clear and Sample tasks on Diagnostics', async () => {
+    const backupView = renderDataPage();
+    const backupText = backupView.container.textContent ?? '';
 
-    expect(text).not.toMatch(/TickTick/i);
-    expect(text).not.toMatch(/\bCSV\b/);
+    expect(backupText).not.toMatch(/TickTick/i);
+    expect(backupText).not.toMatch(/\bCSV\b/);
+    expect(backupText).not.toContain('Diagnostics & Repair');
+    expect(backupText).not.toContain('Clear all current data');
+    expect(backupText).not.toContain('Load sample tasks');
 
-    const jsonBackupHeading = Array.from(view.container.querySelectorAll('div')).find(
+    const jsonBackupHeading = Array.from(backupView.container.querySelectorAll('div')).find(
       (el) => el.textContent?.trim() === 'JSON Backup'
     );
-    const diagHeading = Array.from(view.container.querySelectorAll('div')).find(
-      (el) => el.textContent?.trim() === 'Diagnostics & Repair'
-    );
     expect(jsonBackupHeading).toBeTruthy();
-    expect(diagHeading).toBeTruthy();
 
     const jsonCard = jsonBackupHeading!.nextElementSibling!;
-    const diagCard = diagHeading!.nextElementSibling!;
 
     expect(jsonCard.textContent).toContain('Export JSON backup');
     expect(jsonCard.textContent).toContain('Restore JSON backup');
@@ -142,6 +139,16 @@ describe('SettingsPage Backup & Diagnostics', () => {
       'Exports your active tasks. Restoring a JSON backup merges with your current tasks after confirmation.'
     );
     expect(jsonNote.textContent).not.toMatch(/lists|folders|tombstone/i);
+    backupView.unmount();
+
+    const view = renderDataPage(undefined, 'diagnostics');
+    const diagHeading = Array.from(view.container.querySelectorAll('div')).find(
+      (el) => el.textContent?.trim() === 'Diagnostics & Repair'
+    );
+    expect(diagHeading).toBeTruthy();
+    expect(view.container.textContent).not.toContain('Export JSON backup');
+    expect(view.container.textContent).not.toContain('Restore JSON backup');
+    const diagCard = diagHeading!.nextElementSibling!;
 
     expect(diagCard.textContent).toContain('Background sync');
     expect(diagCard.textContent).toContain('Repair & Deduplicate Tasks');
@@ -239,7 +246,7 @@ describe('SettingsPage Backup & Diagnostics', () => {
   });
 
   it('shows detailed confirmation popups for Clear all current data and Clean Up Storage', async () => {
-    const view = renderDataPage('donna@example.com');
+    const view = renderDataPage('donna@example.com', 'diagnostics');
 
     // Clear all current data popup
     const clearBtn = Array.from(view.container.querySelectorAll('button')).find((b) =>
@@ -305,7 +312,7 @@ describe('SettingsPage Backup & Diagnostics', () => {
     const view = mount(
       <SettingsPage
         isOpen={true}
-        initialPage="data"
+        initialPage="diagnostics"
         onClose={onClose}
         tasks={[]}
         syncStatus={{
@@ -316,7 +323,6 @@ describe('SettingsPage Backup & Diagnostics', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 

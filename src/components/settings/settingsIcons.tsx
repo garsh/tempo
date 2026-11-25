@@ -14,13 +14,6 @@ export function GeneralIcon() {
     </svg>
   );
 }
-export function IntegrationsIcon() {
-  return (
-    <svg {...box} fill="var(--tt-icon-green)">
-      <path d="M11.4 1.6 19 8l-7.6 6.4v-3.7C6.6 10.5 3.6 12.6 1 17c.6-6.7 4.2-10.6 10.4-11.6Z" />
-    </svg>
-  );
-}
 export function AccountIcon() {
   return (
     <svg {...box} fill={B}>

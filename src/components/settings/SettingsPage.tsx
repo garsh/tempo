@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Copy,
+  Activity,
   ExternalLink,
   Key,
   Keyboard,
@@ -69,6 +70,7 @@ import {
   readFileText,
   type JsonImportPreview,
 } from './dataTransfer';
+import { KEYBOARD_SHORTCUTS } from '../dialogs/ShortcutsHelpDialog';
 import { Avatar, Card, ControlRow, NavRow, Note, SectionLabel, SelectRow, SettingsHeader } from './settingsUi';
 import {
   AccountIcon,
@@ -77,16 +79,17 @@ import {
   GeneralIcon,
   GoogleGIcon,
   ImportIcon,
-  IntegrationsIcon,
 } from './settingsIcons';
 
-export type SettingsPageId = 'root' | 'account' | 'general' | 'data';
+export type SettingsPageId = 'root' | 'account' | 'general' | 'backup' | 'diagnostics' | 'shortcuts';
 
 const TITLES: Record<SettingsPageId, string> = {
   root: 'Settings',
   account: 'Account',
   general: 'General',
-  data: 'Backup & Diagnostics',
+  backup: 'Backup',
+  diagnostics: 'Diagnostics',
+  shortcuts: 'Keyboard shortcuts',
 };
 
 interface SettingsPageProps {
@@ -96,7 +99,6 @@ interface SettingsPageProps {
   tasks: Task[];
   syncStatus: SyncStatusSnapshot;
   onSyncStatusChange: () => void;
-  onShowShortcuts: () => void;
   diagnosticsContext?: Record<string, unknown>;
   suppressEscape?: boolean;
 }
@@ -157,10 +159,16 @@ export function SettingsPage(props: SettingsPageProps) {
       );
       break;
     case 'general':
-      body = <GeneralPage {...props} />;
+      body = <PreferencesSections />;
       break;
-    case 'data':
-      body = <DataDiagnosticsPage {...props} setStatus={setStatus} onChildDialogChange={setHasChildDialog} />;
+    case 'backup':
+      body = <BackupPage {...props} setStatus={setStatus} onChildDialogChange={setHasChildDialog} />;
+      break;
+    case 'diagnostics':
+      body = <DiagnosticsPage {...props} setStatus={setStatus} onChildDialogChange={setHasChildDialog} />;
+      break;
+    case 'shortcuts':
+      body = <ShortcutsPage />;
       break;
   }
 
@@ -184,7 +192,9 @@ export function SettingsPage(props: SettingsPageProps) {
     const navItems: ReadonlyArray<{ id: Exclude<SettingsPageId, 'root'>; icon: ReactNode; label: string }> = [
       { id: 'general', icon: <GeneralIcon />, label: 'General' },
       { id: 'account', icon: <AccountIcon />, label: 'Account' },
-      { id: 'data', icon: <IntegrationsIcon />, label: 'Backup & Diagnostics' },
+      { id: 'backup', icon: <ExportIcon />, label: 'Backup' },
+      { id: 'diagnostics', icon: <Activity className="w-5 h-5 text-tt-icon-amber" />, label: 'Diagnostics' },
+      { id: 'shortcuts', icon: <Keyboard className="w-5 h-5 text-tt-blue" />, label: 'Keyboard shortcuts' },
     ];
 
     return (
@@ -280,14 +290,21 @@ export function SettingsPage(props: SettingsPageProps) {
 
 /* ───────────────────────────── Root ───────────────────────────── */
 
-function RootPage({ onShowShortcuts, go }: SettingsPageProps & { go: (p: SettingsPageId) => void }) {
+function RootPage({ go }: SettingsPageProps & { go: (p: SettingsPageId) => void }) {
   return (
     <>
       <PreferencesSections />
       <Card>
         <NavRow icon={<AccountIcon />} label="Account" onClick={() => go('account')} />
-        <NavRow icon={<IntegrationsIcon />} label="Backup & Diagnostics" onClick={() => go('data')} />
-        <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={onShowShortcuts} />
+      </Card>
+      <Card>
+        <NavRow icon={<ExportIcon />} label="Backup" onClick={() => go('backup')} />
+      </Card>
+      <Card>
+        <NavRow icon={<Activity className="w-5 h-5 text-tt-icon-amber" />} label="Diagnostics" onClick={() => go('diagnostics')} />
+      </Card>
+      <Card>
+        <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={() => go('shortcuts')} />
       </Card>
     </>
   );
@@ -673,18 +690,26 @@ function PreferencesSections() {
   );
 }
 
-function GeneralPage({ onShowShortcuts }: SettingsPageProps) {
+function ShortcutsPage() {
   return (
     <>
-      <PreferencesSections />
-      <Card>
-        <NavRow icon={<Keyboard className="w-5 h-5 text-tt-blue" />} label="Keyboard shortcuts" onClick={onShowShortcuts} />
+      <SectionLabel>Keyboard shortcuts</SectionLabel>
+      <Card className="divide-y divide-tt-border/50">
+        <ul>
+          {KEYBOARD_SHORTCUTS.map(([keys, description]) => (
+            <li key={keys} className="min-h-[50px] flex items-center justify-between gap-3 pl-4 pr-[18px]">
+              <span className="text-[17px] desktop:text-[15px] text-tt-text">{description}</span>
+              <kbd className="shrink-0 px-2 py-1 rounded-lg bg-tt-sidebar text-tt-text font-mono text-[12px]">{keys}</kbd>
+            </li>
+          ))}
+        </ul>
       </Card>
+      <Note>These work from the main screen. Press ? to open this list in a dialog.</Note>
     </>
   );
 }
 
-/* ────────────────────── Backup & Diagnostics ────────────────────── */
+/* ────────────────────── Backup ────────────────────── */
 
 function FileRow({
   icon,
@@ -723,6 +748,24 @@ function FileRow({
   );
 }
 
+function BackupPage(
+  props: SettingsPageProps & {
+    setStatus: (s: Status) => void;
+    onChildDialogChange?: (open: boolean) => void;
+  },
+) {
+  return <DataDiagnosticsPage {...props} section="backup" />;
+}
+
+function DiagnosticsPage(
+  props: SettingsPageProps & {
+    setStatus: (s: Status) => void;
+    onChildDialogChange?: (open: boolean) => void;
+  },
+) {
+  return <DataDiagnosticsPage {...props} section="diagnostics" />;
+}
+
 function DataDiagnosticsPage({
   tasks,
   syncStatus,
@@ -730,9 +773,11 @@ function DataDiagnosticsPage({
   diagnosticsContext,
   setStatus,
   onChildDialogChange,
+  section,
 }: SettingsPageProps & {
   setStatus: (s: Status) => void;
   onChildDialogChange?: (open: boolean) => void;
+  section: 'backup' | 'diagnostics';
 }) {
   const [clearPreview, setClearPreview] = useState<ClearAllDataPreview | null>(null);
   const [cleanupPreview, setCleanupPreview] = useState<StorageCleanupPreview | null>(null);
@@ -1052,134 +1097,142 @@ function DataDiagnosticsPage({
           <span className="flex-1">{busyLabel}</span>
         </div>
       )}
-      <SectionLabel>JSON Backup</SectionLabel>
-      <Card>
-        <NavRow
-          icon={<ExportIcon />}
-          label="Export JSON backup"
-          chevron={false}
-          onClick={() => void run('Exporting JSON backup…', exportJsonBackup, 'Export failed')}
-        />
-        <FileRow
-          icon={<ImportIcon />}
-          label="Restore JSON backup"
-          accept=".json,application/json"
-          disabled={!!busyLabel}
-          onFile={(f) => void handleSelectBackupFile(f)}
-        />
-      </Card>
-      <Note>
-        Exports your active tasks. Restoring a JSON backup merges with your current tasks after confirmation.
-      </Note>
-      <SectionLabel>Diagnostics &amp; Repair</SectionLabel>
-      <Card>
-        <div className="px-4 py-3 text-[13px] text-tt-secondary space-y-1">
-          <div className="font-medium text-tt-text">Build {BUILD_ID}</div>
-          <div>
-            {diag.counts.openTasks} open ({diag.counts.recurringTasks} recurring) · {diag.counts.completedTasks}{' '}
-            completed · {diag.counts.tombstonedTasks} tombstones · {diag.counts.duplicateOpenExtraCount} duplicate open
-            {importedCompletedCount > 0 ? ` · ${importedCompletedCount.toLocaleString()} imported completed` : ''}
-          </div>
-        </div>
-        <ControlRow label="Background sync" sub="Startup, every ~10 min and on return">
-          <Switch checked={autoSync} onChange={handleToggleAutoSync} label="Background sync" />
-        </ControlRow>
-        <NavRow
-          icon={
-            <RefreshCw
-              className={`w-[18px] h-[18px] text-tt-blue ${
-                busyLabel === 'Repairing & deduplicating tasks…' ? 'animate-spin' : ''
-              }`}
-              strokeWidth={1.8}
+      {section === 'backup' && (
+        <>
+          <SectionLabel>JSON Backup</SectionLabel>
+          <Card>
+            <NavRow
+              icon={<ExportIcon />}
+              label="Export JSON backup"
+              chevron={false}
+              onClick={() => void run('Exporting JSON backup…', exportJsonBackup, 'Export failed')}
             />
-          }
-          label="Repair & Deduplicate Tasks"
-          chevron={false}
-          onClick={() =>
-            void run(
-              'Repairing & deduplicating tasks…',
-              async () => {
-                const r = await repairAndDeduplicateDatabase();
-                return `Repaired database: deduplicated ${r.deduplicatedTasks} task(s), purged ${r.purgedTombstones} tombstone(s).`;
-              },
-              'Repair failed',
-            )
-          }
-        />
-        <NavRow
-          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
-          label={<span className="text-tt-overdue">Clean Up Storage</span>}
-          chevron={false}
-          onClick={() => void handleOpenCleanup()}
-        />
-        <div data-tempo-sample-tasks="1">
-          <NavRow
-            icon={<Sparkles className="w-5 h-5 text-tt-blue" />}
-            label="Load sample tasks"
-            chevron={false}
-            onClick={() =>
-              !busyLabel &&
-              void run('Loading sample tasks…', () => loadSampleTasks().then((n) => `Loaded ${n} sample tasks.`), 'Load failed')
-            }
+            <FileRow
+              icon={<ImportIcon />}
+              label="Restore JSON backup"
+              accept=".json,application/json"
+              disabled={!!busyLabel}
+              onFile={(f) => void handleSelectBackupFile(f)}
+            />
+          </Card>
+          <Note>
+            Exports your active tasks. Restoring a JSON backup merges with your current tasks after confirmation.
+          </Note>
+          <ConfirmDialog
+            open={pendingImport !== null}
+            title="Restore JSON backup?"
+            message={importDialogMessage}
+            confirmLabel="Restore Backup"
+            tone="primary"
+            onCancel={() => setPendingImport(null)}
+            onConfirm={handleConfirmImport}
           />
-          <NavRow
-            icon={<Trash2 className={`w-5 h-5 ${hasSampleTasks ? 'text-tt-overdue' : 'text-tt-muted'}`} />}
-            label={<span className={hasSampleTasks ? '' : 'text-tt-muted'}>Clear sample tasks</span>}
-            chevron={false}
-            onClick={() =>
-              !busyLabel &&
-              void run(
-                'Clearing sample tasks…',
-                () =>
-                  clearSampleTasks().then((n) =>
-                    n ? `Removed ${n} sample tasks.` : 'No sample tasks to remove.'
-                  ),
-                'Clear failed',
-              )
-            }
+        </>
+      )}
+      {section === 'diagnostics' && (
+        <>
+          <SectionLabel>Diagnostics &amp; Repair</SectionLabel>
+          <Card>
+            <div className="px-4 py-3 text-[13px] text-tt-secondary space-y-1">
+              <div className="font-medium text-tt-text">Build {BUILD_ID}</div>
+              <div>
+                {diag.counts.openTasks} open ({diag.counts.recurringTasks} recurring) · {diag.counts.completedTasks}{' '}
+                completed · {diag.counts.tombstonedTasks} tombstones · {diag.counts.duplicateOpenExtraCount} duplicate open
+                {importedCompletedCount > 0 ? ` · ${importedCompletedCount.toLocaleString()} imported completed` : ''}
+              </div>
+            </div>
+            <ControlRow label="Background sync" sub="Startup, every ~10 min and on return">
+              <Switch checked={autoSync} onChange={handleToggleAutoSync} label="Background sync" />
+            </ControlRow>
+            <NavRow
+              icon={
+                <RefreshCw
+                  className={`w-[18px] h-[18px] text-tt-blue ${
+                    busyLabel === 'Repairing & deduplicating tasks…' ? 'animate-spin' : ''
+                  }`}
+                  strokeWidth={1.8}
+                />
+              }
+              label="Repair & Deduplicate Tasks"
+              chevron={false}
+              onClick={() =>
+                void run(
+                  'Repairing & deduplicating tasks…',
+                  async () => {
+                    const r = await repairAndDeduplicateDatabase();
+                    return `Repaired database: deduplicated ${r.deduplicatedTasks} task(s), purged ${r.purgedTombstones} tombstone(s).`;
+                  },
+                  'Repair failed',
+                )
+              }
+            />
+            <NavRow
+              icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
+              label={<span className="text-tt-overdue">Clean Up Storage</span>}
+              chevron={false}
+              onClick={() => void handleOpenCleanup()}
+            />
+            <div data-tempo-sample-tasks="1">
+              <NavRow
+                icon={<Sparkles className="w-5 h-5 text-tt-blue" />}
+                label="Load sample tasks"
+                chevron={false}
+                onClick={() =>
+                  !busyLabel &&
+                  void run('Loading sample tasks…', () => loadSampleTasks().then((n) => `Loaded ${n} sample tasks.`), 'Load failed')
+                }
+              />
+              <NavRow
+                icon={<Trash2 className={`w-5 h-5 ${hasSampleTasks ? 'text-tt-overdue' : 'text-tt-muted'}`} />}
+                label={<span className={hasSampleTasks ? '' : 'text-tt-muted'}>Clear sample tasks</span>}
+                chevron={false}
+                onClick={() =>
+                  !busyLabel &&
+                  void run(
+                    'Clearing sample tasks…',
+                    () =>
+                      clearSampleTasks().then((n) =>
+                        n ? `Removed ${n} sample tasks.` : 'No sample tasks to remove.'
+                      ),
+                    'Clear failed',
+                  )
+                }
+              />
+            </div>
+            <NavRow
+              icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
+              label={<span className="text-tt-overdue">Clear all current data</span>}
+              chevron={false}
+              onClick={() => void handleOpenClear()}
+            />
+            <NavRow
+              icon={<Copy className="w-[18px] h-[18px] text-tt-secondary" strokeWidth={1.8} />}
+              label="Copy Diagnostics Report"
+              chevron={false}
+              onClick={() => !busyLabel && void handleCopyDiagnostics()}
+            />
+          </Card>
+          <Note>Sample tasks help you explore; clearing sample tasks removes only demo items.</Note>
+          <ConfirmDialog
+            open={clearPreview !== null}
+            title="Clear all current data?"
+            message={clearDialogMessage}
+            confirmLabel="Clear all data"
+            tone="danger"
+            onCancel={() => setClearPreview(null)}
+            onConfirm={handleConfirmClear}
           />
-        </div>
-        <NavRow
-          icon={<Trash2 className="w-[18px] h-[18px] text-tt-overdue" strokeWidth={1.8} />}
-          label={<span className="text-tt-overdue">Clear all current data</span>}
-          chevron={false}
-          onClick={() => void handleOpenClear()}
-        />
-        <NavRow
-          icon={<Copy className="w-[18px] h-[18px] text-tt-secondary" strokeWidth={1.8} />}
-          label="Copy Diagnostics Report"
-          chevron={false}
-          onClick={() => !busyLabel && void handleCopyDiagnostics()}
-        />
-      </Card>
-      <Note>Sample tasks help you explore; clearing sample tasks removes only demo items.</Note>
-      <ConfirmDialog
-        open={pendingImport !== null}
-        title="Restore JSON backup?"
-        message={importDialogMessage}
-        confirmLabel="Restore Backup"
-        tone="primary"
-        onCancel={() => setPendingImport(null)}
-        onConfirm={handleConfirmImport}
-      />
-      <ConfirmDialog
-        open={clearPreview !== null}
-        title="Clear all current data?"
-        message={clearDialogMessage}
-        confirmLabel="Clear all data"
-        tone="danger"
-        onCancel={() => setClearPreview(null)}
-        onConfirm={handleConfirmClear}
-      />
-      <ConfirmDialog
-        open={cleanupPreview !== null}
-        title="Clean up storage?"
-        message={cleanupDialogMessage}
-        confirmLabel="Clean Up Storage"
-        tone="danger"
-        onCancel={() => setCleanupPreview(null)}
-        onConfirm={handleConfirmCleanup}
-      />
+          <ConfirmDialog
+            open={cleanupPreview !== null}
+            title="Clean up storage?"
+            message={cleanupDialogMessage}
+            confirmLabel="Clean Up Storage"
+            tone="danger"
+            onCancel={() => setCleanupPreview(null)}
+            onConfirm={handleConfirmCleanup}
+          />
+        </>
+      )}
     </>
   );
 }

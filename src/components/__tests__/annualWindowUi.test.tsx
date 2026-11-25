@@ -281,7 +281,6 @@ describe('Annual time-of-year UI', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 

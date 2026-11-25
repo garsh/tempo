@@ -69,7 +69,6 @@ describe('SettingsPage consolidated preferences', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 
@@ -103,7 +102,6 @@ describe('SettingsPage consolidated preferences', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 
@@ -159,7 +157,6 @@ describe('SettingsPage consolidated preferences', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 
@@ -168,8 +165,22 @@ describe('SettingsPage consolidated preferences', () => {
     expect(root?.getAttribute('data-settings-page')).toBe('root');
     expect(view.container.querySelectorAll('select')).toHaveLength(4);
     expect(view.container.textContent).toContain('Account');
-    expect(view.container.textContent).toContain('Backup & Diagnostics');
+    expect(view.container.textContent).toContain('Backup');
+    expect(view.container.textContent).toContain('Diagnostics');
+    expect(view.container.textContent).not.toContain('Backup & Diagnostics');
     expect(view.container.textContent).toContain('Keyboard shortcuts');
+    const rowParent = (label: string) =>
+      Array.from(view.container.querySelectorAll('button')).find((b) => b.textContent?.trim() === label)?.parentElement;
+    expect(rowParent('Account')).toBeTruthy();
+    expect(rowParent('Backup')).not.toBe(rowParent('Account'));
+    expect(rowParent('Diagnostics')).not.toBe(rowParent('Backup'));
+    expect(rowParent('Keyboard shortcuts')).not.toBe(rowParent('Diagnostics'));
+    act(() => {
+      rowParent('Keyboard shortcuts')?.querySelector('button')?.click();
+    });
+    expect(view.container.textContent).toContain('New task (capture)');
+    expect(view.container.textContent).toContain('n / c');
+    expect(view.container.querySelector('[aria-label="Close shortcuts"]')).toBeNull();
     expect(view.container.textContent).not.toContain('Help & Feedback');
     expect(view.container.textContent).not.toContain('Load sample tasks');
 
@@ -193,7 +204,6 @@ describe('SettingsPage consolidated preferences', () => {
           account: { email: 'user@example.com' },
         }}
         onSyncStatusChange={onSyncStatusChange}
-        onShowShortcuts={vi.fn()}
       />
     );
 
@@ -254,7 +264,6 @@ describe('SettingsPage consolidated preferences', () => {
           account: { email: 'user@example.com' },
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
 

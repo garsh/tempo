@@ -444,7 +444,6 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
           account: null,
         }}
         onSyncStatusChange={vi.fn()}
-        onShowShortcuts={vi.fn()}
       />
     );
     mounted.push(view.unmount);
@@ -463,7 +462,7 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
     const navButtons = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).map((b) =>
       b.textContent?.trim()
     );
-    expect(navButtons).toEqual(['General', 'Account', 'Backup & Diagnostics']);
+    expect(navButtons).toEqual(['General', 'Account', 'Backup', 'Diagnostics', 'Keyboard shortcuts']);
     expect(nav.textContent).not.toContain('Help & Feedback');
 
     const accountBtn = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).find((b) =>
@@ -478,6 +477,33 @@ describe('Desktop & Mobile Landscape Responsive Layouts', () => {
     expect(view.container.textContent).not.toContain('Google Drive sync');
     expect(view.container.textContent).not.toContain('Private Drive AppData folder');
     expect(view.container.textContent).not.toContain('Background sync');
+
+    const clickNav = (label: string) => {
+      const button = Array.from(nav.querySelectorAll<HTMLButtonElement>('button')).find(
+        (b) => b.textContent?.trim() === label
+      )!;
+      act(() => {
+        button.click();
+      });
+    };
+
+    clickNav('Backup');
+    expect(root?.getAttribute('data-settings-page')).toBe('backup');
+    expect(view.container.textContent).toContain('Export JSON backup');
+    expect(view.container.textContent).not.toContain('Clear all current data');
+    expect(view.container.textContent).not.toContain('Copy Diagnostics Report');
+
+    clickNav('Diagnostics');
+    expect(root?.getAttribute('data-settings-page')).toBe('diagnostics');
+    expect(view.container.textContent).toContain('Diagnostics & Repair');
+    expect(view.container.textContent).toContain('Copy Diagnostics Report');
+    expect(view.container.textContent).not.toContain('Export JSON backup');
+
+    clickNav('Keyboard shortcuts');
+    expect(root?.getAttribute('data-settings-page')).toBe('shortcuts');
+    expect(view.container.textContent).toContain('New task (capture)');
+    expect(view.container.textContent).toContain('n / c');
+    expect(view.container.querySelector('[aria-label="Close shortcuts"]')).toBeNull();
   });
 
   it('supports RecurringTasksView category filter pills and hides Back button when embedded', () => {

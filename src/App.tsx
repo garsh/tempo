@@ -1746,7 +1746,6 @@ export function App() {
         tasks={allTasks}
         syncStatus={syncStatus}
         onSyncStatusChange={() => refreshSyncStatus()}
-        onShowShortcuts={() => setShowShortcutsHelp(true)}
         suppressEscape={showShortcutsHelp}
         diagnosticsContext={{
           calSelectedDate,
