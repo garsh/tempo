@@ -310,9 +310,15 @@ describe('Batch 4 accessibility, performance & cleanup (Items P, Q, R, S)', () =
     );
 
     const view = mount(
-      <ReorderableTaskList tasks={tasks} enabled={true} onReorder={onReorder} renderRow={renderRow} />
+      <div data-testid="scrollport" style={{ overflowY: 'auto' }}>
+        <ReorderableTaskList tasks={tasks} enabled={true} onReorder={onReorder} renderRow={renderRow} />
+      </div>
     );
     mounted.push(view.unmount);
+
+    const port = view.container.querySelector<HTMLElement>('[data-testid="scrollport"]')!;
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 80 });
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 400 });
 
     const rowA = view.container.querySelector<HTMLElement>('[data-row="a"]')!;
     const rowB = view.container.querySelector<HTMLElement>('[data-row="b"]')!;
@@ -324,7 +330,9 @@ describe('Batch 4 accessibility, performance & cleanup (Items P, Q, R, S)', () =
     const initialRefA = capturedCallbacks.get('a')!.rowRef;
     const initialDownA = capturedCallbacks.get('a')!.onDown;
     view.rerender(
-      <ReorderableTaskList tasks={tasks} enabled={true} onReorder={onReorder} renderRow={renderRow} />
+      <div data-testid="scrollport" style={{ overflowY: 'auto' }}>
+        <ReorderableTaskList tasks={tasks} enabled={true} onReorder={onReorder} renderRow={renderRow} />
+      </div>
     );
     expect(capturedCallbacks.get('a')!.rowRef).toBe(initialRefA);
     expect(capturedCallbacks.get('a')!.onDown).toBe(initialDownA);

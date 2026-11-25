@@ -3,8 +3,24 @@ import type { Task } from '../types/task';
 import { moveItemToSlot } from '../domain/reorder';
 
 const LONG_PRESS_MS = 350;
-const MOVE_CANCEL_PX = 8;
+const MOVE_SLOP_PX = 8;
 const SETTLE_MS = 165;
+
+function nearestScrollport(start: HTMLElement | null): HTMLElement | null {
+  let el = start?.parentElement ?? null;
+  while (el) {
+    const overflowY = window.getComputedStyle(el).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') return el;
+    el = el.parentElement;
+  }
+  return null;
+}
+
+function listCanScroll(start: HTMLElement | null): boolean {
+  const port = nearestScrollport(start);
+  if (!port) return false;
+  return port.scrollHeight - port.clientHeight > 1;
+}
 
 function rowKey(task: Task): string {
   return task.dueAt ? `${task.id}:${task.dueAt}` : task.id;
@@ -20,6 +36,11 @@ export interface RowDragProps {
   onRowPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onRowClickCapture: (e: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu: (e: React.MouseEvent<HTMLDivElement>) => void;
+  /**
+   * `none` when this list cannot scroll, so a touch can move the row.
+   * `pan-y` while the list can scroll, so the same touch still scrolls.
+   */
+  reorderTouchAction: 'pan-y' | 'none';
 }
 
 interface ReorderableTaskListProps {
@@ -54,6 +75,7 @@ interface PendingPress {
   startX: number;
   startY: number;
   timerId: number;
+  requiresLongPress: boolean;
 }
 
 interface ActiveDrag {
@@ -102,8 +124,10 @@ function DropIndicator({ top }: { top: number }) {
 }
 
 /**
- * Renders a list of tasks where long-pressing an item selects it for drag-and-drop
- * reordering between other items in the same list/day.
+ * Renders a list of tasks that can be reordered by dragging.
+ * A scrollable list still requires a long press, so a vertical drag can scroll.
+ * A list that cannot scroll also starts the drag as soon as the press moves.
+ * A short press that does not move stays a tap.
  */
 export function ReorderableTaskList({
   tasks,
@@ -114,6 +138,7 @@ export function ReorderableTaskList({
 }: ReorderableTaskListProps) {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [pendingOrderIds, setPendingOrderIds] = useState<string[] | null>(null);
+  const [canScroll, setCanScroll] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pendingRef = useRef<PendingPress | null>(null);
@@ -122,6 +147,9 @@ export function ReorderableTaskList({
   const suppressClickRef = useRef(false);
   const attachDragTouchRef = useRef<() => void>(() => {});
   const detachDragTouchRef = useRef<() => void>(() => {});
+  const beginDragRef = useRef<
+    (taskId: string, pointerId: number, startY: number, vibrate: boolean) => void
+  >(() => {});
 
   const tasksRef = useRef(tasks);
   const enabledRef = useRef(enabled);
@@ -181,6 +209,28 @@ export function ReorderableTaskList({
   useEffect(() => {
     tasksRef.current = displayTasks;
   }, [displayTasks]);
+
+  useLayoutEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const measure = () => {
+      const next = enabled && listCanScroll(root);
+      setCanScroll((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const port = nearestScrollport(root);
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      observer.observe(root);
+      if (port) observer.observe(port);
+    }
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [enabled, tasks.length]);
 
   useLayoutEffect(() => {
     const active = activeRef.current;
@@ -259,10 +309,17 @@ export function ReorderableTaskList({
       if (p && e.pointerId === p.pointerId) {
         const dx = e.clientX - p.startX;
         const dy = e.clientY - p.startY;
-        if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
-          clearPending();
-        }
-        return;
+        if (Math.hypot(dx, dy) <= MOVE_SLOP_PX) return;
+
+        // Scrollable lists ignore movement so the page can scroll.
+        // Short lists start a reorder on a vertical move and leave a horizontal move for the action tray.
+        const startReorder = !p.requiresLongPress && Math.abs(dy) >= Math.abs(dx);
+        const taskId = p.taskId;
+        const pointerId = p.pointerId;
+        const startY = p.startY;
+        clearPending();
+        if (!startReorder) return;
+        beginDragRef.current(taskId, pointerId, startY, true);
       }
 
       const active = activeRef.current;
@@ -402,6 +459,58 @@ export function ReorderableTaskList({
     };
   }, [clearPending, cleanupDragImmediate]);
 
+  const beginDrag = useCallback(
+    (taskId: string, pointerId: number, startY: number, vibrate: boolean) => {
+      const list = tasksRef.current;
+      const fromIndex = list.findIndex((t) => rowKey(t) === taskId);
+      const orderKeys = list.map(rowKey);
+      if (fromIndex === -1) return;
+
+      const containerTop = containerRef.current?.getBoundingClientRect().top ?? 0;
+      const snapshots: RowSnapshot[] = list.map((t) => {
+        const key = rowKey(t);
+        const rect = rowRefs.current.get(key)?.getBoundingClientRect();
+        const top = rect?.top ?? 0;
+        const height = rect?.height ?? 0;
+        return { id: key, top, height, midpoint: top + height / 2 };
+      });
+      const draggedHeight = snapshots[fromIndex]?.height ?? 0;
+
+      suppressClickRef.current = true;
+      if (vibrate && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(15);
+      }
+
+      const nextActive: ActiveDrag = {
+        taskId,
+        pointerId,
+        fromIndex,
+        startY,
+        targetIndex: fromIndex,
+        offsetY: 0,
+        draggedHeight,
+        containerTop,
+        snapshots,
+        orderKeys,
+      };
+      activeRef.current = nextActive;
+      attachDragTouchRef.current();
+      onDragActiveChangeRef.current?.(true);
+      setDragState({
+        taskId,
+        fromIndex,
+        targetIndex: fromIndex,
+        offsetY: 0,
+        settling: false,
+        draggedHeight,
+        indicatorTop: null,
+        orderKeys,
+      });
+    },
+    []
+  );
+  beginDragRef.current = beginDrag;
+
   const handleRowPointerDown = useCallback(
     (taskId: string, e: React.PointerEvent<HTMLDivElement>) => {
       if (!enabledRef.current || tasksRef.current.length < 2 || settleTimerRef.current !== null) return;
@@ -414,69 +523,25 @@ export function ReorderableTaskList({
       const startY = e.clientY;
       const isDragHandle = Boolean((e.target as HTMLElement).closest('[data-drag-handle="true"]'));
 
-      const startDrag = (immediate: boolean) => {
-        const list = tasksRef.current;
-        const fromIndex = list.findIndex((t) => rowKey(t) === taskId);
-        const orderKeys = list.map(rowKey);
-        if (fromIndex === -1) return;
-
-        const containerTop = containerRef.current?.getBoundingClientRect().top ?? 0;
-        const snapshots: RowSnapshot[] = list.map((t) => {
-          const key = rowKey(t);
-          const rect = rowRefs.current.get(key)?.getBoundingClientRect();
-          const top = rect?.top ?? 0;
-          const height = rect?.height ?? 0;
-          return { id: key, top, height, midpoint: top + height / 2 };
-        });
-        const draggedHeight = snapshots[fromIndex]?.height ?? 0;
-
-        suppressClickRef.current = true;
-        if (!immediate && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-          navigator.vibrate(15);
-        }
-
-        const nextActive: ActiveDrag = {
-          taskId,
-          pointerId,
-          fromIndex,
-          startY,
-          targetIndex: fromIndex,
-          offsetY: 0,
-          draggedHeight,
-          containerTop,
-          snapshots,
-          orderKeys,
-        };
-        activeRef.current = nextActive;
-        attachDragTouchRef.current();
-        onDragActiveChangeRef.current?.(true);
-        setDragState({
-          taskId,
-          fromIndex,
-          targetIndex: fromIndex,
-          offsetY: 0,
-          settling: false,
-          draggedHeight,
-          indicatorTop: null,
-          orderKeys,
-        });
-      };
-
       if (isDragHandle && e.pointerType === 'mouse') {
-        startDrag(true);
+        beginDrag(taskId, pointerId, startY, false);
         return;
       }
 
+      // A list that fits starts reorder on move. A list that overflows keeps the
+      // long press so the same move can scroll. The timer still runs either way,
+      // so a still hold picks the row up on touch as well as with a mouse.
+      const requiresLongPress = listCanScroll(containerRef.current);
       const timerId = window.setTimeout(() => {
         const current = pendingRef.current;
         if (!current || current.taskId !== taskId || current.pointerId !== pointerId) return;
         pendingRef.current = null;
-        startDrag(false);
+        beginDrag(taskId, pointerId, startY, true);
       }, LONG_PRESS_MS);
 
-      pendingRef.current = { taskId, pointerId, startX, startY, timerId };
+      pendingRef.current = { taskId, pointerId, startX, startY, timerId, requiresLongPress };
     },
-    [clearPending]
+    [beginDrag, clearPending]
   );
 
   const handleRowClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -552,6 +617,7 @@ export function ReorderableTaskList({
           onRowPointerDown,
           onRowClickCapture: handleRowClickCapture,
           onRowContextMenu: handleRowContextMenu,
+          reorderTouchAction: enabled && tasks.length >= 2 && !canScroll ? 'none' : 'pan-y',
         });
       })}
     </div>

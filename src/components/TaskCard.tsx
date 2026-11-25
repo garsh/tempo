@@ -50,7 +50,7 @@ interface TaskCardProps {
   occurrenceDateStr?: string;
   /** Normalized search tokens highlighted inside title and notes preview. */
   highlightTokens?: string[];
-  /** Long-press drag-to-reorder support. */
+  /** Drag-to-reorder support. Scrollable lists use a long press; lists that fit drag on move. */
   reorderEnabled?: boolean;
   isDragging?: boolean;
   isSettling?: boolean;
@@ -61,6 +61,8 @@ interface TaskCardProps {
   onRowPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onRowClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  /** `none` lets a short list drag on touch. Scrollable lists keep `pan-y`. */
+  reorderTouchAction?: 'pan-y' | 'none';
   /** Swipe action triggers */
   onRequestChangeDate?: (task: Task, anchorRect?: DOMRect) => void;
   onRequestLogDate?: (task: Task, anchorRect?: DOMRect) => void;
@@ -123,6 +125,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
   onRowPointerDown,
   onRowClickCapture,
   onRowContextMenu,
+  reorderTouchAction,
   onRequestChangeDate,
   onRequestLogDate,
   onRequestSkipOccurrence,
@@ -590,7 +593,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
       <div
         ref={bodyRef}
         data-testid="task-card-body"
-        style={{ touchAction: 'pan-y' }}
+        style={{ touchAction: reorderTouchAction === 'none' ? 'none' : 'pan-y' }}
         className={`relative z-10 w-full flex items-start gap-3 desktop:gap-2.5 px-3 sm:px-4 ${
           selected
             ? 'bg-tt-blue-soft'

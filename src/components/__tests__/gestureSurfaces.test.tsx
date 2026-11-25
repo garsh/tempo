@@ -357,25 +357,49 @@ describe('TaskCard swipe', () => {
 });
 
 describe('ReorderableTaskList touch scroll', () => {
-  function renderList(onReorder = vi.fn(), onDragActiveChange?: (active: boolean) => void) {
+  function renderList(
+    onReorder = vi.fn(),
+    onDragActiveChange?: (active: boolean) => void,
+    scrollable = false
+  ) {
     const tasks = [
       task({ id: 'a', title: 'A', dueAt: null }),
       task({ id: 'b', title: 'B', dueAt: null }),
       task({ id: 'c', title: 'C', dueAt: null }),
     ];
-    const view = mount(
+    const list = (
       <ReorderableTaskList
         tasks={tasks}
         enabled
         onReorder={onReorder}
         onDragActiveChange={onDragActiveChange}
         renderRow={(item, drag) => (
-          <div data-row={item.id} ref={drag.rowRef} onPointerDown={drag.onRowPointerDown}>
+          <div
+            data-row={item.id}
+            ref={drag.rowRef}
+            onPointerDown={drag.onRowPointerDown}
+            onClickCapture={drag.onRowClickCapture}
+          >
             {item.title}
           </div>
         )}
       />
     );
+    const view = mount(
+      scrollable ? (
+        <div data-testid="scrollport" style={{ overflowY: 'auto' }}>
+          {list}
+        </div>
+      ) : (
+        list
+      )
+    );
+    if (scrollable) {
+      const port = view.container.querySelector<HTMLElement>('[data-testid="scrollport"]');
+      if (!port) throw new Error('scrollport not found');
+      Object.defineProperty(port, 'clientHeight', { configurable: true, value: 120 });
+      Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 480 });
+    }
     return view;
   }
 
@@ -389,7 +413,7 @@ describe('ReorderableTaskList touch scroll', () => {
   it('cancels scrolling once a long-press reorder is active, and reports the new order', () => {
     vi.useFakeTimers();
     const onReorder = vi.fn();
-    const view = renderList(onReorder);
+    const view = renderList(onReorder, undefined, true);
     const row = view.container.querySelector<HTMLElement>('[data-row="a"]');
     if (!row) throw new Error('row not found');
 
@@ -414,7 +438,7 @@ describe('ReorderableTaskList touch scroll', () => {
   it('notifies onDragActiveChange when long-press activates and clears after drop', () => {
     vi.useFakeTimers();
     const onDragActiveChange = vi.fn();
-    const view = renderList(vi.fn(), onDragActiveChange);
+    const view = renderList(vi.fn(), onDragActiveChange, true);
     const row = view.container.querySelector<HTMLElement>('[data-row="a"]');
     if (!row) throw new Error('row not found');
 
@@ -436,6 +460,120 @@ describe('ReorderableTaskList touch scroll', () => {
     });
     expect(onDragActiveChange).toHaveBeenCalledWith(false);
     view.unmount();
+  });
+
+  it('does not pick up a row when a scrollable list is dragged before the long press', () => {
+    vi.useFakeTimers();
+    const onDragActiveChange = vi.fn();
+    const view = renderList(vi.fn(), onDragActiveChange, true);
+    const row = view.container.querySelector<HTMLElement>('[data-row="a"]');
+    if (!row) throw new Error('row not found');
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 10, 10, 1));
+      window.dispatchEvent(pointer('pointermove', 10, 80, 1));
+      vi.advanceTimersByTime(350);
+    });
+    expect(onDragActiveChange).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('starts reorder on a vertical move when the list cannot scroll, and a tap still clicks', () => {
+    vi.useFakeTimers();
+    const onReorder = vi.fn();
+    const onDragActiveChange = vi.fn();
+    const view = renderList(onReorder, onDragActiveChange);
+    const row = view.container.querySelector<HTMLElement>('[data-row="a"]');
+    if (!row) throw new Error('row not found');
+
+    const tap = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 10, 10, 1));
+      window.dispatchEvent(pointer('pointerup', 12, 11, 0));
+      row.dispatchEvent(tap);
+    });
+    expect(onDragActiveChange).not.toHaveBeenCalled();
+    expect(tap.defaultPrevented).toBe(false);
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 10, 10, 1));
+      vi.advanceTimersByTime(350);
+    });
+    expect(onDragActiveChange).toHaveBeenCalledWith(true);
+    act(() => {
+      window.dispatchEvent(pointer('pointerup', 10, 10, 0));
+      vi.advanceTimersByTime(200);
+    });
+    onDragActiveChange.mockClear();
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 30, 10, 1));
+      window.dispatchEvent(pointer('pointermove', 70, 12, 1));
+    });
+    expect(onDragActiveChange).not.toHaveBeenCalled();
+
+    act(() => {
+      row.dispatchEvent(pointer('pointerdown', 10, 10, 1));
+      window.dispatchEvent(pointer('pointermove', 10, 40, 1));
+    });
+    expect(onDragActiveChange).toHaveBeenCalledWith(true);
+    const move = dispatchTouch(window.document.body, 'touchmove', 10, 200);
+    expect(move.defaultPrevented).toBe(true);
+
+    const draggedClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    act(() => {
+      row.dispatchEvent(draggedClick);
+      window.dispatchEvent(pointer('pointermove', 10, 200, 1));
+      window.dispatchEvent(pointer('pointerup', 10, 200, 0));
+    });
+    expect(draggedClick.defaultPrevented).toBe(true);
+    expect(onReorder).toHaveBeenCalledWith(['b', 'c', 'a']);
+    view.unmount();
+  });
+
+  it('claims vertical touches on a short list and keeps them for a list that can scroll', () => {
+    const tasks = [
+      task({ id: 'a', title: 'A', dueAt: null }),
+      task({ id: 'b', title: 'B', dueAt: null }),
+    ];
+    const short = mount(
+      <ReorderableTaskList
+        tasks={tasks}
+        enabled
+        onReorder={vi.fn()}
+        renderRow={(item, drag) => (
+          <TaskCard task={item} onComplete={vi.fn()} reorderEnabled {...drag} />
+        )}
+      />
+    );
+    expect(
+      short.container.querySelector<HTMLElement>('[data-testid="task-card-body"]')?.style.touchAction
+    ).toBe('none');
+    short.unmount();
+
+    const scrolling = mount(
+      <div data-testid="scrollport" style={{ overflowY: 'auto' }}>
+        <ReorderableTaskList
+          tasks={tasks}
+          enabled
+          onReorder={vi.fn()}
+          renderRow={(item, drag) => (
+            <TaskCard task={item} onComplete={vi.fn()} reorderEnabled {...drag} />
+          )}
+        />
+      </div>
+    );
+    const port = scrolling.container.querySelector<HTMLElement>('[data-testid="scrollport"]');
+    if (!port) throw new Error('scrollport not found');
+    Object.defineProperty(port, 'clientHeight', { configurable: true, value: 80 });
+    Object.defineProperty(port, 'scrollHeight', { configurable: true, value: 400 });
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(
+      scrolling.container.querySelector<HTMLElement>('[data-testid="task-card-body"]')?.style.touchAction
+    ).toBe('pan-y');
+    scrolling.unmount();
   });
 });
 
