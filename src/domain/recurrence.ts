@@ -117,6 +117,14 @@ export function formatAnnualWindowRange(w: AnnualWindow): string {
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
 
+/** Keep a YYYY-MM-DD first-open date, an explicit clear, or "not present" (undefined). */
+export function normalizeFirstOpenDate(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === 'string' && DATE_ONLY_RE.test(value)) return value;
+  return null;
+}
+
 export function formatDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -701,7 +709,7 @@ export interface WindowProgress {
   daysUntilOpen: number | null;
   /** Days remaining before overdue (> 0 while before_min/in_window, 0 on max/last day, < 0 when overdue, null when not_done_yet or stopped). */
   daysUntilMax: number | null;
-  /** Local YYYY-MM-DD start date of the upcoming window for annual_window before_min tasks (null otherwise). */
+  /** Local YYYY-MM-DD when a waiting window next opens (annual seasons and approximate first-open dates). */
   nextOpenDateStr: string | null;
 }
 
@@ -1007,13 +1015,103 @@ function resolveAnnualProgress(
 }
 
 /**
+ * First cycle of an approximate task that has no completion yet.
+ * `openStr` is the first day the minimum has been reached. The window ends
+ * `max - min` units later (same day when min === max).
+ */
+function progressFromFirstOpen(
+  openStr: string,
+  min: number,
+  max: number,
+  unit: IntervalUnit,
+  today: Date,
+  periodExpanded: string,
+  doneToday: boolean
+): WindowProgress {
+  const open = parseDate(openStr);
+  const width = Math.max(0, max - min);
+  const maxBoundary = addInterval(open, width, unit);
+  const windowDays = Math.max(0, localDaysBetween(open, maxBoundary));
+  const nominalMaxDays = Math.max(1, localDaysBetween(open, addInterval(open, max, unit)));
+  const nominalMinDays = Math.max(1, Math.min(nominalMaxDays, localDaysBetween(open, addInterval(open, min, unit))));
+  const openLabel = formatAnnualNextStart(open, today.getFullYear());
+
+  if (today.getTime() < open.getTime()) {
+    const daysUntilOpen = localDaysBetween(today, open);
+    const daysUntilMax = localDaysBetween(today, maxBoundary);
+    return {
+      stage: 'before_min',
+      visibleInTasks: false,
+      sortScore: -1,
+      ringFill: 0,
+      overdueIntensity: 0,
+      elapsedDays: null,
+      minDays: nominalMinDays,
+      maxDays: nominalMaxDays,
+      lastDoneMs: null,
+      doneToday,
+      detailLabel: `Starts ${openLabel} · ${periodExpanded}`,
+      daysUntilOpen,
+      daysUntilMax,
+      nextOpenDateStr: openStr,
+    };
+  }
+
+  const daysInto = localDaysBetween(open, today);
+  if (windowDays > 0 && daysInto < windowDays) {
+    const w = daysInto / windowDays;
+    const daysLeft = windowDays - daysInto;
+    return {
+      stage: 'in_window',
+      visibleInTasks: true,
+      sortScore: w,
+      ringFill: Math.max(0.08, w),
+      overdueIntensity: 0,
+      elapsedDays: daysInto,
+      minDays: nominalMinDays,
+      maxDays: nominalMaxDays,
+      lastDoneMs: null,
+      doneToday,
+      detailLabel: `${daysLeft === 1 ? '1 day left' : `${daysLeft} days left`} · ${periodExpanded}`,
+      daysUntilOpen: 0,
+      daysUntilMax: daysLeft,
+      nextOpenDateStr: null,
+    };
+  }
+
+  const daysOver = daysInto - windowDays;
+  const extra = daysOver / nominalMaxDays;
+  const onDueDay = daysOver === 0;
+  return {
+    stage: 'at_or_past_max',
+    visibleInTasks: true,
+    sortScore: 1.01 + extra,
+    ringFill: 1,
+    overdueIntensity: Math.min(1, extra),
+    elapsedDays: daysInto,
+    minDays: nominalMinDays,
+    maxDays: nominalMaxDays,
+    lastDoneMs: null,
+    doneToday,
+    detailLabel: onDueDay
+      ? width === 0
+        ? `Due today · ${periodExpanded}`
+        : `Last day of window · ${periodExpanded}`
+      : `${daysOver === 1 ? '1 day overdue' : `${daysOver} days overdue`} · ${periodExpanded}`,
+    daysUntilOpen: 0,
+    daysUntilMax: daysOver === 0 ? 0 : -daysOver,
+    nextOpenDateStr: null,
+  };
+}
+
+/**
  * Compute continuous progress, visibility in Tasks, sort score, and radial ring fill
  * for an approximate min–max periodic task or annual time-of-year window task.
  * Returns null for non-window tasks.
  */
 export function getWindowProgress(
   task: Pick<Task, 'recurrence' | 'completionHistory'> &
-    Partial<Pick<Task, 'completedAt' | 'dueAt' | 'createdAt'>>,
+    Partial<Pick<Task, 'completedAt' | 'dueAt' | 'createdAt' | 'firstOpenDate'>>,
   now: Date = new Date()
 ): WindowProgress | null {
   if (!isWindowPeriodic(task) || !task.recurrence) return null;
@@ -1048,6 +1146,10 @@ export function getWindowProgress(
   }
 
   if (lastDoneMs == null) {
+    const firstOpen = normalizeFirstOpenDate(task.firstOpenDate);
+    if (firstOpen) {
+      return progressFromFirstOpen(firstOpen, min, max, unit, today, periodExpanded, doneToday);
+    }
     const minDays = Math.max(1, localDaysBetween(today, addInterval(today, min, unit)));
     const maxDays = Math.max(minDays, localDaysBetween(today, addInterval(today, max, unit)));
     return {
@@ -1199,6 +1301,13 @@ export function formatRecurringDueSubtitle(
       }
       case 'before_min': {
         const until = Math.max(1, progress.daysUntilOpen ?? 1);
+        if (progress.nextOpenDateStr) {
+          const label = formatAnnualNextStart(
+            parseDate(progress.nextOpenDateStr),
+            startOfDay(now).getFullYear()
+          );
+          return `Starts ${label} (in ${formatDurationSpan(until)}) · ${period}`;
+        }
         return `Opens in ${formatDurationSpan(until)} · ${period}`;
       }
     }

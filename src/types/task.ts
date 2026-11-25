@@ -66,6 +66,11 @@ export interface Task {
   dueAt?: string | null;
   /** Inception/start date (YYYY-MM-DD) of the recurring schedule. Preserved across occurrence completions and skips. */
   startDate?: string | null;
+  /**
+   * First day an approximate min–max window opens when nothing has been completed yet (YYYY-MM-DD).
+   * A completion overrides it until that completion is removed. Absent on older tasks.
+   */
+  firstOpenDate?: string | null;
   /** @deprecated Priority UI has been removed. Field retained for sync schema compatibility. */
   priority?: TaskPriority;
   /** @deprecated Pinned UI has been removed. Field retained for sync schema compatibility. */

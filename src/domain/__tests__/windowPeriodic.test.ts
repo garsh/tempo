@@ -534,3 +534,131 @@ describe('Approximate Window Periodic & Undated One-Time Domain Logic', () => {
     });
   });
 });
+
+describe('first open date for approximate tasks', () => {
+  const months: RecurrenceRule = {
+    type: 'after_completion',
+    intervalValue: 3,
+    maxIntervalValue: 6,
+    intervalUnit: 'months',
+  };
+
+  it('waits until the first open day, then runs a window of max minus min', () => {
+    const task = makeWindowTask('filter', 'Replace filter', months, [], {
+      firstOpenDate: '2026-06-01',
+    });
+    const may20 = new Date(2026, 4, 20, 12, 0);
+    const before = getWindowProgress(task, may20)!;
+    expect(before.stage).toBe('before_min');
+    expect(before.visibleInTasks).toBe(false);
+    expect(before.ringFill).toBe(0);
+    expect(before.daysUntilOpen).toBe(12);
+    expect(before.nextOpenDateStr).toBe('2026-06-01');
+    expect(formatRecurringDueSubtitle(task, before, may20)).toBe(
+      'Starts Jun 1 (in 12 days) · every 3–6 months'
+    );
+    expect(taskOccursOnDate(task, '2026-06-01')).toBe(false);
+
+    const june1 = new Date(2026, 5, 1, 12, 0);
+    const opened = getWindowProgress(task, june1)!;
+    expect(opened.stage).toBe('in_window');
+    expect(opened.visibleInTasks).toBe(true);
+    expect(opened.daysUntilOpen).toBe(0);
+    expect(opened.daysUntilMax).toBe(92);
+    expect(opened.ringFill).toBe(0.08);
+    expect(formatRecurringDueSubtitle(task, opened, june1)).toBe('92 days left · every 3–6 months');
+
+    const sept1 = new Date(2026, 8, 1, 12, 0);
+    const lastDay = getWindowProgress(task, sept1)!;
+    expect(lastDay.stage).toBe('at_or_past_max');
+    expect(lastDay.daysUntilMax).toBe(0);
+    expect(formatRecurringDueSubtitle(task, lastDay, sept1)).toBe(
+      'Last day of window · every 3–6 months'
+    );
+
+    const sept2 = new Date(2026, 8, 2, 12, 0);
+    const overdue = getWindowProgress(task, sept2)!;
+    expect(overdue.stage).toBe('at_or_past_max');
+    expect(overdue.daysUntilMax).toBe(-1);
+    expect(formatRecurringDueSubtitle(task, overdue, sept2)).toBe('1 day overdue · every 3–6 months');
+  });
+
+  it('treats a tight min and max as due on the open day', () => {
+    const task = makeWindowTask(
+      'tight',
+      'Tight',
+      { type: 'after_completion', intervalValue: 3, maxIntervalValue: 3, intervalUnit: 'days' },
+      [],
+      { firstOpenDate: '2026-06-01' }
+    );
+    const may31 = new Date(2026, 4, 31, 9, 0);
+    expect(getWindowProgress(task, may31)!.stage).toBe('before_min');
+    const june1 = new Date(2026, 5, 1, 9, 0);
+    const due = getWindowProgress(task, june1)!;
+    expect(due.stage).toBe('at_or_past_max');
+    expect(due.daysUntilMax).toBe(0);
+    expect(formatRecurringDueSubtitle(task, due, june1)).toBe('Due today · every 3 days');
+    const june2 = new Date(2026, 5, 2, 9, 0);
+    expect(getWindowProgress(task, june2)!.daysUntilMax).toBe(-1);
+  });
+
+  it('keeps an undated approximate task as not done yet, and ignores a bad date', () => {
+    const bare = makeWindowTask('bare', 'Bare', months, []);
+    expect(getWindowProgress(bare, new Date(2026, 5, 1, 12, 0))!.stage).toBe('not_done_yet');
+    const bad = makeWindowTask('bad', 'Bad', months, [], { firstOpenDate: 'June 1' });
+    expect(getWindowProgress(bad, new Date(2026, 5, 1, 12, 0))!.stage).toBe('not_done_yet');
+  });
+
+  it('lets a completion override the first open date', () => {
+    const doneOnJune20 = new Date(2026, 5, 20, 12, 0).getTime();
+    const task = makeWindowTask('done', 'Filter', months, [doneOnJune20], {
+      firstOpenDate: '2026-06-01',
+    });
+    const progress = getWindowProgress(task, new Date(2026, 5, 20, 15, 0))!;
+    expect(progress.stage).toBe('before_min');
+    expect(progress.lastDoneMs).toBe(doneOnJune20);
+    expect(progress.nextOpenDateStr).toBeNull();
+    expect(progress.visibleInTasks).toBe(false);
+  });
+
+  it('stops when the end date has passed, even if the first open day is later', () => {
+    const task = makeWindowTask(
+      'ended',
+      'Ended',
+      { ...months, endOnDate: '2026-05-01' },
+      [],
+      { firstOpenDate: '2026-06-01' }
+    );
+    expect(getWindowProgress(task, new Date(2026, 5, 2, 12, 0))!.stage).toBe('stopped');
+    expect(getWindowProgress(task, new Date(2026, 3, 15, 12, 0))!.stage).toBe('before_min');
+  });
+
+  it('uses addInterval for the first window end, including a short month', () => {
+    const task = makeWindowTask(
+      'jan',
+      'January',
+      { type: 'after_completion', intervalValue: 1, maxIntervalValue: 3, intervalUnit: 'months' },
+      [],
+      { firstOpenDate: '2026-01-31' }
+    );
+    expect(getWindowProgress(task, new Date(2026, 2, 30, 12, 0))!.stage).toBe('in_window');
+    const march31 = getWindowProgress(task, new Date(2026, 2, 31, 12, 0))!;
+    expect(march31.stage).toBe('at_or_past_max');
+    expect(march31.daysUntilMax).toBe(0);
+  });
+
+  it('does not move the open day when the maximum changes', () => {
+    const task = makeWindowTask(
+      'shorter',
+      'Shorter',
+      { ...months, maxIntervalValue: 4 },
+      [],
+      { firstOpenDate: '2026-06-01' }
+    );
+    expect(getWindowProgress(task, new Date(2026, 4, 20, 12, 0))!.stage).toBe('before_min');
+    const july1 = new Date(2026, 6, 1, 12, 0);
+    const last = getWindowProgress(task, july1)!;
+    expect(last.stage).toBe('at_or_past_max');
+    expect(last.daysUntilMax).toBe(0);
+  });
+});

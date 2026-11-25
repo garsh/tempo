@@ -591,4 +591,60 @@ describe('Annual time-of-year db persistence', () => {
     expect(uncompleted?.completionHistory).toEqual([]);
     expect(uncompleted?.recurrence).toEqual(rule);
   });
+
+  it('keeps an approximate firstOpenDate across save, complete, and uncomplete', async () => {
+    const saved = await saveTask({
+      title: 'Replace filter',
+      dueAt: '2026-01-01',
+      firstOpenDate: '2026-06-01',
+      recurrence: {
+        type: 'after_completion',
+        intervalValue: 3,
+        maxIntervalValue: 6,
+        intervalUnit: 'months',
+      },
+    });
+    expect(saved.dueAt).toBeNull();
+    expect(saved.startDate).toBeNull();
+    expect(saved.firstOpenDate).toBe('2026-06-01');
+
+    const completed = await completeTask(saved.id, '2026-06-20');
+    expect(completed?.firstOpenDate).toBe('2026-06-01');
+    expect(completed?.completionHistory).toHaveLength(1);
+
+    const undone = await uncompleteTask(saved.id, '2026-06-20');
+    expect(undone?.completionHistory).toEqual([]);
+    expect(undone?.firstOpenDate).toBe('2026-06-01');
+
+    const fixed = await saveTask({
+      id: saved.id,
+      title: 'Replace filter',
+      dueAt: '2026-06-01',
+      recurrence: { type: 'fixed_interval', intervalValue: 3, intervalUnit: 'months' },
+    });
+    expect(fixed.firstOpenDate).toBeNull();
+    expect(fixed.dueAt).toBe('2026-06-01');
+
+    const restored = await saveTask({
+      id: saved.id,
+      title: 'Replace filter',
+      firstOpenDate: '2026-08-01',
+      recurrence: {
+        type: 'after_completion',
+        intervalValue: 3,
+        maxIntervalValue: 6,
+        intervalUnit: 'months',
+      },
+    });
+    expect(restored.firstOpenDate).toBe('2026-08-01');
+    expect(restored.dueAt).toBeNull();
+
+    const cleared = await saveTask({
+      id: saved.id,
+      title: 'Replace filter',
+      firstOpenDate: null,
+      recurrence: restored.recurrence,
+    });
+    expect(cleared.firstOpenDate).toBeNull();
+  });
 });

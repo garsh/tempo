@@ -187,6 +187,39 @@ describe('Merge & Conflict Resolution Engine', () => {
     expect(merged[0].startDate).toBeNull();
   });
 
+  it('keeps an approximate firstOpenDate when the other copy omits it, and lets a newer explicit clear win', () => {
+    const dated: Task = {
+      id: 'approx-open',
+      title: 'Filter',
+      dueAt: null,
+      startDate: null,
+      firstOpenDate: '2026-06-01',
+      recurrence: {
+        type: 'after_completion',
+        intervalValue: 3,
+        maxIntervalValue: 6,
+        intervalUnit: 'months',
+      },
+      completionHistory: [],
+      createdAt: 1000,
+      updatedAt: 2000,
+    };
+    const renamed = { ...dated, title: 'Furnace filter', updatedAt: 5000 };
+    delete renamed.firstOpenDate;
+    const kept = mergeTasks([dated], [renamed]);
+    expect(kept[0].title).toBe('Furnace filter');
+    expect(kept[0].firstOpenDate).toBe('2026-06-01');
+
+    const cleared: Task = { ...dated, firstOpenDate: null, title: 'Cleared', updatedAt: 6000 };
+    expect(mergeTasks([dated], [cleared])[0].firstOpenDate).toBeNull();
+
+    const olderClear: Task = { ...dated, firstOpenDate: null, updatedAt: 1000 };
+    expect(mergeTasks([dated], [olderClear])[0].firstOpenDate).toBe('2026-06-01');
+
+    const newerDate: Task = { ...dated, firstOpenDate: '2026-07-01', updatedAt: 7000 };
+    expect(mergeTasks([dated], [newerDate])[0].firstOpenDate).toBe('2026-07-01');
+  });
+
   it('unions removedSkippedDates tombstones so unskipped dates do not resurrect and preserves winner rescheduledDates/scheduleHistory', () => {
     const local: Task = {
       id: 'rec-merge-1',

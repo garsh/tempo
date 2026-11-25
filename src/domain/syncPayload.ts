@@ -410,6 +410,11 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
     task.dueAt = null;
     task.startDate = null;
   }
+  if (typeof record.firstOpenDate === 'string' && DATE_RE.test(record.firstOpenDate)) {
+    task.firstOpenDate = record.firstOpenDate;
+  } else if (record.firstOpenDate === null) {
+    task.firstOpenDate = null;
+  }
   const removedCompletions = asHistory(record.removedCompletions);
   if (removedCompletions.length > 0) task.removedCompletions = removedCompletions;
   const completedAt = asOptionalStamp(record.completedAt, now);
@@ -561,6 +566,8 @@ function compactTaskForSync(task: Task): Task {
   if (task.notes) compact.notes = task.notes;
   if (task.dueAt) compact.dueAt = task.dueAt;
   if (task.startDate) compact.startDate = task.startDate;
+  if (typeof task.firstOpenDate === 'string') compact.firstOpenDate = task.firstOpenDate;
+  else if (task.firstOpenDate === null) compact.firstOpenDate = null;
   if (task.priority && task.priority !== 'none') compact.priority = task.priority;
   if (task.pinned === true) compact.pinned = true;
   if (task.tags && task.tags.length > 0) compact.tags = task.tags;

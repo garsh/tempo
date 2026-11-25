@@ -89,6 +89,45 @@ describe('parseSyncPayload', () => {
     expect(() => parseSyncPayload('{"tasks":[]}', { maxBytes: 4, now })).toThrow(/too large/);
   });
 
+  it('keeps an approximate firstOpenDate, an explicit null, and a missing value distinct', () => {
+    const recurrence = {
+      type: 'after_completion',
+      intervalValue: 3,
+      maxIntervalValue: 6,
+      intervalUnit: 'months',
+    };
+    const parsed = parseSyncPayload(
+      JSON.stringify({
+        tasks: [
+          task(10, {
+            id: 'dated',
+            recurrence,
+            firstOpenDate: '2026-06-01',
+            dueAt: '2026-06-01',
+            startDate: '2026-01-01',
+          }),
+          task(10, { id: 'cleared', recurrence, firstOpenDate: null }),
+          task(10, { id: 'legacy', recurrence }),
+          task(10, { id: 'bogus', recurrence, firstOpenDate: 'next june' }),
+        ],
+      }),
+      { now }
+    );
+    const byId = new Map(parsed.tasks.map((item) => [item.id, item]));
+    expect(byId.get('dated')?.firstOpenDate).toBe('2026-06-01');
+    expect(byId.get('dated')?.dueAt).toBeNull();
+    expect(byId.get('dated')?.startDate).toBeNull();
+    expect(byId.get('cleared')?.firstOpenDate).toBeNull();
+    expect(byId.get('legacy')?.firstOpenDate).toBeUndefined();
+    expect(byId.get('bogus')?.firstOpenDate).toBeUndefined();
+
+    const compacted = compactSyncData({ version: 1, exportedAt: now, tasks: parsed.tasks });
+    const compactById = new Map(compacted.tasks.map((item) => [item.id, item]));
+    expect(compactById.get('dated')?.firstOpenDate).toBe('2026-06-01');
+    expect(compactById.get('cleared')?.firstOpenDate).toBeNull();
+    expect(compactById.get('legacy')?.firstOpenDate).toBeUndefined();
+  });
+
   it('caps notes and does not copy a __proto__ key onto the task', () => {
     const body = JSON.stringify({ tasks: [task(10, { notes: 'x'.repeat(20_000) })] }).replace(
       '"notes":',

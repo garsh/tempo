@@ -16,13 +16,15 @@ interface DateChoiceMenuProps {
   anchorRef: RefObject<HTMLElement | null>;
   active: DatePreset;
   dateValue: string;
-  mode?: 'due' | 'last_done';
+  mode?: 'due' | 'last_done' | 'first_open';
   allowNoDate?: boolean;
   maxDate?: string;
   onClose: () => void;
   onToday: () => void;
   onTomorrow?: () => void;
   onNoDate?: () => void;
+  /** Approximate tasks: switch this menu to the past-only last-done picker. */
+  onAlreadyDone?: () => void;
   onDatePicked: (value: string) => void;
 }
 
@@ -43,12 +45,13 @@ export function DateChoiceMenu({
   onToday,
   onTomorrow,
   onNoDate,
+  onAlreadyDone,
   onDatePicked,
 }: DateChoiceMenuProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const itemCount =
-    mode === 'last_done' ? 3 : allowNoDate && onNoDate ? 4 : 3;
+    mode === 'last_done' ? 3 : mode === 'first_open' ? 5 : allowNoDate && onNoDate ? 4 : 3;
   const menuHeight = 44 * itemCount + 19;
   const pos = useAnchoredMenu({
     open,
@@ -87,13 +90,58 @@ export function DateChoiceMenu({
         ref={cardRef}
         role="menu"
         id="date-choice-menu"
-        aria-label={mode === 'last_done' ? 'Choose last done date' : 'Choose a date'}
+        aria-label={
+          mode === 'last_done'
+            ? 'Choose last done date'
+            : mode === 'first_open'
+              ? 'Choose when it starts'
+              : 'Choose a date'
+        }
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => handleMenuArrowKeyDown(e, cardRef.current)}
         className="absolute w-[196px] rounded-[16px] bg-tt-menu pt-[10px] pb-[9px] shadow-[0_6px_28px_var(--tt-shadow),0_1px_4px_var(--tt-shadow)]"
         style={{ top: pos.top, left: pos.left }}
       >
-        {mode === 'last_done' ? (
+        {mode === 'first_open' ? (
+          <>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'today'}
+              className={row}
+              onClick={choose(onToday)}
+            >
+              Today
+              {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'tomorrow'}
+              className={row}
+              onClick={choose(onTomorrow)}
+            >
+              Tomorrow
+              {active === 'tomorrow' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button type="button" role="menuitem" className={row} onClick={openDatePicker}>
+              Select
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'none'}
+              className={row}
+              onClick={choose(onNoDate)}
+            >
+              No start date
+              {active === 'none' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button type="button" role="menuitem" className={row} onClick={() => onAlreadyDone?.()}>
+              Already done
+            </button>
+          </>
+        ) : mode === 'last_done' ? (
           <>
             <button
               type="button"

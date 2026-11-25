@@ -17,6 +17,7 @@ import {
   getRuleActiveOnDate,
   getSkipOccurrenceDate,
   getWindowBounds,
+  normalizeFirstOpenDate,
   hasDueTime,
   isCompleted,
   isCompletedOnDate,
@@ -190,6 +191,23 @@ export async function clearAllData(): Promise<number> {
   return removedTasks;
 }
 
+/**
+ * Approximate tasks keep `firstOpenDate`. Every other kind clears a stored value
+ * and otherwise leaves the field absent so older rows stay unchanged.
+ */
+function resolveFirstOpenDate(
+  rule: Task['recurrence'],
+  incoming: string | null | undefined,
+  existing: string | null | undefined
+): string | null | undefined {
+  if (rule?.type !== 'after_completion') {
+    if (incoming === undefined && (existing === undefined || existing === null)) return undefined;
+    return null;
+  }
+  if (incoming !== undefined) return normalizeFirstOpenDate(incoming) ?? null;
+  return existing;
+}
+
 function normalizeRecurrenceForSave(
   rule: Task['recurrence'] | undefined
 ): Task['recurrence'] {
@@ -262,6 +280,11 @@ export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Prom
           completionHistory: existing?.completionHistory || [],
         });
       }
+      const nextFirstOpenDate = resolveFirstOpenDate(
+        recurrenceRule,
+        task.firstOpenDate,
+        existing?.firstOpenDate
+      );
 
       const effectiveDateChanged =
         prevIsFixed && nextIsFixed
@@ -295,6 +318,7 @@ export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Prom
         id: taskId,
         dueAt: nextDue,
         startDate: nextStartDate,
+        ...(nextFirstOpenDate !== undefined ? { firstOpenDate: nextFirstOpenDate } : {}),
         sortOrder:
           task.sortOrder !== undefined
             ? task.sortOrder
@@ -337,11 +361,13 @@ export async function saveTask(task: TaskInput, options?: SaveTaskOptions): Prom
   if (!isWindow && recurrenceRule && !initialStartDate) {
     initialStartDate = task.dueAt ? getDueDatePart(task.dueAt) : formatDate(new Date(now));
   }
+  const initialFirstOpenDate = resolveFirstOpenDate(recurrenceRule, task.firstOpenDate, undefined);
   const fullTask: Task = {
     title: task.title,
     notes: task.notes,
     dueAt: isWindow ? null : task.dueAt ?? null,
     startDate: initialStartDate,
+    ...(initialFirstOpenDate !== undefined ? { firstOpenDate: initialFirstOpenDate } : {}),
     priority: task.priority,
     pinned: task.pinned,
     tags: task.tags,

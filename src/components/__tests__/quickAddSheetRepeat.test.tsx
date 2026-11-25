@@ -3,6 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QuickAddSheet } from '../QuickAddSheet';
+import { formatDate } from '../../domain/recurrence';
 import { type Task } from '../../types/task';
 
 function mount(ui: ReactElement) {
@@ -275,7 +276,7 @@ describe('QuickAddSheet recurrence UI', () => {
     });
 
     openRepeatChoice(view.container, 'Approximately');
-    expect(view.container.querySelector('button[aria-label="Last done"]')?.textContent).toContain('Not done yet');
+    expect(view.container.querySelector('button[aria-label="Starts"]')?.textContent).toContain('Starts');
 
     const minInput = view.container.querySelector<HTMLInputElement>('#repeat-min-input')!;
     const maxInput = view.container.querySelector<HTMLInputElement>('#repeat-max-input')!;
@@ -311,6 +312,7 @@ describe('QuickAddSheet recurrence UI', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0];
     expect(saved.dueAt).toBeNull();
+    expect(saved.firstOpenDate).toBe(formatDate(new Date()));
     expect(saved.recurrence).toEqual({
       type: 'after_completion',
       intervalValue: 7,
@@ -318,6 +320,72 @@ describe('QuickAddSheet recurrence UI', () => {
       intervalUnit: 'days',
       endOnDate: '2026-10-31',
     });
+
+    view.unmount();
+  });
+
+  it('sets, clears, and converts the first open day of an approximate task', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 1, 12, 0));
+    const onSave = vi.fn();
+    const view = mount(
+      <QuickAddSheet isOpen={true} onSave={onSave} onClose={vi.fn()} defaultDueAt={null} />
+    );
+
+    const titleInput = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Routine title"]');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(titleInput, 'Replace filter');
+      titleInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    openRepeatChoice(view.container, 'Approximately');
+    const startsBtn = view.container.querySelector<HTMLButtonElement>('button[aria-label="Starts"]')!;
+    expect(startsBtn.textContent).toContain('Starts Today');
+
+    act(() => {
+      startsBtn.click();
+    });
+    const menu = view.container.querySelector('#date-choice-menu')!;
+    const tomorrow = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((el) =>
+      el.textContent?.includes('Tomorrow')
+    )!;
+    act(() => {
+      tomorrow.click();
+    });
+    expect(view.container.querySelector('button[aria-label="Starts"]')?.textContent).toContain('Starts Tomorrow');
+
+    act(() => {
+      view.container.querySelector<HTMLButtonElement>('button[aria-label="Starts"]')!.click();
+    });
+    const noStart = Array.from(
+      view.container.querySelectorAll<HTMLButtonElement>('#date-choice-menu [role="menuitemradio"]')
+    ).find((el) => el.textContent?.includes('No start date'))!;
+    act(() => {
+      noStart.click();
+    });
+    expect(view.container.querySelector('button[aria-label="Starts"]')?.textContent).toContain('Not done yet');
+
+    act(() => {
+      view.container.querySelector<HTMLButtonElement>('button[aria-label="Starts"]')!.click();
+    });
+    const dateInput = view.container.querySelector<HTMLInputElement>('#date-choice-menu input[aria-label="Select"]')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(dateInput, '2026-06-15');
+      dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+      dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(view.container.querySelector('button[aria-label="Starts"]')?.textContent).toContain('Jun 15');
+
+    openRepeatChoice(view.container, 'On fixed interval');
+    const createBtn = view.container.querySelector<HTMLButtonElement>('button[aria-label="Create routine"]')!;
+    await act(async () => {
+      createBtn.click();
+    });
+    expect(onSave.mock.calls[0][0].dueAt).toBe('2026-06-15');
+    expect(onSave.mock.calls[0][0].recurrence.type).toBe('fixed_interval');
+    expect(onSave.mock.calls[0][0].firstOpenDate).toBeUndefined();
 
     view.unmount();
   });

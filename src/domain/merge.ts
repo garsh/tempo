@@ -145,6 +145,29 @@ function resolveConflict<T extends Mergeable>(
   return mergeExtras ? mergeExtras(local, remote, base) : base;
 }
 
+/**
+ * A missing `firstOpenDate` means that copy did not know about the field.
+ * An explicit null is a clear. Two known values follow `updatedAt` (local wins a tie).
+ * Non-approximate tasks drop a stored date.
+ */
+function pickFirstOpenDate(local: Task, remote: Task, winner: Task): string | null | undefined {
+  if (winner.recurrence?.type !== 'after_completion') {
+    if (local.firstOpenDate == null && remote.firstOpenDate == null && winner.firstOpenDate == null) {
+      return undefined;
+    }
+    return null;
+  }
+  const left = local.firstOpenDate;
+  const right = remote.firstOpenDate;
+  const leftKnown = left !== undefined;
+  const rightKnown = right !== undefined;
+  if (!leftKnown && !rightKnown) return undefined;
+  if (leftKnown && !rightKnown) return left;
+  if (!leftKnown && rightKnown) return right;
+  if (left === right) return left;
+  return local.updatedAt >= remote.updatedAt ? left : right;
+}
+
 export function mergeTasks(
   localTasks: Task[],
   remoteTasks: Task[],
@@ -216,10 +239,12 @@ export function mergeTasks(
 
       const isWindow = isWindowPeriodic(winner);
       const isFixed = !isWindow && !!winner.recurrence;
+      const firstOpenDate = pickFirstOpenDate(local, remote, winner);
 
-      return {
+      const merged: Task = {
         ...winner,
         startDate: isFixed ? winner.startDate || local.startDate || remote.startDate || null : null,
+        ...(firstOpenDate !== undefined ? { firstOpenDate } : {}),
         completionHistory: allCompletions,
         ...(allRemoved.length > 0 ? { removedCompletions: allRemoved } : { removedCompletions: undefined }),
         skippedDates: allSkipped,
@@ -236,6 +261,8 @@ export function mergeTasks(
           ? { scheduleHistory: winner.scheduleHistory }
           : { scheduleHistory: undefined }),
       };
+      if (firstOpenDate === undefined) delete merged.firstOpenDate;
+      return merged;
     },
     options
   );
