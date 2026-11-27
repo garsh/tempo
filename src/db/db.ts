@@ -41,6 +41,7 @@ import { MAX_HISTORY } from '../domain/syncPayload';
 import type { NewTaskPosition } from '../prefs/prefs';
 import { getGoogleAccount } from '../sync/googleAccount';
 import { setTombstonesPrunedBefore } from '../sync/syncWatermark';
+import { SHARE_CACHE } from '../pwa/shareText';
 import { buildSampleData, isSampleId } from './sampleData';
 
 export { buildSampleData, isSampleId, SAMPLE_ID_PREFIX } from './sampleData';
@@ -134,6 +135,17 @@ export async function loadSampleTasks(nowDate: Date = new Date()): Promise<numbe
   return tasks.length;
 }
 
+function toTombstone(task: Task, now: number): Task {
+  return {
+    id: task.id,
+    title: '',
+    completionHistory: [],
+    createdAt: task.createdAt,
+    updatedAt: now,
+    deletedAt: now,
+  };
+}
+
 /**
  * Settings → "Clear sample tasks": soft-delete (tombstone) every demo task so the
  * removal also propagates through Drive sync.
@@ -144,7 +156,7 @@ export async function clearSampleTasks(): Promise<number> {
   await db.transaction('rw', db.tasks, async () => {
     const tasks = (await db.tasks.toArray()).filter((t) => isSampleId(t.id) && !t.deletedAt);
     removed = tasks.length;
-    await db.tasks.bulkPut(tasks.map((t) => ({ ...t, deletedAt: now, updatedAt: now })));
+    await db.tasks.bulkPut(tasks.map((t) => toTombstone(t, now)));
   });
   recordDiagEvent('clear_sample', `removed=${removed}`);
   return removed;
@@ -178,15 +190,18 @@ export async function getClearAllDataPreview(): Promise<ClearAllDataPreview> {
  */
 export async function clearAllData(): Promise<number> {
   const now = Date.now();
-  const markDeleted = <T extends { deletedAt?: number | null; updatedAt: number }>(items: T[]): T[] =>
-    items.filter((x) => !x.deletedAt).map((x) => ({ ...x, deletedAt: now, updatedAt: now }));
 
   let removedTasks = 0;
   await db.transaction('rw', db.tasks, async () => {
-    const tasks = markDeleted(await db.tasks.toArray());
+    const tasks = (await db.tasks.toArray())
+      .filter((x) => !x.deletedAt)
+      .map((x) => toTombstone(x, now));
     removedTasks = tasks.length;
     if (tasks.length) await db.tasks.bulkPut(tasks);
   });
+  if (typeof caches !== 'undefined') {
+    await caches.delete(SHARE_CACHE).catch(() => undefined);
+  }
   recordDiagEvent('clear_all_data', `removedTasks=${removedTasks}`);
   return removedTasks;
 }
@@ -1436,13 +1451,10 @@ export async function softDeleteTask(id: string): Promise<Task | null> {
     if (!task) return null;
 
     const now = Date.now();
-    const updated: Task = {
-      ...task,
-      deletedAt: now,
-      updatedAt: now,
-    };
+    const titleSnippet = task.title.slice(0, 30);
+    const updated = toTombstone(task, now);
     await db.tasks.put(updated);
-    recordDiagEvent('delete_task', `id=${id} title=${task.title.slice(0, 30)}`);
+    recordDiagEvent('delete_task', `id=${id} title=${titleSnippet}`);
     return updated;
   });
 }

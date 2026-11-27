@@ -48,15 +48,17 @@ import {
   jumpToToday,
   readStoredActiveView,
   readStoredCalendarExpanded,
+  readStoredCalendarSelectedDate,
   saveStoredActiveView,
   saveStoredCalendarExpanded,
+  saveStoredCalendarSelectedDate,
   shiftWeek,
   stepCalendarView,
   type ActiveMainView,
   type CalendarSwipeEvent,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
-import { shareTextFromParts, takeSharedText } from './pwa/shareText';
+import { takeSharedText } from './pwa/shareText';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useCalendarPullGesture } from './hooks/useCalendarPullGesture';
@@ -143,13 +145,26 @@ export function App() {
 
   const todayKey = useTodayKey();
   const todayDate = useMemo(() => parseDate(todayKey), [todayKey]);
-  const [calYear, setCalYear] = useState(() => parseDate(todayKey).getFullYear());
-  const [calMonth, setCalMonth] = useState(() => parseDate(todayKey).getMonth());
-  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(todayKey);
+  const [calSelectedDate, setCalSelectedDate] = useState<string | null>(() =>
+    readStoredCalendarSelectedDate(todayKey)
+  );
+  const [calYear, setCalYear] = useState(() =>
+    parseDate(calSelectedDate ?? todayKey).getFullYear()
+  );
+  const [calMonth, setCalMonth] = useState(() =>
+    parseDate(calSelectedDate ?? todayKey).getMonth()
+  );
   const [calExpanded, setCalExpanded] = useState<boolean>(readStoredCalendarExpanded);
   const [isMonthYearPickerOpen, setIsMonthYearPickerOpen] = useState(false);
 
   const prevTodayKeyRef = useRef(todayKey);
+  useEffect(() => {
+    if (prevTodayKeyRef.current !== todayKey && calSelectedDate === prevTodayKeyRef.current) {
+      return;
+    }
+    saveStoredCalendarSelectedDate(calSelectedDate, todayKey);
+  }, [calSelectedDate, todayKey]);
+
   useEffect(() => {
     const prevKey = prevTodayKeyRef.current;
     if (prevKey === todayKey) return;
@@ -280,25 +295,20 @@ export function App() {
     })();
   }, []);
 
-  // PWA Web Share Target. Production posts to /share and the service worker
-  // stashes the note. A length-capped query string remains for older links.
+  // PWA Web Share Target: production posts to /share and the service worker stashes the note.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       const stashed = await takeSharedText();
       const params = new URLSearchParams(window.location.search);
       const hasShareQuery = ['share', 'text', 'title', 'url'].some((key) => params.has(key));
-      const fromQuery = hasShareQuery
-        ? shareTextFromParts(params.get('title'), params.get('text'), params.get('url'))
-        : '';
       if (hasShareQuery) {
         const url = new URL(window.location.href);
         ['share', 'text', 'title', 'url'].forEach((key) => url.searchParams.delete(key));
         window.history.replaceState({}, '', url.pathname + url.search);
       }
-      const combined = stashed || fromQuery;
-      if (cancelled || !combined) return;
-      setEditingTask({ title: combined } as Task);
+      if (cancelled || !stashed) return;
+      setEditingTask({ title: stashed } as Task);
       setIsTaskModalOpen(true);
     })();
     return () => {

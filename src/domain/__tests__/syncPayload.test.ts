@@ -578,4 +578,72 @@ describe('compactSyncData', () => {
       '2026-11-22': now,
     });
   });
+
+  it('rejects impossible calendar dates, extreme years, and out-of-range completion timestamps', () => {
+    const parsed = parseSyncPayload(
+      JSON.stringify({
+        tasks: [
+          task(10, {
+            dueAt: '0100-01-01',
+            startDate: '2026-02-30',
+            firstOpenDate: '0000-00-00',
+            completionHistory: [1e20, -1e20, Date.UTC(1800, 0, 1), Date.UTC(2300, 0, 1), 1_700_000_000_000],
+            removedCompletions: [-1e20, 500],
+            recurrence: {
+              type: 'fixed_interval',
+              intervalValue: 1,
+              intervalUnit: 'days',
+              endOnDate: '2026-13-01',
+            },
+            skippedDates: ['2026-02-29', '2026-11-10'],
+            removedSkippedDates: ['not-a-date', '2026-11-01'],
+            rescheduledDates: {
+              '2026-02-30': '2026-11-25',
+              '2026-11-20': '9999-99-99',
+              '2026-11-21': '2026-11-22',
+            },
+            scheduleHistory: [
+              {
+                startDate: '-200000-01-01',
+                endDate: '2026-11-20',
+                recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+              },
+              {
+                startDate: '2026-11-01',
+                endDate: '2026-11-15',
+                recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+              },
+            ],
+          }),
+          task(10, {
+            id: 'valid-datetime',
+            dueAt: '2026-11-27T08:30',
+            startDate: '2026-11-01',
+          }),
+          task(10, {
+            id: 'bad-time',
+            dueAt: '2026-11-27T25:99',
+          }),
+        ],
+      }),
+      { now }
+    );
+
+    const first = parsed.tasks[0]!;
+    expect(first.dueAt).toBeUndefined();
+    expect(first.startDate).toBeUndefined();
+    expect(first.firstOpenDate).toBeUndefined();
+    expect(first.completionHistory).toEqual([1_700_000_000_000]);
+    expect(first.removedCompletions).toEqual([500]);
+    expect(first.recurrence?.endOnDate).toBeUndefined();
+    expect(first.skippedDates).toEqual(['2026-11-10']);
+    expect(first.removedSkippedDates).toEqual(['2026-11-01']);
+    expect(first.rescheduledDates).toEqual({ '2026-11-21': '2026-11-22' });
+    expect(first.scheduleHistory).toHaveLength(1);
+    expect(first.scheduleHistory?.[0]?.startDate).toBe('2026-11-01');
+
+    expect(parsed.tasks[1]?.dueAt).toBe('2026-11-27T08:30');
+    expect(parsed.tasks[1]?.startDate).toBe('2026-11-01');
+    expect(parsed.tasks[2]?.dueAt).toBeUndefined();
+  });
 });

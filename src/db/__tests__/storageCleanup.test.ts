@@ -7,6 +7,9 @@ import {
   findImportedCompletedTaskIds,
   getStorageCleanupPreview,
   repairAndDeduplicateDatabase,
+  clearSampleTasks,
+  clearAllData,
+  softDeleteTask,
 } from '../db';
 import { TOMBSTONE_TTL_MS } from '../../domain/merge';
 import * as googleAccount from '../../sync/googleAccount';
@@ -31,6 +34,8 @@ describe('storage cleanup & database repair', () => {
       toArray: () => Promise<T[]>;
       bulkPut: (items: T[]) => Promise<void>;
       bulkDelete: (ids: string[]) => Promise<void>;
+      get: (id: string) => Promise<T | undefined>;
+      put: (item: T) => Promise<void>;
     };
     vi.spyOn(t, 'toArray').mockImplementation(async () =>
       Array.from(map.values()).map((item) => structuredClone(item))
@@ -40,6 +45,10 @@ describe('storage cleanup & database repair', () => {
     });
     vi.spyOn(t, 'bulkDelete').mockImplementation(async (ids: string[]) => {
       for (const id of ids) map.delete(id);
+    });
+    vi.spyOn(t, 'get').mockImplementation(async (id: string) => map.get(id));
+    vi.spyOn(t, 'put').mockImplementation(async (item: T) => {
+      map.set(item.id, structuredClone(item));
     });
   };
 
@@ -56,6 +65,7 @@ describe('storage cleanup & database repair', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     localStorage.clear();
   });
@@ -164,5 +174,90 @@ describe('storage cleanup & database repair', () => {
     expect(signedInRepair.purgedTombstones).toBe(1);
     expect(Array.from(taskStore.keys())).toEqual(['active', 'expired-del', 'recent-del']);
     expect(getTombstonesPrunedBefore()).toBe(now - TOMBSTONE_TTL_MS);
+  });
+
+  it('softDeleteTask strips sensitive fields on local IndexedDB tombstones', async () => {
+    const now = 1_795_461_688_588;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    const task = makeTask('task-1', {
+      title: 'Sensitive Task',
+      notes: 'This is a sensitive note.',
+      subtasks: [{ id: 'sub-1', title: 'Subtask 1', completed: false }],
+      tags: ['tag1', 'tag2'],
+    });
+    taskStore.set(task.id, task);
+
+    await softDeleteTask(task.id);
+
+    const tombstone = taskStore.get(task.id);
+    expect(tombstone).toEqual({
+      id: task.id,
+      title: '',
+      completionHistory: [],
+      createdAt: task.createdAt,
+      updatedAt: now,
+      deletedAt: now,
+    });
+  });
+
+  it('clearSampleTasks strips sensitive fields on local IndexedDB tombstones', async () => {
+    const now = 1_795_461_688_588;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    const sampleTask = makeTask('demo-1', {
+      title: 'Sample Task',
+      notes: 'This is a sample note.',
+      subtasks: [{ id: 'sub-1', title: 'Subtask 1', completed: false }],
+      tags: ['tag1', 'tag2'],
+    });
+    taskStore.set(sampleTask.id, sampleTask);
+
+    await clearSampleTasks();
+
+    const tombstone = taskStore.get(sampleTask.id);
+    expect(tombstone).toEqual({
+      id: sampleTask.id,
+      title: '',
+      completionHistory: [],
+      createdAt: sampleTask.createdAt,
+      updatedAt: now,
+      deletedAt: now,
+    });
+  });
+
+  it('clearAllData strips sensitive fields on local IndexedDB tombstones and deletes the "tempo-share" cache', async () => {
+    const now = 1_795_461_688_588;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    const task = makeTask('task-1', {
+      title: 'Sensitive Task',
+      notes: 'This is a sensitive note.',
+      subtasks: [{ id: 'sub-1', title: 'Subtask 1', completed: false }],
+      tags: ['tag1', 'tag2'],
+    });
+    taskStore.set(task.id, task);
+
+    const cachesStub = {
+      delete: vi.fn().mockResolvedValue(true),
+    };
+    vi.stubGlobal('caches', cachesStub);
+
+    await clearAllData();
+
+    const tombstone = taskStore.get(task.id);
+    expect(tombstone).toEqual({
+      id: task.id,
+      title: '',
+      completionHistory: [],
+      createdAt: task.createdAt,
+      updatedAt: now,
+      deletedAt: now,
+    });
+
+    expect(cachesStub.delete).toHaveBeenCalledWith('tempo-share');
   });
 });

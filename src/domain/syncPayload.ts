@@ -21,8 +21,15 @@ export const MAX_HISTORY = 36_500;
  * Stays above MAX_HISTORY so a list at the cap is read in full.
  */
 const MAX_HISTORY_SCAN = 50_000;
+const MAX_SCHEDULE_SCAN = 20_000;
 export const MAX_SCHEDULE_HISTORY = 10_000;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const MIN_VALID_YEAR = 1900;
+export const MAX_VALID_YEAR = 2199;
+export const MIN_EPOCH_MS = Date.UTC(MIN_VALID_YEAR, 0, 1);
+export const MAX_EPOCH_MS = Date.UTC(MAX_VALID_YEAR + 1, 0, 1) - 1;
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_TIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?$/;
 /** Timestamps further ahead than this are hostile and are rewritten to `now`. */
 export const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -124,18 +131,55 @@ function asOptionalStamp(value: unknown, now: number): number | null | undefined
   return clampTimestamp(n, now);
 }
 
-function asHistory(value: unknown): number[] {
+function isValidDateOnly(value: string): boolean {
+  const match = DATE_ONLY_RE.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < MIN_VALID_YEAR || year > MAX_VALID_YEAR) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
+function asDateOnly(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return isValidDateOnly(value) ? value : undefined;
+}
+
+function asDueAt(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 40) return undefined;
+  if (isValidDateOnly(value)) return value;
+  const match = DATE_TIME_RE.exec(value);
+  if (!match) return undefined;
+  if (!isValidDateOnly(`${match[1]}-${match[2]}-${match[3]}`)) return undefined;
+  const hours = Number(match[4]);
+  const minutes = Number(match[5]);
+  const seconds = match[6] !== undefined ? Number(match[6]) : 0;
+  if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
+  return value;
+}
+
+function isValidEpochMs(value: number, now: number): boolean {
+  return Number.isFinite(value) && value >= MIN_EPOCH_MS && value <= Math.min(MAX_EPOCH_MS, now + CLOCK_SKEW_MS);
+}
+
+function sampleBounded<T>(items: readonly T[], maxScan: number): readonly T[] {
+  if (items.length <= maxScan) return items;
+  const half = Math.floor(maxScan / 2);
+  return [...items.slice(0, half), ...items.slice(items.length - half)];
+}
+
+function asHistory(value: unknown, now: number): number[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<number>();
-  const add = (item: unknown) => {
-    if (typeof item === 'number' && Number.isFinite(item)) seen.add(item);
-  };
-  if (value.length <= MAX_HISTORY_SCAN) {
-    for (let i = 0; i < value.length; i++) add(value[i]);
-  } else {
-    const half = Math.floor(MAX_HISTORY_SCAN / 2);
-    for (let i = 0; i < half; i++) add(value[i]);
-    for (let i = value.length - half; i < value.length; i++) add(value[i]);
+  for (const item of sampleBounded(value, MAX_HISTORY_SCAN)) {
+    if (typeof item === 'number' && isValidEpochMs(item, now)) seen.add(item);
   }
   const sorted = [...seen].sort((a, b) => a - b);
   return sorted.length > MAX_HISTORY ? sorted.slice(-MAX_HISTORY) : sorted;
@@ -144,8 +188,8 @@ function asHistory(value: unknown): number[] {
 function asDateList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const dates: string[] = [];
-  for (const item of value) {
-    if (typeof item === 'string' && DATE_RE.test(item)) dates.push(item);
+  for (const item of sampleBounded(value, MAX_HISTORY_SCAN)) {
+    if (typeof item === 'string' && isValidDateOnly(item)) dates.push(item);
   }
   const unique = [...new Set(dates)].sort();
   return unique.length > MAX_HISTORY ? unique.slice(-MAX_HISTORY) : unique;
@@ -157,8 +201,8 @@ function asSkippedDateUpdatedAt(
 ): Record<string, number> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const entries: [string, number][] = [];
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (!DATE_RE.test(k)) continue;
+  for (const [k, v] of sampleBounded(Object.entries(value as Record<string, unknown>), MAX_HISTORY_SCAN)) {
+    if (!isValidDateOnly(k)) continue;
     const ts = asFinite(v);
     if (ts === undefined || ts <= 0) continue;
     entries.push([k, clampTimestamp(ts, now)]);
@@ -171,8 +215,8 @@ function asSkippedDateUpdatedAt(
 
 function asRescheduledDates(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([k, v]) => typeof v === 'string' && DATE_RE.test(k) && DATE_RE.test(v) && k !== v)
+  const entries = sampleBounded(Object.entries(value as Record<string, unknown>), MAX_HISTORY_SCAN)
+    .filter(([k, v]) => typeof v === 'string' && isValidDateOnly(k) && isValidDateOnly(v) && k !== v)
     .sort(([a], [b]) => a.localeCompare(b)) as [string, string][];
 
   const seenTargets = new Set<string>();
@@ -191,11 +235,11 @@ function asRescheduledDates(value: unknown): Record<string, string> | undefined 
 function asScheduleHistory(value: unknown): RecurrenceScheduleSegment[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const parsed: RecurrenceScheduleSegment[] = [];
-  for (const item of value) {
+  for (const item of sampleBounded(value, MAX_SCHEDULE_SCAN)) {
     if (!item || typeof item !== 'object') continue;
     const raw = item as Record<string, unknown>;
-    if (typeof raw.startDate !== 'string' || !DATE_RE.test(raw.startDate)) continue;
-    if (typeof raw.endDate !== 'string' || !DATE_RE.test(raw.endDate)) continue;
+    if (typeof raw.startDate !== 'string' || !isValidDateOnly(raw.startDate)) continue;
+    if (typeof raw.endDate !== 'string' || !isValidDateOnly(raw.endDate)) continue;
     if (raw.startDate > raw.endDate) continue;
     const rec = asRecurrence(raw.recurrence);
     if (!rec || rec.type !== 'fixed_interval') continue;
@@ -288,7 +332,7 @@ function asRecurrence(value: unknown): RecurrenceRule | null | undefined {
       intervalUnit: 'years',
       annualWindows,
     };
-    if (typeof raw.endOnDate === 'string' && DATE_RE.test(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
+    if (typeof raw.endOnDate === 'string' && isValidDateOnly(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
     else if (raw.endOnDate === null) rule.endOnDate = null;
     return rule;
   }
@@ -327,7 +371,7 @@ function asRecurrence(value: unknown): RecurrenceRule | null | undefined {
     const monthDay = asFinite(raw.monthDay);
     if (monthDay !== undefined && monthDay >= 1 && monthDay <= 31) rule.monthDay = Math.floor(monthDay);
   }
-  if (typeof raw.endOnDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
+  if (typeof raw.endOnDate === 'string' && isValidDateOnly(raw.endOnDate)) rule.endOnDate = raw.endOnDate;
   else if (raw.endOnDate === null) rule.endOnDate = null;
   if (!isWindow) {
     const endCount = asFinite(raw.endAfterCount);
@@ -383,16 +427,16 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
   const task: Task = {
     id: record.id.trim(),
     title,
-    completionHistory: asHistory(record.completionHistory),
+    completionHistory: asHistory(record.completionHistory, now),
     createdAt: asStamp(record.createdAt, now, 0),
     updatedAt: asStamp(record.updatedAt, now, 0),
   };
   const notes = asText(record.notes, MAX_NOTES_LENGTH);
   if (notes) task.notes = notes;
-  const dueAt = asText(record.dueAt, 40);
+  const dueAt = asDueAt(record.dueAt);
   if (dueAt) task.dueAt = dueAt;
   else if (record.dueAt === null) task.dueAt = null;
-  const startDate = asText(record.startDate, 40);
+  const startDate = asDateOnly(record.startDate);
   if (startDate) task.startDate = startDate;
   else if (record.startDate === null) task.startDate = null;
   const priority = asPriority(record.priority);
@@ -410,12 +454,12 @@ function sanitizeTask(raw: unknown, now: number): Task | null {
     task.dueAt = null;
     task.startDate = null;
   }
-  if (typeof record.firstOpenDate === 'string' && DATE_RE.test(record.firstOpenDate)) {
+  if (typeof record.firstOpenDate === 'string' && isValidDateOnly(record.firstOpenDate)) {
     task.firstOpenDate = record.firstOpenDate;
   } else if (record.firstOpenDate === null) {
     task.firstOpenDate = null;
   }
-  const removedCompletions = asHistory(record.removedCompletions);
+  const removedCompletions = asHistory(record.removedCompletions, now);
   if (removedCompletions.length > 0) task.removedCompletions = removedCompletions;
   const completedAt = asOptionalStamp(record.completedAt, now);
   if (completedAt !== undefined) task.completedAt = completedAt;

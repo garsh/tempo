@@ -337,59 +337,119 @@ export function nextMonthDayAfter(
   return candidate;
 }
 
+const MAX_CATCHUP_ITERATIONS = 10_000;
+
+function safeDueBase(dueAt: string | null | undefined, fallback: Date, toDayStart: boolean): Date {
+  if (!dueAt) return fallback;
+  const parsed = parseDueAt(dueAt);
+  const year = parsed.getFullYear();
+  if (Number.isNaN(parsed.getTime()) || year < 1900 || year > 2199) return fallback;
+  return toDayStart ? startOfDay(parsed) : parsed;
+}
+
+function safeAnchorBase(startDate: string | null | undefined, fallback: Date): Date {
+  if (!startDate) return fallback;
+  const parsed = parseDate(startDate);
+  const year = parsed.getFullYear();
+  return Number.isNaN(parsed.getTime()) || year < 1900 || year > 2199 ? fallback : parsed;
+}
+
 function computeRawNextDue(task: NextDueInput, completionDate: Date): Date {
   const { recurrence } = task;
   const completionDay = startOfDay(completionDate);
   const weekdays = recurrence.weekdays?.length ? recurrence.weekdays : undefined;
   const monthDay = recurrence.monthDay;
+  const intervalValue = Math.max(1, Math.floor(recurrence.intervalValue || 1));
 
   // Weekday pattern (typically with weeks unit)
   if (weekdays && weekdays.length > 0) {
-    const intervalWeeks =
-      recurrence.intervalUnit === 'weeks' ? Math.max(1, recurrence.intervalValue) : 1;
+    const intervalWeeks = recurrence.intervalUnit === 'weeks' ? intervalValue : 1;
 
     if (recurrence.type === 'after_completion') {
       return nextWeekdayAfter(completionDay, weekdays, intervalWeeks);
     }
 
     // fixed_interval: advance from prior due
-    const dueBase = task.dueAt ? startOfDay(parseDueAt(task.dueAt)) : completionDay;
-    const anchorBase = task.startDate ? parseDate(task.startDate) : dueBase;
-    let next = nextWeekdayAfter(dueBase, weekdays, intervalWeeks, anchorBase);
-    while (next <= completionDay) {
+    const dueBase = safeDueBase(task.dueAt, completionDay, true);
+    const anchorBase = safeAnchorBase(task.startDate, dueBase);
+    const searchFrom = dueBase < completionDay ? completionDay : dueBase;
+    let next = nextWeekdayAfter(searchFrom, weekdays, intervalWeeks, anchorBase);
+    for (let steps = 0; steps < MAX_CATCHUP_ITERATIONS && next <= completionDay; steps++) {
       next = nextWeekdayAfter(next, weekdays, intervalWeeks, anchorBase);
     }
-    return next;
+    return next <= completionDay
+      ? nextWeekdayAfter(completionDay, weekdays, intervalWeeks, anchorBase)
+      : next;
   }
 
   // Monthly-by-date
   if (monthDay != null && recurrence.intervalUnit === 'months') {
-    const intervalMonths = Math.max(1, recurrence.intervalValue);
+    const intervalMonths = intervalValue;
     if (recurrence.type === 'after_completion') {
       return nextMonthDayAfter(completionDay, monthDay, intervalMonths);
     }
-    const dueBase = task.dueAt ? startOfDay(parseDueAt(task.dueAt)) : completionDay;
+    const dueBase = safeDueBase(task.dueAt, completionDay, true);
     let next = nextMonthDayAfter(dueBase, monthDay, intervalMonths);
-    // If dueBase was already on monthDay, nextMonthDayAfter goes to next cycle —
-    // but if due was before completion on same monthDay path, catch up:
-    while (next <= completionDay) {
-      next = nextMonthDayAfter(next, monthDay, intervalMonths);
+    if (next <= completionDay) {
+      const monthsDiff =
+        (completionDay.getFullYear() - next.getFullYear()) * 12 +
+        (completionDay.getMonth() - next.getMonth());
+      if (monthsDiff > intervalMonths) {
+        const jumpMonths = Math.floor((monthsDiff - 1) / intervalMonths) * intervalMonths;
+        next = clampMonthDay(next.getFullYear(), next.getMonth() + jumpMonths, monthDay);
+      }
+      for (let steps = 0; steps < MAX_CATCHUP_ITERATIONS && next <= completionDay; steps++) {
+        next = nextMonthDayAfter(next, monthDay, intervalMonths);
+      }
     }
-    return next;
+    return next <= completionDay
+      ? nextMonthDayAfter(completionDay, monthDay, intervalMonths)
+      : next;
   }
 
   // Default interval advance
   if (recurrence.type === 'after_completion') {
-    return addInterval(completionDay, recurrence.intervalValue, recurrence.intervalUnit);
+    return addInterval(completionDay, intervalValue, recurrence.intervalUnit);
   }
 
-  const dueBase = task.dueAt ? parseDueAt(task.dueAt) : completionDay;
-  let nextDue = addInterval(dueBase, recurrence.intervalValue, recurrence.intervalUnit);
+  const dueBase = safeDueBase(task.dueAt, completionDay, false);
+  let nextDue = addInterval(dueBase, intervalValue, recurrence.intervalUnit);
   const completionDayEnd = new Date(completionDay);
   completionDayEnd.setHours(23, 59, 59, 999);
 
-  while (nextDue <= completionDayEnd) {
-    nextDue = addInterval(nextDue, recurrence.intervalValue, recurrence.intervalUnit);
+  if (nextDue <= completionDayEnd) {
+    if (recurrence.intervalUnit === 'days' || recurrence.intervalUnit === 'weeks') {
+      const stepDays = recurrence.intervalUnit === 'weeks' ? intervalValue * 7 : intervalValue;
+      const diffDays = localDaysBetween(startOfDay(nextDue), completionDay);
+      if (diffDays > stepDays) {
+        const jumpDays = Math.floor((diffDays - 1) / stepDays) * stepDays;
+        nextDue.setDate(nextDue.getDate() + jumpDays);
+      }
+    } else if (recurrence.intervalUnit === 'months' || recurrence.intervalUnit === 'years') {
+      const stepMonths = recurrence.intervalUnit === 'years' ? intervalValue * 12 : intervalValue;
+      const monthsDiff =
+        (completionDay.getFullYear() - nextDue.getFullYear()) * 12 +
+        (completionDay.getMonth() - nextDue.getMonth());
+      if (monthsDiff > stepMonths * 120) {
+        const jumpSteps = Math.floor((monthsDiff - 1) / stepMonths);
+        nextDue = addInterval(dueBase, (jumpSteps + 1) * intervalValue, recurrence.intervalUnit);
+      }
+    }
+
+    for (let steps = 0; steps < MAX_CATCHUP_ITERATIONS && nextDue <= completionDayEnd; steps++) {
+      nextDue = addInterval(nextDue, intervalValue, recurrence.intervalUnit);
+    }
+  }
+
+  if (nextDue <= completionDayEnd) {
+    const fallbackBase = new Date(completionDay);
+    fallbackBase.setHours(
+      dueBase.getHours(),
+      dueBase.getMinutes(),
+      dueBase.getSeconds(),
+      dueBase.getMilliseconds()
+    );
+    return addInterval(fallbackBase, intervalValue, recurrence.intervalUnit);
   }
   return nextDue;
 }

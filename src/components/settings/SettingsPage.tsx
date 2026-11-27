@@ -35,8 +35,10 @@ import {
   getDefaultClientId,
   getCustomClientId,
   getStoredClientId,
+  isGoogleScriptLoaded,
   isPopupBlockedError,
   isValidGoogleClientId,
+  loadGoogleScript,
   setStoredClientId,
   signOutGoogleSession,
 } from '../../sync/googleAuth';
@@ -336,12 +338,33 @@ function AccountPage({
   const hasCustomClientId = Boolean(getCustomClientId());
   const hasActiveClientId = Boolean(activeClientId);
   const isSignedIn = Boolean(syncStatus.account);
+
+  useEffect(() => {
+    if (
+      hasActiveClientId &&
+      !isGoogleScriptLoaded() &&
+      (typeof navigator === 'undefined' || navigator.onLine !== false)
+    ) {
+      void loadGoogleScript().catch(() => {});
+    }
+  }, [hasActiveClientId]);
+
   const activeSyncStatus: SyncStatusSnapshot = {
     ...syncStatus,
     phase: isSyncing ? 'syncing' : syncStatus.phase,
   };
   const summary = summarizeAccount(syncStatus.account, activeSyncStatus, hasActiveClientId);
   const lastSynced = syncStatus.lastSyncedAt ? new Date(syncStatus.lastSyncedAt).toLocaleString() : 'Never';
+
+  const resetSessionOnClientSwitch = () => {
+    if (!syncStatus.account && !syncStatus.lastSyncedAt) return;
+    void signOutGoogleSession();
+    cancelPendingAutoSync();
+    setGoogleAccount(null);
+    clearSyncWatermarkState();
+    clearSyncAuthPrompt();
+    clearSyncError();
+  };
 
   const handleSaveCustomClientId = () => {
     const trimmed = customClientId.trim();
@@ -353,9 +376,13 @@ function AccountPage({
       });
       return;
     }
+    const previousClientId = getStoredClientId();
     if (!setStoredClientId(trimmed)) {
       setStatus({ type: 'error', message: 'Could not save that Client ID. The previous ID was kept.' });
       return;
+    }
+    if (getStoredClientId() !== previousClientId) {
+      resetSessionOnClientSwitch();
     }
     setStatus({
       type: 'success',
@@ -369,8 +396,12 @@ function AccountPage({
   };
 
   const handleClearCustomClientId = () => {
+    const previousClientId = getStoredClientId();
     setStoredClientId('');
     setCustomClientId('');
+    if (getStoredClientId() !== previousClientId) {
+      resetSessionOnClientSwitch();
+    }
     setStatus({
       type: 'success',
       message: defaultClientId

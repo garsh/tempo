@@ -22,7 +22,9 @@ import {
   applyRemoteSignOut,
   getStoredClientId,
   isAuthInteractionError,
+  isGoogleScriptLoaded,
   isPopupBlockedError,
+  loadGoogleScript,
   subscribeGoogleSignOut,
 } from '../sync/googleAuth';
 import { getGoogleAccount, setGoogleAccount } from '../sync/googleAccount';
@@ -105,6 +107,15 @@ export function useAutoSync(): {
         )
       );
     });
+
+    if (
+      getStoredClientId() &&
+      getGoogleAccount() &&
+      !isGoogleScriptLoaded() &&
+      (typeof navigator === 'undefined' || navigator.onLine !== false)
+    ) {
+      void loadGoogleScript().catch(() => {});
+    }
 
     if (canAutoSync()) {
       void syncNow(false);

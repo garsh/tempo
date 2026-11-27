@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   ACTIVE_VIEW_STORAGE_KEY,
   CALENDAR_EXPANDED_STORAGE_KEY,
+  CALENDAR_SELECTED_DATE_STORAGE_KEY,
+  CALENDAR_SELECTED_TODAY_SENTINEL,
   PICKER_FUTURE_YEARS,
   PICKER_PAST_YEARS,
   PICKER_YEAR_COLUMNS,
@@ -18,8 +20,10 @@ import {
   pickerDefaultScrollYear,
   readStoredActiveView,
   readStoredCalendarExpanded,
+  readStoredCalendarSelectedDate,
   saveStoredActiveView,
   saveStoredCalendarExpanded,
+  saveStoredCalendarSelectedDate,
   shiftMonthView,
   shiftWeek,
   shortMonthNames,
@@ -247,6 +251,76 @@ describe('calendar swiping (week and month shifting)', () => {
       };
       expect(readStoredActiveView(faultyStorage)).toBe('calendar');
       expect(() => saveStoredActiveView('tasks', faultyStorage)).not.toThrow();
+    });
+  });
+
+  describe('calendar selected date storage', () => {
+    it('defaults to todayKey when unset, when set to CALENDAR_SELECTED_TODAY_SENTINEL, or when set to invalid values', () => {
+      const storage = createMockStorage();
+      const mockToday = '2026-11-16';
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, CALENDAR_SELECTED_TODAY_SENTINEL);
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, 'not-a-date');
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, '2026-02-29');
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, '2026-13-01');
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, '0050-01-01');
+      expect(readStoredCalendarSelectedDate(mockToday, storage)).toBe(mockToday);
+    });
+
+    it('restores valid YYYY-MM-DD dates including leap days', () => {
+      const storage = createMockStorage();
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, '2024-02-29');
+      expect(readStoredCalendarSelectedDate('2026-11-16', storage)).toBe('2024-02-29');
+    });
+
+    it('saves CALENDAR_SELECTED_TODAY_SENTINEL when saving todayKey, null, undefined, or an invalid date; saves the concrete YYYY-MM-DD when saving a non-today date', () => {
+      const storage = createMockStorage();
+      saveStoredCalendarSelectedDate('2026-11-16', '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe(CALENDAR_SELECTED_TODAY_SENTINEL);
+
+      saveStoredCalendarSelectedDate(null, '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe(CALENDAR_SELECTED_TODAY_SENTINEL);
+
+      saveStoredCalendarSelectedDate(undefined, '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe(CALENDAR_SELECTED_TODAY_SENTINEL);
+
+      saveStoredCalendarSelectedDate('not-a-date', '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe(CALENDAR_SELECTED_TODAY_SENTINEL);
+
+      saveStoredCalendarSelectedDate('2026-13-01', '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe(CALENDAR_SELECTED_TODAY_SENTINEL);
+
+      saveStoredCalendarSelectedDate('2026-11-17', '2026-11-16', storage);
+      expect(storage.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY)).toBe('2026-11-17');
+      expect(readStoredCalendarSelectedDate('2026-11-16', storage)).toBe('2026-11-17');
+    });
+
+    it('when CALENDAR_SELECTED_TODAY_SENTINEL is stored, reading on a later todayKey returns the new todayKey', () => {
+      const storage = createMockStorage();
+      storage.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, CALENDAR_SELECTED_TODAY_SENTINEL);
+      expect(readStoredCalendarSelectedDate('2027-01-01', storage)).toBe('2027-01-01');
+    });
+
+    it('handles storage errors gracefully when getItem or setItem throws', () => {
+      const faultyStorage = {
+        getItem: () => {
+          throw new Error('Access denied');
+        },
+        setItem: () => {
+          throw new Error('Quota exceeded');
+        },
+      };
+      expect(readStoredCalendarSelectedDate('2026-11-16', faultyStorage)).toBe('2026-11-16');
+      expect(() => saveStoredCalendarSelectedDate('2026-11-17', '2026-11-16', faultyStorage)).not.toThrow();
     });
   });
 });

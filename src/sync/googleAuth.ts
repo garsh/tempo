@@ -20,7 +20,10 @@ declare global {
             requestAccessToken: (overrideConfig?: { prompt?: string; hint?: string }) => void;
           };
           /** Present when the GIS script has loaded. Revokes an access token. */
-          revoke?: (accessToken: string, done: () => void) => void;
+          revoke?: (
+            accessToken: string,
+            done: (response?: { successful?: boolean; error?: string; error_description?: string }) => void
+          ) => void;
         };
       };
     };
@@ -31,7 +34,7 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const TOKEN_KEY = 'tempo_google_access_token';
 const EXPIRES_KEY = 'tempo_google_token_expires_at';
 const CLIENT_ID_KEY = 'tempo_google_client_id';
-const CLIENT_ID_SUFFIX = '.apps.googleusercontent.com';
+const CLIENT_ID_RE = /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/;
 const MAX_CLIENT_ID_LENGTH = 200;
 const SIGNOUT_CHANNEL = 'tempo-auth-signout';
 
@@ -39,6 +42,7 @@ const SIGNOUT_CHANNEL = 'tempo-auth-signout';
 const EXPIRY_SKEW_MS = 60_000;
 const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
 const GIS_SCRIPT_LOAD_TIMEOUT_MS = 15_000;
+const GIS_REVOKE_TIMEOUT_MS = 5_000;
 const SILENT_AUTH_TIMEOUT_MS = 20_000;
 
 type CachedToken = { token: string; expiresAt: number };
@@ -62,9 +66,7 @@ export function getAuthGeneration(): number {
 export function isValidGoogleClientId(clientId: string): boolean {
   const trimmed = clientId.trim();
   if (!trimmed || trimmed.length > MAX_CLIENT_ID_LENGTH) return false;
-  if (trimmed.length <= CLIENT_ID_SUFFIX.length) return false;
-  if (/[\s/:]/.test(trimmed)) return false;
-  return trimmed.endsWith(CLIENT_ID_SUFFIX);
+  return CLIENT_ID_RE.test(trimmed);
 }
 
 export function getDefaultClientId(): string {
@@ -379,10 +381,17 @@ function broadcastSignOut(): void {
   }
 }
 
-/** Other tabs (and this tab's listener) drop the in-memory token and stop sync. */
-export function applyRemoteSignOut(): void {
+function dropLocalAuthState(): string | null {
+  const token = cachedToken?.token ?? null;
   authGeneration += 1;
   clearStoredToken();
+  return token;
+}
+
+/** Other tabs (and this tab's listener) drop the in-memory token, stop sync, and revoke any live token. */
+export function applyRemoteSignOut(): void {
+  const token = dropLocalAuthState();
+  if (token) void revokeTokenBestEffort(token);
 }
 
 export function subscribeGoogleSignOut(listener: () => void): () => void {
@@ -400,10 +409,18 @@ async function revokeWithGis(token: string): Promise<boolean> {
   const revoke = typeof window !== 'undefined' ? window.google?.accounts?.oauth2?.revoke : undefined;
   if (!revoke) return false;
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), GIS_REVOKE_TIMEOUT_MS);
     try {
-      revoke(token, () => resolve(true));
+      revoke(token, (resp) => finish(resp?.successful !== false));
     } catch {
-      resolve(false);
+      finish(false);
     }
   });
 }
@@ -420,15 +437,17 @@ async function revokeWithHttp(token: string): Promise<void> {
   }
 }
 
+async function revokeTokenBestEffort(token: string): Promise<void> {
+  const revoked = await revokeWithGis(token);
+  if (!revoked) await revokeWithHttp(token);
+}
+
 /**
  * Drop the token, tell other tabs, and best-effort revoke it at Google.
  * Does not block on the network. Does not delete local tasks.
  */
 export async function signOutGoogleSession(): Promise<void> {
-  const token = cachedToken?.token ?? null;
-  applyRemoteSignOut();
+  const token = dropLocalAuthState();
   broadcastSignOut();
-  if (!token) return;
-  const revoked = await revokeWithGis(token);
-  if (!revoked) await revokeWithHttp(token);
+  if (token) await revokeTokenBestEffort(token);
 }

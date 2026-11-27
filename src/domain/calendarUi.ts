@@ -231,6 +231,57 @@ export function saveStoredActiveView(
   }
 }
 
+export const CALENDAR_SELECTED_DATE_STORAGE_KEY = 'tempo_calendar_selected_date';
+export const CALENDAR_SELECTED_TODAY_SENTINEL = 'today';
+
+function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  if (y < 100) return false;
+  const dt = new Date(y, m - 1, d);
+  return !Number.isNaN(dt.getTime()) && formatDate(dt) === value;
+}
+
+/**
+ * Reads the persisted calendar selection, resolving the `'today'` sentinel (or unset/invalid values)
+ * to the caller's current `todayKey`.
+ */
+export function readStoredCalendarSelectedDate(
+  todayKey: string,
+  storage?: Pick<Storage, 'getItem'>
+): string {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    const raw = s?.getItem(CALENDAR_SELECTED_DATE_STORAGE_KEY);
+    if (!raw || raw === CALENDAR_SELECTED_TODAY_SENTINEL) return todayKey;
+    if (isValidIsoDate(raw)) return raw;
+  } catch {
+    /* ignore storage access errors */
+  }
+  return todayKey;
+}
+
+/**
+ * Persists the selected calendar date. Stores `'today'` when viewing `todayKey` (or unset/invalid)
+ * so reopening on a later day shows that day's "today".
+ */
+export function saveStoredCalendarSelectedDate(
+  selectedDateStr: string | null | undefined,
+  todayKey: string,
+  storage?: Pick<Storage, 'setItem'>
+): void {
+  try {
+    const s = storage ?? (typeof localStorage !== 'undefined' ? localStorage : undefined);
+    const value =
+      !selectedDateStr || selectedDateStr === todayKey || !isValidIsoDate(selectedDateStr)
+        ? CALENDAR_SELECTED_TODAY_SENTINEL
+        : selectedDateStr;
+    s?.setItem(CALENDAR_SELECTED_DATE_STORAGE_KEY, value);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 export type CalendarSwipeEvent =
   | { phase: 'drag'; progress: number }
   | { phase: 'snap'; target: -1 | 0 | 1; durationMs: number }

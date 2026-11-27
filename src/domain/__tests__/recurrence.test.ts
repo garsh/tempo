@@ -617,6 +617,106 @@ describe('Per-day recurrence occurrences & completion', () => {
       expect(taskOccursOnDate(monthlyDay1, '2026-12-01')).toBe(true);
       expect(getNextUncompletedOccurrenceDate(monthlyDay1, new Date(2026, 10, 23, 9, 0))).toBe('2026-12-01');
     });
+
+    it('handles extreme far-past or invalid dueAt without hanging on catch-up loops', () => {
+      const completionDate = new Date(2026, 10, 27, 10, 0);
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '0100-01-01',
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+          },
+          completionDate
+        )
+      ).toBe('2026-11-28');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '-200000-01-01T09:15',
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+          },
+          completionDate
+        )
+      ).toBe('2026-11-28T09:15');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '0100-01-01',
+            startDate: '0100-01-01',
+            recurrence: {
+              type: 'fixed_interval',
+              intervalValue: 2,
+              intervalUnit: 'weeks',
+              weekdays: [5],
+            },
+          },
+          completionDate
+        )
+      ).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '0100-01-15',
+            recurrence: {
+              type: 'fixed_interval',
+              intervalValue: 1,
+              intervalUnit: 'months',
+              monthDay: 15,
+            },
+          },
+          completionDate
+        )
+      ).toBe('2026-12-15');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '1950-01-15',
+            recurrence: {
+              type: 'fixed_interval',
+              intervalValue: 1,
+              intervalUnit: 'months',
+              monthDay: 15,
+            },
+          },
+          completionDate
+        )
+      ).toBe('2026-12-15');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '1950-01-01',
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'months' },
+          },
+          completionDate
+        )
+      ).toBe('2026-12-01');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: '0100-01-01',
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'months' },
+          },
+          completionDate
+        )
+      ).toBe('2026-12-27');
+
+      expect(
+        calculateNextDueDate(
+          {
+            dueAt: 'not-a-date',
+            recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+          },
+          completionDate
+        )
+      ).toBe('2026-11-28');
+    });
   });
 });
 

@@ -29,6 +29,7 @@ import {
   setStoredClientId,
   signOutGoogleSession,
   storeAccessToken,
+  applyRemoteSignOut,
 } from '../googleAuth';
 
 describe('googleAuth client id resolution', () => {
@@ -327,6 +328,86 @@ describe('googleAuth client id resolution', () => {
         delete (globalThis as { window?: unknown }).window;
       } else {
         vi.stubGlobal('window', previousWindow);
+      }
+    }
+  });
+
+  it('isValidGoogleClientId rejects query, fragment, dot, and special characters before .apps.googleusercontent.com', () => {
+    expect(setStoredClientId('foo?x=1.apps.googleusercontent.com')).toBe(false);
+    expect(setStoredClientId('foo#bar.apps.googleusercontent.com')).toBe(false);
+    expect(setStoredClientId('a.b.apps.googleusercontent.com')).toBe(false);
+    expect(setStoredClientId('valid-client-id.apps.googleusercontent.com')).toBe(true);
+    expect(setStoredClientId('valid_client-id.apps.googleusercontent.com')).toBe(true);
+    expect(setStoredClientId('valid-client_id.apps.googleusercontent.com')).toBe(true);
+    expect(setStoredClientId('valid-client-id_with-hyphen.apps.googleusercontent.com')).toBe(true);
+  });
+
+  it('applyRemoteSignOut revokes an active in-memory token held by the tab', async () => {
+    storeAccessToken('fake-token-123', 3600);
+    const revoke = vi.fn((_token: string, done: () => void) => done());
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    vi.stubGlobal('window', { google: { accounts: { oauth2: { revoke } } } });
+    try {
+      applyRemoteSignOut();
+      expect(revoke).toHaveBeenCalledWith('fake-token-123', expect.any(Function));
+      expect(getCachedAccessToken()).toBeNull();
+    } finally {
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+    }
+  });
+
+  it('signOutGoogleSession falls back to POST https://oauth2.googleapis.com/revoke when GIS revoke invokes done({ successful: false }) or times out after 5_000 ms', async () => {
+    vi.useFakeTimers();
+    const previousWindow = (globalThis as { window?: unknown }).window;
+    const previousFetch = (globalThis as { fetch?: unknown }).fetch;
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    const revokeFail = vi.fn(
+      (_token: string, done: (response?: { successful?: boolean }) => void) => {
+        setTimeout(() => done({ successful: false }), 100);
+      }
+    );
+    vi.stubGlobal('window', { google: { accounts: { oauth2: { revoke: revokeFail } } } });
+    try {
+      storeAccessToken('fake-token-fail', 3600);
+      const pendingFail = signOutGoogleSession();
+      await vi.advanceTimersByTimeAsync(100);
+      await pendingFail;
+      expect(revokeFail).toHaveBeenCalledWith('fake-token-fail', expect.any(Function));
+      expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'token=fake-token-fail',
+      });
+
+      fetchMock.mockClear();
+      const revokeHang = vi.fn();
+      vi.stubGlobal('window', { google: { accounts: { oauth2: { revoke: revokeHang } } } });
+      storeAccessToken('fake-token-timeout', 3600);
+      const pendingTimeout = signOutGoogleSession();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await pendingTimeout;
+      expect(revokeHang).toHaveBeenCalledWith('fake-token-timeout', expect.any(Function));
+      expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'token=fake-token-timeout',
+      });
+    } finally {
+      vi.useRealTimers();
+      if (previousWindow === undefined) {
+        delete (globalThis as { window?: unknown }).window;
+      } else {
+        vi.stubGlobal('window', previousWindow);
+      }
+      if (previousFetch === undefined) {
+        delete (globalThis as { fetch?: unknown }).fetch;
+      } else {
+        vi.stubGlobal('fetch', previousFetch);
       }
     }
   });
