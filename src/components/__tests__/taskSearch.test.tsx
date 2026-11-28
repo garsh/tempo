@@ -279,8 +279,8 @@ describe('TaskSearchView & App Search integration', () => {
         id: 'c1',
         title: 'Dentist billing',
         dueAt: doneTargetDate,
-        completedAt: 5000,
-        completionHistory: [5000],
+        completedAt: new Date(2026, 9, 12, 12, 0, 0).getTime(),
+        completionHistory: [new Date(2026, 9, 12, 12, 0, 0).getTime()],
       }),
       makeTask({ id: 'u1', title: 'Dentist insurance undated', dueAt: null }),
     ];

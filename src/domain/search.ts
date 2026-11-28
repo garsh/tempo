@@ -369,8 +369,8 @@ export function searchTasks(
     // Branch by task kind before getNextUncompletedOccurrenceDate so open undated
     // one-off tasks are never mistaken for ended recurring series.
     if (!isRecurring(task)) {
-      const jumpDateStr = task.dueAt ? getDueDatePart(task.dueAt) : null;
       if (task.completedAt) {
+        const jumpDateStr = task.dueAt ? formatDate(new Date(task.completedAt)) : null;
         completedEntries.push({
           item: {
             task,
@@ -385,6 +385,7 @@ export function searchTasks(
           completedSortTs: task.completedAt,
         });
       } else {
+        const jumpDateStr = task.dueAt ? getDueDatePart(task.dueAt) : null;
         activeEntries.push({
           item: {
             task,

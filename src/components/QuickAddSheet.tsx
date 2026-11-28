@@ -53,6 +53,7 @@ export interface QuickAddSheetProps {
   onRequestDelete?: (task: Task) => void;
   onLogCompletionDate?: (taskId: string, dateStr: string) => Promise<void> | void;
   onRemoveCompletionTimestamp?: (taskId: string, timestamp: number) => Promise<void> | void;
+  onUpdateCompletionDate?: (taskId: string, fromDateStr: string, toDateStr: string) => Promise<void> | void;
   onUnskipOccurrence?: (taskId: string, dateStr: string) => Promise<void> | void;
 }
 
@@ -83,6 +84,7 @@ export function QuickAddSheet({
   onRequestDelete,
   onLogCompletionDate,
   onRemoveCompletionTimestamp,
+  onUpdateCompletionDate,
   onUnskipOccurrence,
 }: QuickAddSheetProps) {
   const isEditMode = Boolean(initialTask?.id);
@@ -93,6 +95,7 @@ export function QuickAddSheet({
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
+  const [completedDate, setCompletedDate] = useState<string | null>(null);
   const [panel, setPanel] = useState<'none' | 'repeat'>('none');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [repeatMenuOpen, setRepeatMenuOpen] = useState(false);
@@ -125,6 +128,7 @@ export function QuickAddSheet({
   const [localSkippedDates, setLocalSkippedDates] = useState<string[]>([]);
 
   const todayStr = useTodayKey();
+  const yesterdayStr = useMemo(() => formatDate(addDays(parseDate(todayStr), -1)), [todayStr]);
   const tomorrowStr = useMemo(() => formatDate(addDays(parseDate(todayStr), 1)), [todayStr]);
 
   // Visual viewport tracking for virtual keyboard
@@ -179,6 +183,7 @@ export function QuickAddSheet({
         ? null
         : dueAtForSelectedDay(currentDefaultDueAt, currentTodayStr)
     );
+    setCompletedDate(null);
     setIsRecurring(false);
     setRecurrenceType('fixed_interval');
     setIntervalValue(1);
@@ -218,6 +223,9 @@ export function QuickAddSheet({
     if (initialTask) {
       setTitle(initialTask.title);
       setNotes(initialTask.notes || '');
+      setCompletedDate(
+        initialTask.completedAt != null ? formatDate(new Date(initialTask.completedAt)) : null
+      );
       const hasRecurrence = !!initialTask.recurrence;
       const isAnnual = isAnnualWindow(initialTask);
       const isApprox = !isAnnual && isWindowPeriodic(initialTask);
@@ -367,44 +375,65 @@ export function QuickAddSheet({
   };
 
   const datePart = dueAt ? dueAt.slice(0, 10) : '';
+  const initialCompletedDate =
+    initialTask?.id && initialTask.completedAt != null
+      ? formatDate(new Date(initialTask.completedAt))
+      : null;
+  const isEditingCompletedDate = Boolean(
+    initialCompletedDate && (!isRecurring || !!initialTask?.recurrence)
+  );
   const choosingFirstOpen = isApprox && localHistory.length === 0 && !initialLastDoneDate && !alreadyDoneMenu;
-  const datePreset: DatePreset = choosingFirstOpen
-    ? !firstOpenDate
-      ? 'none'
-      : firstOpenDate === todayStr
-        ? 'today'
-        : firstOpenDate === tomorrowStr
-          ? 'tomorrow'
-          : null
-    : isWindowMode
-      ? initialLastDoneDate === todayStr
-        ? 'today'
-        : initialLastDoneDate
-          ? null
-          : 'none'
-      : !dueAt
+  const datePreset: DatePreset = isEditingCompletedDate
+    ? completedDate === todayStr
+      ? 'today'
+      : completedDate === yesterdayStr
+        ? 'yesterday'
+        : null
+    : choosingFirstOpen
+      ? !firstOpenDate
         ? 'none'
-        : datePart === todayStr
+        : firstOpenDate === todayStr
           ? 'today'
-          : datePart === tomorrowStr
+          : firstOpenDate === tomorrowStr
             ? 'tomorrow'
-            : null;
+            : null
+      : isWindowMode
+        ? initialLastDoneDate === todayStr
+          ? 'today'
+          : initialLastDoneDate
+            ? null
+            : 'none'
+        : !dueAt
+          ? 'none'
+          : datePart === todayStr
+            ? 'today'
+            : datePart === tomorrowStr
+              ? 'tomorrow'
+              : null;
 
-  const dateChipLabel = isWindowMode
-    ? initialTask?.id && latestHistoryDateStr
-      ? `Last done: ${latestHistoryDateStr === todayStr ? 'Today' : formatShortDate(latestHistoryDateStr)}`
-      : initialLastDoneDate
-        ? `Last done: ${initialLastDoneDate === todayStr ? 'Today' : formatShortDate(initialLastDoneDate)}`
-        : isApprox && firstOpenDate
-          ? `Starts ${formatStartChip(firstOpenDate)}`
-          : 'Not done yet'
-    : !dueAt
-      ? 'No date'
-      : datePreset === 'today'
-        ? 'Today'
-        : datePreset === 'tomorrow'
-          ? 'Tomorrow'
-          : formatShortDate(datePart);
+  const dateChipLabel = isEditingCompletedDate
+    ? !completedDate
+      ? 'Completed'
+      : completedDate === todayStr
+        ? 'Done: Today'
+        : completedDate === yesterdayStr
+          ? 'Done: Yesterday'
+          : `Done: ${formatShortDate(completedDate)}`
+    : isWindowMode
+      ? initialTask?.id && latestHistoryDateStr
+        ? `Last done: ${latestHistoryDateStr === todayStr ? 'Today' : formatShortDate(latestHistoryDateStr)}`
+        : initialLastDoneDate
+          ? `Last done: ${initialLastDoneDate === todayStr ? 'Today' : formatShortDate(initialLastDoneDate)}`
+          : isApprox && firstOpenDate
+            ? `Starts ${formatStartChip(firstOpenDate)}`
+            : 'Not done yet'
+      : !dueAt
+        ? 'No date'
+        : datePreset === 'today'
+          ? 'Today'
+          : datePreset === 'tomorrow'
+            ? 'Tomorrow'
+            : formatShortDate(datePart);
 
   const toggleWeekday = (d: Weekday) => {
     if (intervalUnit === 'days') {
@@ -572,6 +601,16 @@ export function QuickAddSheet({
         return;
       }
 
+      if (
+        isEditingCompletedDate &&
+        initialTask?.id &&
+        initialCompletedDate &&
+        completedDate &&
+        completedDate !== initialCompletedDate
+      ) {
+        await onUpdateCompletionDate?.(initialTask.id, initialCompletedDate, completedDate);
+      }
+
       if (initialTask) {
         onClose();
       } else {
@@ -632,18 +671,32 @@ export function QuickAddSheet({
     </button>
   );
 
-  const dateMenuMode = choosingFirstOpen ? 'first_open' : isWindowMode ? 'last_done' : 'due';
+  const dateMenuMode = isEditingCompletedDate
+    ? 'completed'
+    : choosingFirstOpen
+      ? 'first_open'
+      : isWindowMode
+        ? 'last_done'
+        : 'due';
   const choosingStart = isApprox && !approxHasCompletion;
   const dateChipControl = toolBtn(
-    choosingStart ? 'Starts' : isWindowMode ? 'Last done' : 'Date',
-    choosingStart
-      ? dateMenuOpen || !!firstOpenDate
-      : isWindowMode
-        ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
-        : dateMenuOpen || !!dueAt,
+    isEditingCompletedDate
+      ? 'Completed date'
+      : choosingStart
+        ? 'Starts'
+        : isWindowMode
+          ? 'Last done'
+          : 'Date',
+    isEditingCompletedDate
+      ? dateMenuOpen || !!completedDate
+      : choosingStart
+        ? dateMenuOpen || !!firstOpenDate
+        : isWindowMode
+          ? dateMenuOpen || !!initialLastDoneDate || localHistory.length > 0
+          : dateMenuOpen || !!dueAt,
     () => {
       setRepeatMenuOpen(false);
-      if (isWindowMode && initialTask?.id && localHistory.length > 0) {
+      if (!isEditingCompletedDate && isWindowMode && initialTask?.id && localHistory.length > 0) {
         setDateMenuOpen(false);
         setPanel('repeat');
         window.requestAnimationFrame(() => {
@@ -655,7 +708,7 @@ export function QuickAddSheet({
       }
     },
     <span className="inline-flex items-center gap-1.5 px-1 text-[14px] sm:text-[15px] font-semibold">
-      {choosingStart || !isWindowMode ? (
+      {isEditingCompletedDate || choosingStart || !isWindowMode ? (
         <Calendar className="w-4 h-4 stroke-[2.2]" />
       ) : (
         <Clock className="w-4 h-4 stroke-[2.2]" />
@@ -664,7 +717,7 @@ export function QuickAddSheet({
     </span>,
     'shrink-0',
     undefined,
-    isWindowMode && initialTask?.id && localHistory.length > 0
+    !isEditingCompletedDate && isWindowMode && initialTask?.id && localHistory.length > 0
       ? undefined
       : { expanded: dateMenuOpen, controlsId: 'date-choice-menu', buttonRef: dateButtonRef },
   );
@@ -759,33 +812,47 @@ export function QuickAddSheet({
         anchorRef={dateButtonRef}
         active={datePreset}
         mode={dateMenuMode}
-        allowNoDate={!isRecurring}
-        maxDate={dateMenuMode === 'last_done' ? todayStr : undefined}
+        allowNoDate={!isRecurring && !isEditingCompletedDate}
+        maxDate={dateMenuMode === 'last_done' || dateMenuMode === 'completed' ? todayStr : undefined}
         dateValue={
-          dateMenuMode === 'first_open' ? (firstOpenDate ?? '') : isWindowMode ? (initialLastDoneDate ?? '') : datePart
+          dateMenuMode === 'completed'
+            ? (completedDate ?? '')
+            : dateMenuMode === 'first_open'
+              ? (firstOpenDate ?? '')
+              : isWindowMode
+                ? (initialLastDoneDate ?? '')
+                : datePart
         }
         onClose={() => {
           setDateMenuOpen(false);
           setAlreadyDoneMenu(false);
         }}
         onToday={() => {
-          if (dateMenuMode === 'first_open') {
+          if (dateMenuMode === 'completed') {
+            setCompletedDate(todayStr);
+          } else if (dateMenuMode === 'first_open') {
             setFirstOpenDate(todayStr);
             setInitialLastDoneDate(null);
           } else if (isWindowMode) setInitialLastDoneDate(todayStr);
           else setDueAt(todayStr);
         }}
+        onYesterday={
+          dateMenuMode === 'completed' ? () => setCompletedDate(yesterdayStr) : undefined
+        }
         onTomorrow={
-          dateMenuMode === 'first_open'
-            ? () => {
-                setFirstOpenDate(tomorrowStr);
-                setInitialLastDoneDate(null);
-              }
-            : isWindowMode
-              ? undefined
-              : () => setDueAt(tomorrowStr)
+          dateMenuMode === 'completed'
+            ? undefined
+            : dateMenuMode === 'first_open'
+              ? () => {
+                  setFirstOpenDate(tomorrowStr);
+                  setInitialLastDoneDate(null);
+                }
+              : isWindowMode
+                ? undefined
+                : () => setDueAt(tomorrowStr)
         }
         onNoDate={() => {
+          if (dateMenuMode === 'completed') return;
           if (dateMenuMode === 'first_open') {
             setFirstOpenDate(null);
             setInitialLastDoneDate(null);
@@ -794,7 +861,9 @@ export function QuickAddSheet({
         }}
         onAlreadyDone={() => setAlreadyDoneMenu(true)}
         onDatePicked={(val) => {
-          if (dateMenuMode === 'first_open') {
+          if (dateMenuMode === 'completed') {
+            setCompletedDate(val);
+          } else if (dateMenuMode === 'first_open') {
             setFirstOpenDate(val);
             setInitialLastDoneDate(null);
           } else if (isWindowMode) setInitialLastDoneDate(val);

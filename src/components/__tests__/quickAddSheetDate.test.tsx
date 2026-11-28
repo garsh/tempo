@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dateChoiceMenuPosition } from '../menu/DateChoiceMenu';
 import { QuickAddSheet } from '../QuickAddSheet';
-import { formatDate } from '../../domain/recurrence';
+import { formatDate, addDays, parseDate } from '../../domain/recurrence';
 import type { Task } from '../../types/task';
 
 function mount(ui: ReactElement) {
@@ -286,5 +286,150 @@ describe('QuickAddSheet date menu', () => {
     expect(showPickerSpy).toHaveBeenCalledTimes(1);
 
     view.unmount();
+  });
+
+  it('edits completed date instead of due date when editing a completed overdue one-off task', async () => {
+    const today = new Date();
+    const todayStr = formatDate(today);
+    const yesterdayStr = formatDate(addDays(parseDate(todayStr), -1));
+
+    const completedOverdueTask: Task = {
+      id: 'done-overdue',
+      title: 'Pay bill',
+      dueAt: yesterdayStr,
+      completedAt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 10, 0, 0).getTime(),
+      completionHistory: [],
+      recurrence: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const onSave = vi.fn().mockResolvedValue(true);
+    const onUpdateCompletionDate = vi.fn().mockResolvedValue(undefined);
+
+    const view = mount(
+      <QuickAddSheet
+        isOpen={true}
+        initialTask={completedOverdueTask}
+        onClose={vi.fn()}
+        onSave={onSave}
+        onUpdateCompletionDate={onUpdateCompletionDate}
+      />
+    );
+
+    const completedDateButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="Completed date"]');
+    expect(completedDateButton?.textContent?.trim()).toContain('Done: Today');
+
+    act(() => {
+      completedDateButton!.click();
+    });
+
+    const menu = view.container.querySelector('#date-choice-menu');
+    const choices = Array.from(menu!.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')).map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(choices).toEqual(['Today', 'Yesterday', 'Select']);
+    const dateInput = menu!.querySelector<HTMLInputElement>('input[type="date"]');
+    expect(dateInput?.max).toBe(todayStr);
+
+    const yesterdayItem = Array.from(menu!.querySelectorAll('[role="menuitemradio"]')).find(
+      (el) => el.textContent?.trim() === 'Yesterday',
+    ) as HTMLButtonElement | undefined;
+    act(() => {
+      yesterdayItem!.click();
+    });
+    expect(completedDateButton?.textContent?.trim()).toContain('Done: Yesterday');
+
+    const saveButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="Save routine"]');
+    act(() => {
+      saveButton!.click();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ dueAt: yesterdayStr }));
+    expect(onUpdateCompletionDate).toHaveBeenCalledWith('done-overdue', todayStr, yesterdayStr);
+
+    view.unmount();
+  });
+
+  it('edits completed date via onUpdateCompletionDate when editing a completed recurring or window-periodic occurrence', async () => {
+    const today = new Date();
+    const todayStr = formatDate(today);
+    const yesterdayStr = formatDate(addDays(parseDate(todayStr), -1));
+    const todayMs = today.getTime();
+
+    const fixedRecurringTask: Task = {
+      id: 'fixed-recurring',
+      title: 'Daily task',
+      dueAt: todayStr,
+      completedAt: todayMs,
+      completionHistory: [todayMs],
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'days' },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const windowPeriodicTask: Task = {
+      id: 'window-periodic',
+      title: 'Window task',
+      dueAt: null,
+      completedAt: todayMs,
+      completionHistory: [todayMs],
+      recurrence: { type: 'after_completion', intervalValue: 3, maxIntervalValue: 5, intervalUnit: 'days' },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const onSave = vi.fn().mockResolvedValue(true);
+    const onUpdateCompletionDate = vi.fn().mockResolvedValue(undefined);
+
+    for (const task of [fixedRecurringTask, windowPeriodicTask]) {
+      const view = mount(
+        <QuickAddSheet
+          isOpen={true}
+          initialTask={task}
+          onClose={vi.fn()}
+          onSave={onSave}
+          onUpdateCompletionDate={onUpdateCompletionDate}
+        />
+      );
+
+      const completedDateButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="Completed date"]');
+      expect(completedDateButton?.textContent?.trim()).toContain('Done: Today');
+
+      act(() => {
+        completedDateButton!.click();
+      });
+
+      const menu = view.container.querySelector('#date-choice-menu');
+      const choices = Array.from(menu!.querySelectorAll('[role="menuitemradio"], [role="menuitem"]')).map((el) =>
+        el.textContent?.trim(),
+      );
+      expect(choices).toEqual(['Today', 'Yesterday', 'Select']);
+
+      const yesterdayItem = Array.from(menu!.querySelectorAll('[role="menuitemradio"]')).find(
+        (el) => el.textContent?.trim() === 'Yesterday',
+      ) as HTMLButtonElement | undefined;
+      act(() => {
+        yesterdayItem!.click();
+      });
+      expect(completedDateButton?.textContent?.trim()).toContain('Done: Yesterday');
+
+      const saveButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="Save routine"]');
+      act(() => {
+        saveButton!.click();
+      });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(onUpdateCompletionDate).toHaveBeenCalledWith(task.id, todayStr, yesterdayStr);
+
+      view.unmount();
+    }
   });
 });

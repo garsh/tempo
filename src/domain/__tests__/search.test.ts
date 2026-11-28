@@ -110,11 +110,18 @@ describe('domain/search', () => {
       title: 'Budget undated note',
       dueAt: null,
     });
+    const completedDatedTs = new Date(2026, 9, 15, 12, 0, 0).getTime();
     const completedDated = makeTask({
       id: 'oneoff-done',
       title: 'Budget October',
       dueAt: '2026-10-15',
-      completedAt: 5000,
+      completedAt: completedDatedTs,
+    });
+    const completedOverdueLater = makeTask({
+      id: 'oneoff-done-later',
+      title: 'Budget overdue done later',
+      dueAt: '2026-10-10',
+      completedAt: new Date(2026, 9, 18, 12, 0, 0).getTime(),
     });
     const completedUndated = makeTask({
       id: 'oneoff-done-undated',
@@ -167,6 +174,7 @@ describe('domain/search', () => {
       [
         openUndated,
         completedDated,
+        completedOverdueLater,
         completedUndated,
         activeRecurring,
         endedRecurringWithHistory,
@@ -195,7 +203,13 @@ describe('domain/search', () => {
         completable: false,
         completedAt: new Date(2026, 10, 1, 14, 0, 0).getTime(),
       },
-      { id: 'oneoff-done', jump: '2026-10-15', completable: true, completedAt: 5000 },
+      {
+        id: 'oneoff-done-later',
+        jump: '2026-10-18',
+        completable: true,
+        completedAt: new Date(2026, 9, 18, 12, 0, 0).getTime(),
+      },
+      { id: 'oneoff-done', jump: '2026-10-15', completable: true, completedAt: completedDatedTs },
       { id: 'oneoff-done-undated', jump: null, completable: true, completedAt: 4000 },
       { id: 'rec-ended-empty', jump: null, completable: false, completedAt: 3000 },
     ]);

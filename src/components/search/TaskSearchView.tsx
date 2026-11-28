@@ -229,8 +229,8 @@ export function TaskSearchView({
           onEdit={item.jumpDateStr ? undefined : onEdit}
           onComplete={item.completable ? onComplete : NOOP_COMPLETE}
           onUncomplete={item.completable ? onUncomplete : undefined}
-          onRequestChangeDate={onRequestChangeDate}
-          onRequestLogDate={onRequestLogDate}
+          onRequestChangeDate={item.completable ? onRequestChangeDate : undefined}
+          onRequestLogDate={item.completable ? onRequestLogDate : undefined}
           onRequestSkipOccurrence={isCompletedItem ? undefined : onRequestSkipOccurrence}
           onRequestDelete={onRequestDelete}
           onDelete={onDelete}

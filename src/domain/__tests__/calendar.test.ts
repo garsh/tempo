@@ -132,7 +132,7 @@ describe('Calendar recurring tasks', () => {
 });
 
 describe('Overdue one-off task completed on a later date', () => {
-  it('shows completed overdue one-off task on its completion day while preserving original dueAt', () => {
+  it('shows completed overdue one-off task only on its completion day while preserving original dueAt', () => {
     const completedTodayMs = new Date(2026, 10, 24, 10, 30, 0).getTime();
     const overdueCompleted = task({
       id: 'overdue-done',
@@ -145,5 +145,46 @@ describe('Overdue one-off task completed on a later date', () => {
     const todayDone = completedTasksOnDate([overdueCompleted], '2026-11-24');
     expect(todayDone.map((t) => t.id)).toEqual(['overdue-done']);
     expect(todayDone[0].dueAt).toBe('2026-11-20');
+    expect(completedTasksOnDate([overdueCompleted], '2026-11-20')).toEqual([]);
+
+    const movedToYesterdayMs = new Date(2026, 10, 23, 12, 0, 0).getTime();
+    const editedCompleted = {
+      ...overdueCompleted,
+      completedAt: movedToYesterdayMs,
+      completionHistory: [movedToYesterdayMs],
+    };
+    expect(completedTasksOnDate([editedCompleted], '2026-11-24')).toEqual([]);
+    const yesterdayDone = completedTasksOnDate([editedCompleted], '2026-11-23');
+    expect(yesterdayDone.map((t) => t.id)).toEqual(['overdue-done']);
+    expect(yesterdayDone[0].dueAt).toBe('2026-11-20');
+  });
+
+  it('shows a one-off task due today with completedAt yesterday only on yesterday', () => {
+    const completedYesterdayMs = new Date(2026, 10, 23, 12, 0, 0).getTime();
+    const doneEarly = task({
+      id: 'done-early',
+      title: 'Submit report',
+      dueAt: '2026-11-24',
+      completedAt: completedYesterdayMs,
+      completionHistory: [completedYesterdayMs],
+    });
+
+    expect(completedTasksOnDate([doneEarly], '2026-11-24')).toEqual([]);
+    expect(completedTasksOnDate([doneEarly], '2026-11-23').map((t) => t.id)).toEqual(['done-early']);
+  });
+
+  it('shows a fixed recurring task with a completion on an off-schedule date', () => {
+    const offScheduleTs = completionTimestampForDate('2026-10-06');
+    const weekly = task({
+      id: 'weekly-off',
+      title: 'Weekly review',
+      dueAt: '2026-10-05',
+      recurrence: { type: 'fixed_interval', intervalValue: 1, intervalUnit: 'weeks' },
+      completionHistory: [offScheduleTs],
+    });
+
+    const doneOffSchedule = completedTasksOnDate([weekly], '2026-10-06');
+    expect(doneOffSchedule.map((t) => t.id)).toEqual(['weekly-off']);
+    expect(doneOffSchedule[0].completedAt).toBe(offScheduleTs);
   });
 });

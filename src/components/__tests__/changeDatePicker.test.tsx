@@ -326,4 +326,107 @@ describe('ChangeDatePicker', () => {
 
     view.unmount();
   });
+
+  it('pre-fills completedAt date instead of dueAt, applies completedMaxDate, resets max for open tasks, and does not carry over dueAt time', () => {
+    const onSaveTask = vi.fn();
+    const pickerRef = createRef<ChangeDatePickerHandle>();
+    const view = mount(
+      <ChangeDatePicker
+        ref={pickerRef}
+        completedMaxDate="2026-11-28"
+        onSaveTask={onSaveTask}
+      />,
+    );
+    const input = getNativeInput(view.container);
+    setShowPicker(input, vi.fn());
+
+    const completedTask = makeTask({
+      id: 'c1',
+      dueAt: '2026-11-27T09:30',
+      completedAt: new Date(2026, 10, 28, 11, 0, 0).getTime(),
+    });
+
+    act(() => {
+      pickerRef.current?.open(completedTask);
+    });
+    expect(input.value).toBe('2026-11-28');
+    expect(input.max).toBe('2026-11-28');
+
+    act(() => {
+      input.value = '2026-11-27';
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(onSaveTask).toHaveBeenCalledWith(completedTask, '2026-11-27');
+
+    const openTask = makeTask({
+      id: 'o1',
+      dueAt: '2026-11-27T09:30',
+      completedAt: null,
+    });
+
+    act(() => {
+      pickerRef.current?.open(openTask);
+    });
+    expect(input.value).toBe('2026-11-27');
+    expect(input.max).toBe('');
+
+    view.unmount();
+  });
+
+  it('renders completed TaskCard date in secondary color rather than overdue red and uses Change Date for completed window-periodic rows', () => {
+    const completedCard = mount(
+      <TaskCard
+        task={makeTask({
+          id: 'c2',
+          dueAt: '2020-01-01',
+          completedAt: new Date(2026, 10, 28, 10, 0, 0).getTime(),
+        })}
+        onComplete={vi.fn()}
+        onUncomplete={vi.fn()}
+      />,
+    );
+
+    const overdueSpan = completedCard.container.querySelector('.text-tt-overdue');
+    expect(overdueSpan).toBeNull();
+    const dateSpan = Array.from(completedCard.container.querySelectorAll('span')).find((el) =>
+      el.className.includes('tabular-nums'),
+    );
+    expect(dateSpan?.className).toContain('text-tt-secondary');
+    completedCard.unmount();
+
+    const onChangeDate = vi.fn();
+    const onLogDate = vi.fn();
+    const windowCompletedCard = mount(
+      <TaskCard
+        task={makeTask({
+          id: 'w1',
+          dueAt: null,
+          completedAt: new Date(2026, 10, 28, 10, 0, 0).getTime(),
+          recurrence: {
+            type: 'after_completion',
+            intervalValue: 3,
+            maxIntervalValue: 5,
+            intervalUnit: 'days',
+          },
+        })}
+        onComplete={vi.fn()}
+        onUncomplete={vi.fn()}
+        onRequestChangeDate={onChangeDate}
+        onRequestLogDate={onLogDate}
+      />,
+    );
+
+    expect(windowCompletedCard.container.querySelector('button[aria-label="Log Date"]')).toBeNull();
+    const changeDateBtn = windowCompletedCard.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Change Date"]',
+    );
+    expect(changeDateBtn).not.toBeNull();
+
+    act(() => {
+      changeDateBtn!.click();
+    });
+    expect(onChangeDate).toHaveBeenCalledTimes(1);
+    expect(onLogDate).not.toHaveBeenCalled();
+    windowCompletedCard.unmount();
+  });
 });

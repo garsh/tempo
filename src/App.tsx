@@ -18,6 +18,7 @@ import {
   uncompleteTask,
   undoCompleteUndatedTask,
   unskipTaskOccurrence,
+  updateTaskCompletionDate,
 } from './db/db';
 import type { Task, TaskInput } from './types/task';
 import {
@@ -690,6 +691,15 @@ export function App() {
     const existing = await db.tasks.get(task.id);
     if (!existing) return;
 
+    if (task.completedAt != null) {
+      const toDate = newDueAt ? getDueDatePart(newDueAt) : null;
+      if (!toDate) return;
+      const fromDate = formatDate(new Date(task.completedAt));
+      await updateTaskCompletionDate(existing.id, fromDate, toDate);
+      scheduleSync();
+      return;
+    }
+
     const fromDate = task.dueAt
       ? getDueDatePart(task.dueAt)
       : existing.dueAt
@@ -785,6 +795,14 @@ export function App() {
     await removeTaskCompletion(taskId, ts);
     scheduleSync();
   }, [scheduleSync]);
+
+  const handleUpdateCompletionDate = useCallback(
+    async (taskId: string, fromDateStr: string, toDateStr: string) => {
+      await updateTaskCompletionDate(taskId, fromDateStr, toDateStr);
+      scheduleSync();
+    },
+    [scheduleSync]
+  );
 
   const handleConfirmSkipOccurrence = async (task: Task, dateToSkip: string) => {
     const previousTask = activeTasks.find((t) => t.id === task.id) ?? (await db.tasks.get(task.id));
@@ -1739,6 +1757,7 @@ export function App() {
             onRequestDelete={setDeleteConfirmTask}
             onLogCompletionDate={handleConfirmLogDate}
             onRemoveCompletionTimestamp={handleRemoveCompletionTimestamp}
+            onUpdateCompletionDate={handleUpdateCompletionDate}
             onUnskipOccurrence={handleUnskipOccurrence}
           />
         )}
@@ -1784,6 +1803,7 @@ export function App() {
           onRequestDelete={setDeleteConfirmTask}
           onLogCompletionDate={handleConfirmLogDate}
           onRemoveCompletionTimestamp={handleRemoveCompletionTimestamp}
+          onUpdateCompletionDate={handleUpdateCompletionDate}
           onUnskipOccurrence={handleUnskipOccurrence}
         />
       )}
@@ -1833,6 +1853,7 @@ export function App() {
       {/* Swipe Action Dialogs */}
       <ChangeDatePicker
         ref={changeDatePickerRef}
+        completedMaxDate={todayDateStr}
         onSaveTask={handleConfirmChangeDateTask}
       />
       <ChangeDatePicker

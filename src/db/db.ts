@@ -1396,6 +1396,129 @@ export async function removeTaskCompletion(id: string, timestamp: number): Promi
   });
 }
 
+/**
+ * Move a completed item's completion date without modifying its due date (`dueAt`).
+ * Preserves CRDT `removedCompletions` tombstones for any replaced completion timestamps.
+ */
+export async function updateTaskCompletionDate(
+  id: string,
+  fromDateStr: string | null,
+  toDateStr: string
+): Promise<Task | null> {
+  return db.transaction('rw', db.tasks, async () => {
+    const task = await db.tasks.get(id);
+    if (!task || !toDateStr) return null;
+
+    const now = Date.now();
+    let updated: Task;
+
+    if (!isWindowPeriodic(task) && !isFixedRecurring(task)) {
+      if (!task.completedAt) return null;
+      const currentCompDate = formatDate(new Date(task.completedAt));
+      if (currentCompDate === toDateStr) return task;
+
+      const [targetStartMs, targetEndMs] = getDayBoundsMs(toDateStr);
+      const prevHistory = task.completionHistory || [];
+      const existingOnTarget = prevHistory.find((ts) => ts >= targetStartMs && ts < targetEndMs);
+      const nextTs =
+        existingOnTarget ??
+        resolveNonTombstonedTimestamp(
+          completionTimestampForDate(toDateStr, now),
+          task.removedCompletions,
+          toDateStr
+        );
+
+      const removed = prevHistory.filter((ts) => ts !== nextTs);
+      if (task.completedAt !== nextTs && !removed.includes(task.completedAt)) {
+        removed.push(task.completedAt);
+      }
+      const baseRemoved = (task.removedCompletions || []).filter((r) => r !== nextTs);
+      const removedCompletions = mergeRemovedTimestamps(baseRemoved, removed);
+
+      updated = {
+        ...task,
+        completedAt: nextTs,
+        completionHistory: [nextTs],
+        ...(removedCompletions && removedCompletions.length > 0
+          ? { removedCompletions }
+          : { removedCompletions: undefined }),
+        updatedAt: now,
+      };
+    } else {
+      if (!fromDateStr || fromDateStr === toDateStr) return task;
+      const [fromStartMs, fromEndMs] = getDayBoundsMs(fromDateStr);
+      const removed: number[] = [];
+      const remaining = (task.completionHistory || []).filter((ts) => {
+        if (ts >= fromStartMs && ts < fromEndMs) {
+          removed.push(ts);
+          return false;
+        }
+        return true;
+      });
+      if (removed.length === 0) return task;
+
+      const [toStartMs, toEndMs] = getDayBoundsMs(toDateStr);
+      const hasTarget = remaining.some((ts) => ts >= toStartMs && ts < toEndMs);
+      let addedTs: number | null = null;
+      let nextHistory: number[];
+      if (hasTarget) {
+        nextHistory = remaining;
+      } else {
+        addedTs = resolveNonTombstonedTimestamp(
+          completionTimestampForDate(toDateStr, now),
+          task.removedCompletions,
+          toDateStr
+        );
+        nextHistory = [...remaining, addedTs].sort((a, b) => a - b);
+      }
+
+      const baseRemoved =
+        addedTs != null
+          ? (task.removedCompletions || []).filter((r) => r !== addedTs)
+          : task.removedCompletions;
+      const removedCompletions = mergeRemovedTimestamps(baseRemoved, removed);
+
+      let skipPatch: Partial<Task> = {};
+      if (isFixedRecurring(task) && (task.skippedDates || []).includes(toDateStr)) {
+        const nextSkipped = (task.skippedDates || []).filter((d) => d !== toDateStr);
+        const nextRemovedSkipped = mergeRemovedSkipped(task.removedSkippedDates, [toDateStr]);
+        const nextSkippedDateUpdatedAt = recordSkippedDateUpdates(
+          task.skippedDateUpdatedAt,
+          [toDateStr],
+          now
+        );
+        skipPatch = {
+          skippedDates: nextSkipped,
+          ...(nextRemovedSkipped && nextRemovedSkipped.length > 0
+            ? { removedSkippedDates: nextRemovedSkipped }
+            : { removedSkippedDates: undefined }),
+          ...(nextSkippedDateUpdatedAt && Object.keys(nextSkippedDateUpdatedAt).length > 0
+            ? { skippedDateUpdatedAt: nextSkippedDateUpdatedAt }
+            : { skippedDateUpdatedAt: undefined }),
+        };
+      }
+
+      updated = {
+        ...task,
+        completedAt: null,
+        completionHistory: nextHistory,
+        ...(removedCompletions && removedCompletions.length > 0
+          ? { removedCompletions }
+          : { removedCompletions: undefined }),
+        ...skipPatch,
+        updatedAt: now,
+      };
+    }
+
+    recordDiagEvent(
+      'update_completion_date',
+      `id=${id} from=${fromDateStr ?? ''} to=${toDateStr}`
+    );
+    await db.tasks.put(updated);
+    return updated;
+  });
+}
+
 export async function stopRecurringTask(
   id: string
 ): Promise<{ task: Task; previousEndOnDate: string | null } | null> {

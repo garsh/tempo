@@ -9,18 +9,19 @@ import {
 
 export { dateChoiceMenuPosition, handleMenuArrowKeyDown, type ViewportBox };
 
-export type DatePreset = 'today' | 'tomorrow' | 'none' | null;
+export type DatePreset = 'today' | 'yesterday' | 'tomorrow' | 'none' | null;
 
 interface DateChoiceMenuProps {
   open: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   active: DatePreset;
   dateValue: string;
-  mode?: 'due' | 'last_done' | 'first_open';
+  mode?: 'due' | 'last_done' | 'first_open' | 'completed';
   allowNoDate?: boolean;
   maxDate?: string;
   onClose: () => void;
   onToday: () => void;
+  onYesterday?: () => void;
   onTomorrow?: () => void;
   onNoDate?: () => void;
   /** Approximate tasks: switch this menu to the past-only last-done picker. */
@@ -43,6 +44,7 @@ export function DateChoiceMenu({
   maxDate,
   onClose,
   onToday,
+  onYesterday,
   onTomorrow,
   onNoDate,
   onAlreadyDone,
@@ -51,7 +53,13 @@ export function DateChoiceMenu({
   const cardRef = useRef<HTMLDivElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const itemCount =
-    mode === 'last_done' ? 3 : mode === 'first_open' ? 5 : allowNoDate && onNoDate ? 4 : 3;
+    mode === 'last_done' || mode === 'completed'
+      ? 3
+      : mode === 'first_open'
+        ? 5
+        : allowNoDate && onNoDate
+          ? 4
+          : 3;
   const menuHeight = 44 * itemCount + 19;
   const pos = useAnchoredMenu({
     open,
@@ -95,7 +103,9 @@ export function DateChoiceMenu({
             ? 'Choose last done date'
             : mode === 'first_open'
               ? 'Choose when it starts'
-              : 'Choose a date'
+              : mode === 'completed'
+                ? 'Choose completed date'
+                : 'Choose a date'
         }
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => handleMenuArrowKeyDown(e, cardRef.current)}
@@ -172,6 +182,37 @@ export function DateChoiceMenu({
               Select
             </button>
           </>
+        ) : mode === 'completed' ? (
+          <>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'today'}
+              className={row}
+              onClick={choose(onToday)}
+            >
+              Today
+              {active === 'today' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={active === 'yesterday'}
+              className={row}
+              onClick={choose(onYesterday)}
+            >
+              Yesterday
+              {active === 'yesterday' && <Check className="ml-auto h-4 w-4 shrink-0 text-tt-blue" strokeWidth={2.5} />}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={row}
+              onClick={openDatePicker}
+            >
+              Select
+            </button>
+          </>
         ) : (
           <>
             <button
@@ -224,7 +265,7 @@ export function DateChoiceMenu({
           aria-label="Select"
           tabIndex={-1}
           value={dateValue}
-          max={mode === 'last_done' ? maxDate : undefined}
+          max={mode === 'last_done' || mode === 'completed' ? maxDate : undefined}
           onChange={(e) => {
             if (!e.target.value) return;
             onDatePicked(e.target.value);

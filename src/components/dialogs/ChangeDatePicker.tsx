@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type { Task } from '../../types/task';
-import { combineDueAt, splitDueAt } from '../../domain/recurrence';
+import { combineDueAt, formatDate, splitDueAt } from '../../domain/recurrence';
 
 export interface ChangeDatePickerHandle {
   open: (
@@ -14,6 +14,7 @@ export interface ChangeDatePickerProps {
   onSave?: (taskId: string, newDueAt: string | null) => Promise<void> | void;
   onSaveTask?: (task: Task, newDueAt: string | null) => Promise<void> | void;
   maxDate?: string;
+  completedMaxDate?: string;
   ariaLabel?: string;
   testId?: string;
 }
@@ -29,6 +30,7 @@ export function ChangeDatePicker({
   onSave,
   onSaveTask,
   maxDate,
+  completedMaxDate,
   ariaLabel = 'Change date',
   testId = 'change-date-native-input',
 }: ChangeDatePickerProps) {
@@ -36,10 +38,14 @@ export function ChangeDatePicker({
   const pendingRef = useRef<{ id: string; task: Task; existingTime: string | null } | null>(null);
   const onSaveRef = useRef(onSave);
   const onSaveTaskRef = useRef(onSaveTask);
+  const maxDateRef = useRef(maxDate);
+  const completedMaxDateRef = useRef(completedMaxDate);
 
   useEffect(() => {
     onSaveRef.current = onSave;
     onSaveTaskRef.current = onSaveTask;
+    maxDateRef.current = maxDate;
+    completedMaxDateRef.current = completedMaxDate;
   });
 
   useEffect(() => {
@@ -77,11 +83,12 @@ export function ChangeDatePicker({
         const input = inputRef.current;
         if (!input) return;
 
-        const parts = task.dueAt ? splitDueAt(task.dueAt) : null;
+        const completedDate = task.completedAt != null ? formatDate(new Date(task.completedAt)) : null;
+        const parts = completedDate ? null : task.dueAt ? splitDueAt(task.dueAt) : null;
         pendingRef.current = {
           id: task.id,
           task,
-          existingTime: parts?.time ?? null,
+          existingTime: completedDate ? null : (parts?.time ?? null),
         };
 
         if (anchorRect) {
@@ -99,7 +106,11 @@ export function ChangeDatePicker({
           input.style.top = `${top}px`;
         }
 
-        input.value = parts?.date ?? '';
+        input.max =
+          completedDate && completedMaxDateRef.current
+            ? completedMaxDateRef.current
+            : (maxDateRef.current ?? '');
+        input.value = completedDate ?? parts?.date ?? '';
 
         if (typeof input.showPicker === 'function') {
           try {

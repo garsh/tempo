@@ -2,7 +2,6 @@ import { WEEKDAY_LABELS, type Task, type Weekday } from '../types/task';
 import {
   formatDate,
   getDayBoundsMs,
-  getDueDatePart,
   isCompletedOnDate,
   isFixedRecurring,
   isSkippedOnDate,
@@ -91,12 +90,8 @@ export function completedTasksOnDate(tasks: Task[], dateStr: string): Task[] {
         );
       }
       if (!t.recurrence) {
-        if (!t.completedAt) return false;
-        const dueMatches = !!t.dueAt && getDueDatePart(t.dueAt) === dateStr;
-        const compMatches = t.completedAt >= dayStartMs && t.completedAt < dayEndMs;
-        return dueMatches || compMatches;
+        return !!t.completedAt && t.completedAt >= dayStartMs && t.completedAt < dayEndMs;
       }
-      if (!taskOccursOnDate(t, dateStr)) return false;
       return isCompletedOnDate(t, dateStr);
     })
     .map((t) => (!t.recurrence ? t : projectTaskForDate(t, dateStr)));

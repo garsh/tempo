@@ -528,7 +528,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
         onPointerDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        {windowPeriodic && onRequestLogDate ? (
+        {windowPeriodic && task.completedAt == null && onRequestLogDate ? (
           <SwipeActionButton
             icon={<Calendar className="w-4 h-4" />}
             label="Log Date"
@@ -544,7 +544,11 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
           <SwipeActionButton
             icon={<Calendar className="w-4 h-4" />}
             label="Change Date"
-            explanation="Change Date: Pick a new date for this task"
+            explanation={
+              completed
+                ? 'Change Date: Pick a new completed date for this task'
+                : 'Change Date: Pick a new date for this task'
+            }
             colorClasses="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white"
             onClick={(anchorEl) => {
               const rect = anchorEl?.getBoundingClientRect();
@@ -686,7 +690,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
           >
-            {windowPeriodic && onRequestLogDate ? (
+            {windowPeriodic && task.completedAt == null && onRequestLogDate ? (
               <button
                 type="button"
                 data-hover-action="date"
@@ -700,12 +704,12 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
               >
                 <Calendar className="w-3.5 h-3.5" />
               </button>
-            ) : !windowPeriodic && onRequestChangeDate ? (
+            ) : (!windowPeriodic || task.completedAt != null) && onRequestChangeDate ? (
               <button
                 type="button"
                 data-hover-action="date"
                 aria-label="Change Date"
-                title="Change Date"
+                title={completed ? 'Change completed date' : 'Change Date'}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRequestChangeDate(task, e.currentTarget.getBoundingClientRect());
@@ -762,7 +766,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
               )}
 
               {dueLabel && (
-                <span className={`tabular-nums font-medium ${dueTextClass(urgency)}`}>
+                <span className={`tabular-nums font-medium ${completed ? 'text-tt-secondary' : dueTextClass(urgency)}`}>
                   {dueLabel}
                 </span>
               )}
