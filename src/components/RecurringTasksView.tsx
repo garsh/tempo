@@ -174,7 +174,10 @@ export function RecurringTasksView({
 
       <div className="flex-1 flex min-h-0 relative">
         <main className="flex-1 min-w-0 flex flex-col min-h-0 bg-tt-bg desktop:bg-tt-surface">
-          <div className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-5 pt-2 pb-20 desktop:pb-6">
+          <div
+            data-task-scroll-container="true"
+            className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-5 pt-2 pb-20 desktop:pb-6"
+          >
             <div className="max-w-3xl mx-auto w-full" data-testid="recurring-tasks-view">
               {entries.length === 0 ? (
                 <p className="text-sm text-tt-muted px-4 py-12 text-center">No active recurring tasks</p>

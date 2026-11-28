@@ -58,6 +58,7 @@ import {
   type CalendarSwipeEvent,
 } from './domain/calendarUi';
 import { initDiagnostics, recordDiagEvent } from './domain/diagnostics';
+import { findTaskElementById, scrollTaskElementIntoView } from './domain/scrollTaskIntoView';
 import { takeSharedText } from './pwa/shareText';
 import { useAutoSync } from './hooks/useAutoSync';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -277,6 +278,7 @@ export function App() {
   const [deleteConfirmTask, setDeleteConfirmTask] = useState<Task | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingRecurringMove | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [pendingScrollTaskId, setPendingScrollTaskId] = useState<string | null>(null);
 
   const openSettings = useCallback((page: SettingsPageId = 'root') => {
     setSettingsPage(page);
@@ -578,6 +580,7 @@ export function App() {
   }, [closeTaskEditor, editingTask?.id, scheduleSync, showUndoToast]);
 
   const handleSave = async (taskData: TaskInput): Promise<boolean> => {
+    const isCreating = !taskData.id;
     if (taskData.id) {
       const existing = await db.tasks.get(taskData.id);
       const fromDate = editingTask?.dueAt
@@ -635,11 +638,45 @@ export function App() {
       }
     }
 
-    await saveTask(taskData, { newTaskPosition: prefs.newTaskPosition });
+    const saved = await saveTask(taskData, { newTaskPosition: prefs.newTaskPosition });
     setEditingTask(null);
     scheduleSync();
+    if (isCreating && prefs.newTaskPosition === 'bottom' && saved?.id) {
+      if (isUndatedOneTime(saved)) {
+        setCollapsedGroups((prev) =>
+          prev['tasks-onetime'] ? { ...prev, 'tasks-onetime': false } : prev
+        );
+      } else if (isWindowPeriodic(saved)) {
+        setCollapsedGroups((prev) =>
+          prev['tasks-periodic'] ? { ...prev, 'tasks-periodic': false } : prev
+        );
+      } else if (saved.dueAt && getDueDatePart(saved.dueAt) < todayKey) {
+        setCollapsedGroups((prev) =>
+          prev['cal-overdue'] ? { ...prev, 'cal-overdue': false } : prev
+        );
+      }
+      setPendingScrollTaskId(saved.id);
+    }
     return true;
   };
+
+  useEffect(() => {
+    if (!pendingScrollTaskId) return;
+    if (!allTasks.some((t) => t.id === pendingScrollTaskId)) return;
+    setPendingScrollTaskId(null);
+    const taskEl = findTaskElementById(pendingScrollTaskId);
+    if (taskEl) {
+      scrollTaskElementIntoView(taskEl);
+    }
+  }, [
+    pendingScrollTaskId,
+    allTasks,
+    activeView,
+    isRecurringOpen,
+    isSearchOpen,
+    calSelectedDate,
+    collapsedGroups,
+  ]);
 
   const handleRequestChangeDate = useCallback((task: Task, anchorRect?: DOMRect) => {
     changeDatePickerRef.current?.open(task, anchorRect);
@@ -1221,6 +1258,7 @@ export function App() {
       {calSelectedDate && (
         <div
           ref={calScrollRef}
+          data-task-scroll-container="true"
           className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-4 pt-2 pb-6"
         >
           <div className={isThreePaneDashboard ? 'space-y-2' : 'max-w-3xl mx-auto w-full space-y-2'}>
@@ -1632,6 +1670,7 @@ export function App() {
                           {calSelectedDate ? (
                             <div
                               ref={calScrollRef}
+                              data-task-scroll-container="true"
                               className="min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pt-2 pb-20 space-y-2"
                             >
                               {renderSelectedDayListContent(calSelectedDate)}
@@ -1673,6 +1712,7 @@ export function App() {
                         {calSelectedDate && (
                           <div
                             ref={calScrollRef}
+                            data-task-scroll-container="true"
                             className="flex-1 overflow-y-auto overscroll-y-contain min-h-0 border-t border-tt-border px-3 sm:px-5 pt-2 pb-20 space-y-2"
                           >
                             {renderSelectedDayListContent(calSelectedDate)}

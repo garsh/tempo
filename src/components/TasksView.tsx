@@ -113,7 +113,10 @@ export function TasksView({
               bgClassName={surfaceClassName}
             />
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6">
+          <div
+            data-task-scroll-container="true"
+            className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6"
+          >
             {!collapsedGroups['tasks-periodic'] && renderPeriodicList()}
           </div>
         </section>
@@ -129,7 +132,10 @@ export function TasksView({
               bgClassName={surfaceClassName}
             />
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6">
+          <div
+            data-task-scroll-container="true"
+            className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain tt-scroll-stable px-3 sm:px-4 pb-20 desktop:pb-6"
+          >
             {!collapsedGroups['tasks-onetime'] && renderOneTimeList()}
           </div>
         </section>
@@ -139,6 +145,7 @@ export function TasksView({
 
   return (
     <div
+      data-task-scroll-container="true"
       className="flex-1 overflow-y-auto overscroll-y-contain tt-scroll-stable min-h-0 px-3 sm:px-4 pt-2 pb-20 desktop:pb-6 space-y-2"
       data-testid="tasks-view"
       data-layout="stacked"

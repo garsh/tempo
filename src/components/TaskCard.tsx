@@ -464,6 +464,7 @@ const TaskCardComponent: React.FC<TaskCardProps> = ({
     <div
       ref={rowRef}
       data-testid="task-card"
+      data-task-id={task.id}
       data-dragging={isDragging ? 'true' : undefined}
       onPointerDown={handleRowPointerDown}
       onClickCapture={onRowClickCapture}
